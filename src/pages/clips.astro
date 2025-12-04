@@ -1,0 +1,518 @@
+---
+// src/pages/clips.astro
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Clips">
+    <style>
+        .clips-hero {
+            text-align: center;
+            padding: 3rem 0 2rem;
+            animation: fadeIn 0.6s ease-out;
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+        }
+        
+        .clips-hero h1 {
+            font-family: var(--font-serif);
+            font-size: 4rem;
+            font-weight: 700;
+            line-height: 1.1;
+            letter-spacing: -0.03em;
+            margin-bottom: 1rem;
+        }
+        
+        .hero-subtitle {
+            font-size: 1.25rem;
+            color: var(--color-muted);
+            max-width: 650px;
+            margin: 0 auto 3rem;
+            line-height: 1.6;
+        }
+        
+        .signup-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border: 1px solid var(--color-border);
+            border-radius: 16px;
+            padding: 3rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+            animation: fadeIn 0.6s ease-out 0.2s both;
+        }
+        
+        .form-title {
+            font-family: var(--font-serif);
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.75rem;
+            text-align: center;
+        }
+        
+        .form-subtitle {
+            color: var(--color-muted);
+            text-align: center;
+            margin-bottom: 2rem;
+            font-size: 0.9375rem;
+        }
+        
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        .form-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            font-size: 0.9375rem;
+            color: var(--color-ink);
+        }
+        
+        .form-label .required {
+            color: #ef4444;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 0.875rem 1rem;
+            border: 2px solid var(--color-border);
+            border-radius: 8px;
+            font-size: 1rem;
+            font-family: var(--font-sans);
+            transition: all 0.2s;
+            background: var(--color-paper);
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: var(--color-accent);
+            background: white;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+        
+        .form-input::placeholder {
+            color: #9ca3af;
+        }
+        
+        .form-textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+        
+        .form-checkbox-group {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .form-checkbox {
+            width: 1.25rem;
+            height: 1.25rem;
+            margin-top: 0.125rem;
+            cursor: pointer;
+            accent-color: var(--color-accent);
+        }
+        
+        .form-checkbox-label {
+            font-size: 0.9375rem;
+            color: var(--color-muted);
+            line-height: 1.5;
+            cursor: pointer;
+        }
+        
+        .form-checkbox-label a {
+            color: var(--color-accent);
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.2s;
+        }
+        
+        .form-checkbox-label a:hover {
+            border-bottom-color: var(--color-accent);
+        }
+        
+        .submit-btn {
+            width: 100%;
+            padding: 1rem;
+            background: var(--color-accent);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 1.0625rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-family: var(--font-sans);
+            letter-spacing: 0.01em;
+        }
+        
+        .submit-btn:hover:not(:disabled) {
+            background: #1d4ed8;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
+        }
+        
+        .submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .success-message {
+            display: none;
+            background: #d1fae5;
+            border: 2px solid #34d399;
+            color: #065f46;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            font-weight: 500;
+        }
+        
+        .success-message.show {
+            display: block;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+        }
+        
+        .error-message {
+            display: none;
+            background: #fee2e2;
+            border: 2px solid #ef4444;
+            color: #991b1b;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            font-weight: 500;
+        }
+        
+        .error-message.show {
+            display: block;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        .features-preview {
+            max-width: 1000px;
+            margin: 5rem auto 0;
+            text-align: center;
+        }
+        
+        .features-title {
+            font-family: var(--font-serif);
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 3rem;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+        }
+        
+        .feature-item {
+            padding: 1.5rem;
+        }
+        
+        .feature-icon {
+            width: 3rem;
+            height: 3rem;
+            background: var(--color-accent-light);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1rem;
+        }
+        
+        .feature-item h3 {
+            font-family: var(--font-serif);
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        
+        .feature-item p {
+            color: var(--color-muted);
+            font-size: 0.9375rem;
+            line-height: 1.6;
+        }
+        
+        @media (max-width: 768px) {
+            .clips-hero h1 {
+                font-size: 2.5rem;
+            }
+            
+            .signup-container {
+                padding: 2rem 1.5rem;
+            }
+            
+            .features-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+
+    <!-- Hero Section -->
+    <section class="clips-hero">
+        <h1>Join Banity Creators</h1>
+        <p class="hero-subtitle">
+            Create your account and start receiving campaign opportunities from top brands. 
+            Be part of the next generation of authentic content creators.
+        </p>
+    </section>
+
+    <!-- Sign Up Form -->
+    <div class="signup-container">
+        <h2 class="form-title">Get Started</h2>
+        <p class="form-subtitle">Fill out the form below to create your creator account</p>
+        
+        <div id="successMessage" class="success-message">
+            ✓ Thank you for signing up! Check your email for next steps.
+        </div>
+        
+        <div id="errorMessage" class="error-message">
+            Something went wrong. Please try again.
+        </div>
+        
+        <form id="signupForm">
+            <div class="form-group">
+                <label for="fullName" class="form-label">
+                    Full Name <span class="required">*</span>
+                </label>
+                <input 
+                    type="text" 
+                    id="fullName" 
+                    name="fullName" 
+                    class="form-input" 
+                    placeholder="John Doe"
+                    required
+                />
+            </div>
+            
+            <div class="form-group">
+                <label for="email" class="form-label">
+                    Email Address <span class="required">*</span>
+                </label>
+                <input 
+                    type="email" 
+                    id="email" 
+                    name="email" 
+                    class="form-input" 
+                    placeholder="you@example.com"
+                    required
+                />
+            </div>
+            
+            <div class="form-group">
+                <label for="socialHandle" class="form-label">
+                    Primary Social Media Handle <span class="required">*</span>
+                </label>
+                <input 
+                    type="text" 
+                    id="socialHandle" 
+                    name="socialHandle" 
+                    class="form-input" 
+                    placeholder="@yourusername"
+                    required
+                />
+            </div>
+            
+            <div class="form-group">
+                <label for="platform" class="form-label">
+                    Primary Platform <span class="required">*</span>
+                </label>
+                <select id="platform" name="platform" class="form-input" required>
+                    <option value="">Select a platform</option>
+                    <option value="instagram">Instagram</option>
+                    <option value="tiktok">TikTok</option>
+                    <option value="youtube">YouTube</option>
+                    <option value="twitter">Twitter/X</option>
+                    <option value="facebook">Facebook</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="followerCount" class="form-label">
+                    Approximate Follower Count
+                </label>
+                <select id="followerCount" name="followerCount" class="form-input">
+                    <option value="">Select range</option>
+                    <option value="0-1k">0 - 1,000</option>
+                    <option value="1k-10k">1,000 - 10,000</option>
+                    <option value="10k-50k">10,000 - 50,000</option>
+                    <option value="50k-100k">50,000 - 100,000</option>
+                    <option value="100k-500k">100,000 - 500,000</option>
+                    <option value="500k+">500,000+</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="bio" class="form-label">
+                    Tell us about yourself
+                </label>
+                <textarea 
+                    id="bio" 
+                    name="bio" 
+                    class="form-input form-textarea" 
+                    placeholder="What type of content do you create? What are your interests?"
+                ></textarea>
+            </div>
+            
+            <div class="form-checkbox-group">
+                <input 
+                    type="checkbox" 
+                    id="mailingList" 
+                    name="mailingList" 
+                    class="form-checkbox"
+                    checked
+                />
+                <label for="mailingList" class="form-checkbox-label">
+                    I want to receive campaign opportunities, updates, and tips via email
+                </label>
+            </div>
+            
+            <div class="form-checkbox-group">
+                <input 
+                    type="checkbox" 
+                    id="terms" 
+                    name="terms" 
+                    class="form-checkbox"
+                    required
+                />
+                <label for="terms" class="form-checkbox-label">
+                    I agree to the <a href="/legal#terms">Terms of Service</a> and 
+                    <a href="/legal#privacy">Privacy Policy</a> <span class="required">*</span>
+                </label>
+            </div>
+            
+            <button type="submit" class="submit-btn" id="submitBtn">
+                Create My Account
+            </button>
+        </form>
+    </div>
+
+    <!-- Features Preview -->
+    <section class="features-preview">
+        <h2 class="features-title">What You'll Get</h2>
+        <div class="features-grid">
+            <div class="feature-item">
+                <div class="feature-icon">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                              d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                    </svg>
+                </div>
+                <h3>Campaign Alerts</h3>
+                <p>Get notified about campaigns that match your profile and interests</p>
+            </div>
+            
+            <div class="feature-item">
+                <div class="feature-icon">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                </div>
+                <h3>Easy Briefs</h3>
+                <p>Clear campaign requirements and deliverables in one place</p>
+            </div>
+            
+            <div class="feature-item">
+                <div class="feature-icon">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                              d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                </div>
+                <h3>Fast Payments</h3>
+                <p>Get paid within 30 days of completing approved campaigns</p>
+            </div>
+            
+            <div class="feature-item">
+                <div class="feature-icon">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                              d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
+                </div>
+                <h3>Community</h3>
+                <p>Join a network of creators and learn from each other</p>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        const form = document.getElementById('signupForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const successMessage = document.getElementById('successMessage');
+        const errorMessage = document.getElementById('errorMessage');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Disable submit button
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Creating Account...';
+            
+            // Hide previous messages
+            successMessage.classList.remove('show');
+            errorMessage.classList.remove('show');
+            
+            // Get form data
+            const formData = new FormData(form);
+            const data = {
+                fullName: formData.get('fullName'),
+                email: formData.get('email'),
+                socialHandle: formData.get('socialHandle'),
+                platform: formData.get('platform'),
+                followerCount: formData.get('followerCount'),
+                bio: formData.get('bio'),
+                mailingList: formData.get('mailingList') === 'on',
+                terms: formData.get('terms') === 'on',
+                timestamp: new Date().toISOString()
+            };
+            
+            try {
+                // TODO: Replace with actual API endpoint
+                // const response = await fetch('/api/signup', {
+                //     method: 'POST',
+                //     headers: { 'Content-Type': 'application/json' },
+                //     body: JSON.stringify(data)
+                // });
+                
+                // Simulate API call
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                // Show success message
+                successMessage.classList.add('show');
+                form.reset();
+                
+                // Log data (for development)
+                console.log('Sign up data:', data);
+                
+            } catch (error) {
+                console.error('Error:', error);
+                errorMessage.classList.add('show');
+            } finally {
+                // Re-enable submit button
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Create My Account';
+            }
+        });
+    </script>
+</Layout>

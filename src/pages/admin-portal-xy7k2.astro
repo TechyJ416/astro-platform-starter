@@ -1,0 +1,451 @@
+---
+// src/pages/admin-portal-xy7k2.astro
+// Hidden admin page - accessible only by direct URL
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Admin Portal">
+    <style>
+        .admin-container {
+            max-width: 500px;
+            margin: 4rem auto;
+            animation: fadeIn 0.6s ease-out;
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+        }
+        
+        .admin-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        
+        .admin-icon {
+            width: 4rem;
+            height: 4rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1.5rem;
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .admin-header h1 {
+            font-family: var(--font-serif);
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        
+        .admin-subtitle {
+            color: var(--color-muted);
+            font-size: 0.9375rem;
+        }
+        
+        .login-card {
+            background: white;
+            border: 1px solid var(--color-border);
+            border-radius: 16px;
+            padding: 3rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+        }
+        
+        .alert {
+            display: none;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            font-size: 0.9375rem;
+            font-weight: 500;
+        }
+        
+        .alert.show {
+            display: block;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+        }
+        
+        .alert-error {
+            background: #fee2e2;
+            border: 2px solid #ef4444;
+            color: #991b1b;
+        }
+        
+        .alert-success {
+            background: #d1fae5;
+            border: 2px solid #34d399;
+            color: #065f46;
+        }
+        
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        .form-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            font-size: 0.9375rem;
+            color: var(--color-ink);
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 0.875rem 1rem;
+            border: 2px solid var(--color-border);
+            border-radius: 8px;
+            font-size: 1rem;
+            font-family: var(--font-sans);
+            transition: all 0.2s;
+            background: var(--color-paper);
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: #667eea;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .password-wrapper {
+            position: relative;
+        }
+        
+        .toggle-password {
+            position: absolute;
+            right: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--color-muted);
+            cursor: pointer;
+            padding: 0.25rem;
+            display: flex;
+            align-items: center;
+        }
+        
+        .toggle-password:hover {
+            color: var(--color-ink);
+        }
+        
+        .remember-me {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .remember-me input {
+            width: 1.125rem;
+            height: 1.125rem;
+            cursor: pointer;
+            accent-color: #667eea;
+        }
+        
+        .remember-me label {
+            font-size: 0.9375rem;
+            color: var(--color-muted);
+            cursor: pointer;
+        }
+        
+        .submit-btn {
+            width: 100%;
+            padding: 1rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 1.0625rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-family: var(--font-sans);
+            letter-spacing: 0.01em;
+        }
+        
+        .submit-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .forgot-password {
+            text-align: center;
+            margin-top: 1.5rem;
+        }
+        
+        .forgot-password a {
+            color: #667eea;
+            text-decoration: none;
+            font-size: 0.9375rem;
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.2s;
+        }
+        
+        .forgot-password a:hover {
+            border-bottom-color: #667eea;
+        }
+        
+        .security-notice {
+            background: #f3f4f6;
+            border-left: 4px solid #6b7280;
+            padding: 1rem;
+            margin-top: 2rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            color: var(--color-muted);
+        }
+        
+        .security-notice strong {
+            color: var(--color-ink);
+        }
+        
+        .login-attempts {
+            display: none;
+            background: #fef3c7;
+            border: 2px solid #f59e0b;
+            color: #92400e;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .login-attempts.show {
+            display: block;
+        }
+        
+        @media (max-width: 768px) {
+            .admin-container {
+                margin: 2rem auto;
+            }
+            
+            .login-card {
+                padding: 2rem 1.5rem;
+            }
+            
+            .admin-header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+
+    <div class="admin-container">
+        <!-- Admin Header -->
+        <div class="admin-header">
+            <div class="admin-icon">
+                <svg width="32" height="32" fill="none" stroke="white" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                          d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+            </div>
+            <h1>Admin Portal</h1>
+            <p class="admin-subtitle">Restricted Access - Authorized Personnel Only</p>
+        </div>
+
+        <!-- Login Card -->
+        <div class="login-card">
+            <div id="errorAlert" class="alert alert-error">
+                Invalid credentials. Please try again.
+            </div>
+            
+            <div id="successAlert" class="alert alert-success">
+                Login successful! Redirecting...
+            </div>
+            
+            <div id="attemptsWarning" class="login-attempts">
+                <strong>⚠ Warning:</strong> Multiple failed login attempts detected. 
+                Your IP is being logged.
+            </div>
+            
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username" class="form-label">Username</label>
+                    <input 
+                        type="text" 
+                        id="username" 
+                        name="username" 
+                        class="form-input" 
+                        placeholder="Enter your username"
+                        autocomplete="username"
+                        required
+                    />
+                </div>
+                
+                <div class="form-group">
+                    <label for="password" class="form-label">Password</label>
+                    <div class="password-wrapper">
+                        <input 
+                            type="password" 
+                            id="password" 
+                            name="password" 
+                            class="form-input" 
+                            placeholder="Enter your password"
+                            autocomplete="current-password"
+                            required
+                        />
+                        <button type="button" class="toggle-password" id="togglePassword">
+                            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                      d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="remember-me">
+                    <input type="checkbox" id="rememberMe" name="rememberMe" />
+                    <label for="rememberMe">Remember me for 30 days</label>
+                </div>
+                
+                <button type="submit" class="submit-btn" id="submitBtn">
+                    Sign In
+                </button>
+                
+                <div class="forgot-password">
+                    <a href="mailto:admin@banity.com?subject=Admin%20Portal%20Password%20Reset">
+                        Forgot your password?
+                    </a>
+                </div>
+            </form>
+            
+            <div class="security-notice">
+                <strong>Security Notice:</strong> This is a restricted area. All access attempts are 
+                monitored and logged. Unauthorized access attempts will be reported to the appropriate authorities.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('loginForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const errorAlert = document.getElementById('errorAlert');
+        const successAlert = document.getElementById('successAlert');
+        const attemptsWarning = document.getElementById('attemptsWarning');
+        const togglePassword = document.getElementById('togglePassword');
+        const passwordInput = document.getElementById('password');
+        
+        let loginAttempts = parseInt(sessionStorage.getItem('loginAttempts') || '0');
+        
+        // Show warning if there are previous failed attempts
+        if (loginAttempts >= 2) {
+            attemptsWarning.classList.add('show');
+        }
+        
+        // Toggle password visibility
+        togglePassword.addEventListener('click', () => {
+            const type = passwordInput.type === 'password' ? 'text' : 'password';
+            passwordInput.type = type;
+        });
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Disable submit button
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Authenticating...';
+            
+            // Hide previous messages
+            errorAlert.classList.remove('show');
+            successAlert.classList.remove('show');
+            
+            // Get form data
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const rememberMe = document.getElementById('rememberMe').checked;
+            
+            try {
+                // TODO: Replace with actual API endpoint
+                // const response = await fetch('/api/admin/login', {
+                //     method: 'POST',
+                //     headers: { 'Content-Type': 'application/json' },
+                //     body: JSON.stringify({ username, password, rememberMe })
+                // });
+                
+                // Simulate API call
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // For development: Check against demo credentials
+                if (username === 'admin' && password === 'demo123') {
+                    // Success
+                    successAlert.classList.add('show');
+                    sessionStorage.removeItem('loginAttempts');
+                    
+                    // Store auth token (mock)
+                    if (rememberMe) {
+                        localStorage.setItem('adminToken', 'mock-token-' + Date.now());
+                    } else {
+                        sessionStorage.setItem('adminToken', 'mock-token-' + Date.now());
+                    }
+                    
+                    // Redirect after 1.5 seconds
+                    setTimeout(() => {
+                        window.location.href = '/admin-dashboard'; // TODO: Create dashboard page
+                    }, 1500);
+                    
+                } else {
+                    // Failed login
+                    loginAttempts++;
+                    sessionStorage.setItem('loginAttempts', loginAttempts.toString());
+                    
+                    errorAlert.classList.add('show');
+                    
+                    if (loginAttempts >= 2) {
+                        attemptsWarning.classList.add('show');
+                    }
+                    
+                    // Log failed attempt (in production, send to server)
+                    console.warn('Failed login attempt:', {
+                        username,
+                        timestamp: new Date().toISOString(),
+                        attempts: loginAttempts
+                    });
+                    
+                    // Lock out after 5 failed attempts
+                    if (loginAttempts >= 5) {
+                        submitBtn.disabled = true;
+                        submitBtn.textContent = 'Account Locked';
+                        errorAlert.textContent = 'Too many failed attempts. Please contact support.';
+                        return;
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Login error:', error);
+                errorAlert.textContent = 'Server error. Please try again later.';
+                errorAlert.classList.add('show');
+            } finally {
+                if (loginAttempts < 5) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Sign In';
+                }
+            }
+        });
+        
+        // Log page access for security monitoring
+        console.log('Admin portal accessed:', {
+            timestamp: new Date().toISOString(),
+            userAgent: navigator.userAgent,
+            referrer: document.referrer
+        });
+    </script>
+</Layout>
