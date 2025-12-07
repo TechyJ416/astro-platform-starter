@@ -1,0 +1,40 @@
+import { getSupabase } from "@supabase/auth-helpers-astro";
+
+const { supabase, session } = await getSupabase(Astro);
+
+// Protect on server side
+const { data: adminRecord } = await supabase
+  .from("admins")
+  .select("*")
+  .eq("id", session.user.id)
+  .maybeSingle();
+
+if (!adminRecord) {
+  return Astro.redirect("/unauthorized");
+}
+
+// Handle form submission
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const message = form.get("message");
+
+  await supabase.from("server_messages").insert({
+    message,
+    created_by: session.user.id,
+  });
+}
+
+const { data: messages } = await supabase
+  .from("server_messages")
+  .select("*")
+  .order("created_at", { ascending: false });
+---
+
+<h1>Admin Dashboard</h1>
+
+<form method="POST">
+  <input name="message" placeholder="New Server Message" />
+  <button type="submit">Save</button>
+</form>
+
+<pre>{JSON.stringify(messages, null, 2)}</pre>
