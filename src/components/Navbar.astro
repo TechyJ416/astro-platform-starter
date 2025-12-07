@@ -1,0 +1,31 @@
+---
+import { getSupabase } from "@supabase/auth-helpers-astro";
+const { supabase, session } = await getSupabase(Astro);
+
+let isAdmin = false;
+
+if (session) {
+  const { data } = await supabase
+    .from("admins")
+    .select("id")
+    .eq("id", session.user.id)
+    .maybeSingle();
+
+  isAdmin = !!data;
+}
+---
+
+<nav>
+  <a href="/">Home</a>
+  <a href="/dashboard">Dashboard</a>
+
+  {isAdmin && (
+    <a href="/admin" class="admin-link">Admin</a>
+  )}
+
+  {session ? (
+    <a href="/auth/logout">Logout</a>
+  ) : (
+    <a href="/login">Login</a>
+  )}
+</nav>
