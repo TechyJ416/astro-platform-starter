@@ -216,16 +216,33 @@ import Layout from '../layouts/Layout.astro';
             background: #d1fae5;
             border: 2px solid #34d399;
             color: #065f46;
-            padding: 1rem;
+            padding: 1.25rem;
             border-radius: 8px;
             margin-bottom: 1.5rem;
             text-align: center;
             font-weight: 500;
+            position: relative;
         }
         
         .success-message.show {
             display: block;
             animation: slideIn 0.3s ease-out;
+        }
+
+        .success-message .close-btn {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.75rem;
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #065f46;
+            line-height: 1;
+        }
+
+        .success-message .close-btn:hover {
+            color: #047857;
         }
         
         @keyframes slideIn {
@@ -313,6 +330,7 @@ import Layout from '../layouts/Layout.astro';
             }
         }
     </style>
+
     <!-- Hero Section -->
     <section class="clips-hero">
         <h1>Join Banity Creators</h1>
@@ -321,13 +339,15 @@ import Layout from '../layouts/Layout.astro';
             Be part of the next generation of authentic content creators.
         </p>
     </section>
+
     <!-- Sign Up Form -->
     <div class="signup-container">
         <h2 class="form-title">Get Started</h2>
         <p class="form-subtitle">Fill out the form below to create your creator account</p>
         
         <div id="successMessage" class="success-message">
-            ✓ Account created successfully! Redirecting to login...
+            <button class="close-btn" id="closeSuccessBtn" aria-label="Close">&times;</button>
+            <div id="successText">✓ Account created! Please check your email to confirm.</div>
         </div>
         
         <div id="errorMessage" class="error-message"></div>
@@ -452,6 +472,7 @@ import Layout from '../layouts/Layout.astro';
             </button>
         </form>
     </div>
+
     <!-- Features Preview -->
     <section class="features-preview">
         <h2 class="features-title">What You'll Get</h2>
@@ -501,33 +522,36 @@ import Layout from '../layouts/Layout.astro';
             </div>
         </div>
     </section>
+
     <script>
         const form = document.getElementById('signupForm');
         const submitBtn = document.getElementById('submitBtn');
         const successMessage = document.getElementById('successMessage');
+        const successText = document.getElementById('successText');
         const errorMessage = document.getElementById('errorMessage');
         const passwordInput = document.getElementById('password');
         const passwordStrengthBar = document.getElementById('passwordStrengthBar');
+        const closeSuccessBtn = document.getElementById('closeSuccessBtn');
+
+        let redirectTimeout = null;
+
+        // Close success message and redirect to home
+        closeSuccessBtn.addEventListener('click', () => {
+            if (redirectTimeout) clearTimeout(redirectTimeout);
+            window.location.href = '/';
+        });
 
         // Password strength indicator
         passwordInput.addEventListener('input', (e) => {
             const password = e.target.value;
             let strength = 0;
 
-            // Check length
             if (password.length >= 8) strength++;
             if (password.length >= 12) strength++;
-
-            // Check for numbers
             if (/\d/.test(password)) strength++;
-
-            // Check for special characters
             if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) strength++;
-
-            // Check for uppercase and lowercase
             if (/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++;
 
-            // Update strength bar
             passwordStrengthBar.className = 'password-strength-bar';
             if (strength <= 2) {
                 passwordStrengthBar.classList.add('weak');
@@ -541,16 +565,13 @@ import Layout from '../layouts/Layout.astro';
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            // Disable submit button
             submitBtn.disabled = true;
             submitBtn.textContent = 'Creating Account...';
             
-            // Hide previous messages
             successMessage.classList.remove('show');
             errorMessage.classList.remove('show');
             errorMessage.textContent = '';
             
-            // Get form data
             const formData = new FormData(form);
             const data = {
                 fullName: formData.get('fullName').trim(),
@@ -561,7 +582,6 @@ import Layout from '../layouts/Layout.astro';
                 tiktok: formData.get('tiktok')?.trim() || null
             };
 
-            // Basic validation
             if (data.password.length < 8) {
                 errorMessage.textContent = '❌ Password must be at least 8 characters long';
                 errorMessage.classList.add('show');
@@ -571,7 +591,6 @@ import Layout from '../layouts/Layout.astro';
             }
             
             try {
-                // Call the Netlify Function
                 const response = await fetch('/.netlify/functions/creator-signup', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -581,17 +600,20 @@ import Layout from '../layouts/Layout.astro';
                 const result = await response.json();
                 
                 if (response.ok) {
-                    // Success
+                    // Show success message
+                    successText.innerHTML = '✓ Account created! Please check your email to confirm.<br><small>Redirecting to home page in 3 seconds... (click × to go now)</small>';
                     successMessage.classList.add('show');
                     form.reset();
                     passwordStrengthBar.className = 'password-strength-bar';
                     
-                    // Redirect to login after 2 seconds
-                    setTimeout(() => {
-                        window.location.href = '/login'; // You'll create this page next
-                    }, 2000);
+                    // Hide the form
+                    form.style.display = 'none';
+                    
+                    // Redirect to HOME page after 3 seconds
+                    redirectTimeout = setTimeout(() => {
+                        window.location.href = '/';
+                    }, 3000);
                 } else {
-                    // Error from server
                     errorMessage.textContent = '❌ ' + (result.error || 'Something went wrong');
                     errorMessage.classList.add('show');
                 }
@@ -601,7 +623,6 @@ import Layout from '../layouts/Layout.astro';
                 errorMessage.textContent = '❌ Network error. Please check your connection and try again.';
                 errorMessage.classList.add('show');
             } finally {
-                // Re-enable submit button
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Create My Account';
             }
