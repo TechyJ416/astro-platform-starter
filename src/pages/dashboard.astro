@@ -4,8 +4,8 @@
 
 export const prerender = false;
 
-import { requireAdmin } from '../../lib/auth';
-import { supabase } from '../../lib/supabase';
+import { requireAdmin } from '../lib/auth';
+import { supabase } from '../lib/supabase';
 
 const authResult = await requireAdmin(Astro.cookies, '/admin/login');
 if ('redirect' in authResult) {
