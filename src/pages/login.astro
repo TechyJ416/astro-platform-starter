@@ -168,20 +168,6 @@ if (session?.isAdmin) {
 
         const data = await response.json();
 
-        if (session) {
-          const { data } = await supabase
-            .from("admins")
-            .select("id")
-            .eq("id", session.user.id)
-            .maybeSingle();
-        
-          if (data) {
-            return Astro.redirect("/admin");
-          }
-        
-          return Astro.redirect("/dashboard");
-        }
-
         if (data.success) {
           window.location.href = data.redirectTo || '/admin/dashboard';
         } else {
