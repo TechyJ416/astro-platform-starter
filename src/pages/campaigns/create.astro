@@ -1,0 +1,414 @@
+---
+// src/pages/campaigns/create.astro
+export const prerender = false;
+
+import Layout from '../../layouts/Layout.astro';
+import { supabase, getSession, getUserProfile } from '../../lib/supabase';
+
+// Check authentication
+const session = await getSession(Astro.cookies);
+if (!session) {
+  return Astro.redirect('/clips');
+}
+
+// Check if user is manager
+const profile = await getUserProfile(session.user.id);
+if (profile?.role !== 'manager' && profile?.role !== 'admin') {
+  return Astro.redirect('/campaigns');
+}
+
+let errorMessage = '';
+let successMessage = '';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  
+  const title = form.get('title') as string;
+  const description = form.get('description') as string;
+  const brief = form.get('brief') as string;
+  const payout = parseFloat(form.get('payout') as string) || 0;
+  const maxCreators = parseInt(form.get('maxCreators') as string) || 10;
+  const startDate = form.get('startDate') as string;
+  const endDate = form.get('endDate') as string;
+  const hashtagsRaw = form.get('hashtags') as string;
+  const createCommunity = form.get('createCommunity') === 'on';
+  
+  // Generate slug
+  const slug = title.toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '') + '-' + Date.now().toString(36);
+  
+  // Parse hashtags
+  const hashtags = hashtagsRaw
+    ? hashtagsRaw.split(',').map(h => h.trim().replace('#', '')).filter(Boolean)
+    : [];
+  
+  // Create campaign
+  const { data: campaign, error } = await supabase
+    .from('campaigns')
+    .insert({
+      manager_id: session.user.id,
+      title,
+      slug,
+      description,
+      brief,
+      payout_per_post: payout,
+      max_creators: maxCreators,
+      start_date: startDate || null,
+      end_date: endDate || null,
+      hashtags,
+      status: 'draft'
+    })
+    .select()
+    .single();
+  
+  if (error) {
+    errorMessage = `Failed to create campaign: ${error.message}`;
+  } else {
+    // Create community if requested
+    if (createCommunity && campaign) {
+      await supabase.from('communities').insert({
+        manager_id: session.user.id,
+        campaign_id: campaign.id,
+        name: `${title} Community`,
+        slug: `${slug}-community`,
+        description: `Community for ${title} campaign participants`,
+        visibility: 'public'
+      });
+    }
+    
+    return Astro.redirect(`/campaigns/manage`);
+  }
+}
+---
+
+<Layout title="Create Campaign">
+  <style>
+    .page-header {
+      margin-bottom: 2rem;
+    }
+    
+    .page-title {
+      font-family: var(--font-serif);
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    
+    .page-subtitle {
+      color: var(--color-muted);
+    }
+    
+    .form-container {
+      max-width: 700px;
+      background: white;
+      border-radius: 12px;
+      border: 1px solid var(--color-border);
+      padding: 2rem;
+    }
+    
+    .form-section {
+      margin-bottom: 2rem;
+      padding-bottom: 2rem;
+      border-bottom: 1px solid var(--color-border);
+    }
+    
+    .form-section:last-child {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+    
+    .section-title {
+      font-family: var(--font-serif);
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+    
+    .form-group {
+      margin-bottom: 1.5rem;
+    }
+    
+    .form-label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      font-size: 0.9375rem;
+    }
+    
+    .form-label .required {
+      color: #ef4444;
+    }
+    
+    .form-input,
+    .form-textarea {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 2px solid var(--color-border);
+      border-radius: 8px;
+      font-size: 1rem;
+      font-family: var(--font-sans);
+      transition: border-color 0.2s;
+    }
+    
+    .form-input:focus,
+    .form-textarea:focus {
+      outline: none;
+      border-color: var(--color-accent);
+    }
+    
+    .form-textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    
+    .form-help {
+      font-size: 0.875rem;
+      color: var(--color-muted);
+      margin-top: 0.25rem;
+    }
+    
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    
+    .form-checkbox {
+      width: 1.25rem;
+      height: 1.25rem;
+      accent-color: var(--color-accent);
+    }
+    
+    .checkbox-label {
+      font-size: 0.9375rem;
+    }
+    
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+    }
+    
+    .alert.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    
+    .alert.success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    
+    .form-actions {
+      display: flex;
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    
+    .submit-btn {
+      padding: 0.875rem 2rem;
+      background: var(--color-accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .submit-btn:hover {
+      background: #1d4ed8;
+    }
+    
+    .cancel-btn {
+      padding: 0.875rem 2rem;
+      background: white;
+      color: var(--color-muted);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 500;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    
+    .cancel-btn:hover {
+      border-color: var(--color-ink);
+      color: var(--color-ink);
+    }
+    
+    @media (max-width: 768px) {
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+      
+      .form-container {
+        padding: 1.5rem;
+      }
+    }
+  </style>
+
+  <div class="page-header">
+    <h1 class="page-title">Create Campaign</h1>
+    <p class="page-subtitle">Set up a new UGC campaign for creators</p>
+  </div>
+  
+  {errorMessage && <div class="alert error">{errorMessage}</div>}
+  
+  <div class="form-container">
+    <form method="POST">
+      <div class="form-section">
+        <h2 class="section-title">Basic Information</h2>
+        
+        <div class="form-group">
+          <label for="title" class="form-label">
+            Campaign Title <span class="required">*</span>
+          </label>
+          <input 
+            type="text" 
+            id="title" 
+            name="title" 
+            class="form-input"
+            placeholder="e.g., Summer Style Challenge"
+            required
+          />
+        </div>
+        
+        <div class="form-group">
+          <label for="description" class="form-label">
+            Short Description <span class="required">*</span>
+          </label>
+          <textarea 
+            id="description" 
+            name="description" 
+            class="form-textarea"
+            placeholder="Brief overview of the campaign..."
+            required
+          ></textarea>
+          <p class="form-help">This appears on campaign cards (max 200 characters recommended)</p>
+        </div>
+        
+        <div class="form-group">
+          <label for="brief" class="form-label">
+            Campaign Brief
+          </label>
+          <textarea 
+            id="brief" 
+            name="brief" 
+            class="form-textarea"
+            placeholder="Detailed instructions, requirements, do's and don'ts..."
+            style="min-height: 200px;"
+          ></textarea>
+          <p class="form-help">Full details shown to creators after they join</p>
+        </div>
+      </div>
+      
+      <div class="form-section">
+        <h2 class="section-title">Compensation & Capacity</h2>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="payout" class="form-label">
+              Payout per Post ($)
+            </label>
+            <input 
+              type="number" 
+              id="payout" 
+              name="payout" 
+              class="form-input"
+              placeholder="50"
+              min="0"
+              step="0.01"
+            />
+          </div>
+          
+          <div class="form-group">
+            <label for="maxCreators" class="form-label">
+              Max Creators
+            </label>
+            <input 
+              type="number" 
+              id="maxCreators" 
+              name="maxCreators" 
+              class="form-input"
+              placeholder="10"
+              min="1"
+              value="10"
+            />
+          </div>
+        </div>
+      </div>
+      
+      <div class="form-section">
+        <h2 class="section-title">Timeline</h2>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="startDate" class="form-label">Start Date</label>
+            <input 
+              type="date" 
+              id="startDate" 
+              name="startDate" 
+              class="form-input"
+            />
+          </div>
+          
+          <div class="form-group">
+            <label for="endDate" class="form-label">End Date</label>
+            <input 
+              type="date" 
+              id="endDate" 
+              name="endDate" 
+              class="form-input"
+            />
+          </div>
+        </div>
+      </div>
+      
+      <div class="form-section">
+        <h2 class="section-title">Additional Settings</h2>
+        
+        <div class="form-group">
+          <label for="hashtags" class="form-label">Required Hashtags</label>
+          <input 
+            type="text" 
+            id="hashtags" 
+            name="hashtags" 
+            class="form-input"
+            placeholder="#brandname, #summerstyle, #ad"
+          />
+          <p class="form-help">Separate with commas</p>
+        </div>
+        
+        <div class="form-group">
+          <div class="checkbox-group">
+            <input 
+              type="checkbox" 
+              id="createCommunity" 
+              name="createCommunity" 
+              class="form-checkbox"
+            />
+            <label for="createCommunity" class="checkbox-label">
+              Create a community for this campaign
+            </label>
+          </div>
+          <p class="form-help">Allows participants to interact with each other</p>
+        </div>
+      </div>
+      
+      <div class="form-actions">
+        <button type="submit" class="submit-btn">Create Campaign</button>
+        <a href="/campaigns/manage" class="cancel-btn">Cancel</a>
+      </div>
+    </form>
+  </div>
+</Layout>

@@ -1,0 +1,326 @@
+---
+// src/pages/campaigns/manage.astro
+export const prerender = false;
+
+import Layout from '../../layouts/Layout.astro';
+import { supabase, getSession, getUserProfile } from '../../lib/supabase';
+
+// Check authentication
+const session = await getSession(Astro.cookies);
+if (!session) {
+  return Astro.redirect('/clips');
+}
+
+const profile = await getUserProfile(session.user.id);
+if (profile?.role !== 'manager' && profile?.role !== 'admin') {
+  return Astro.redirect('/campaigns');
+}
+
+// Handle status update
+let message = '';
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const campaignId = form.get('campaignId') as string;
+  const action = form.get('action') as string;
+  
+  if (campaignId && action) {
+    let newStatus = action;
+    const { error } = await supabase
+      .from('campaigns')
+      .update({ status: newStatus })
+      .eq('id', campaignId)
+      .eq('manager_id', session.user.id);
+    
+    if (!error) {
+      message = `Campaign ${action === 'active' ? 'published' : action}!`;
+    }
+  }
+}
+
+// Fetch manager's campaigns
+const { data: campaigns } = await supabase
+  .from('campaigns')
+  .select(`
+    *,
+    campaign_participants(count),
+    posts(count)
+  `)
+  .eq('manager_id', session.user.id)
+  .order('created_at', { ascending: false });
+
+// Count stats
+const totalCampaigns = campaigns?.length || 0;
+const activeCampaigns = campaigns?.filter(c => c.status === 'active').length || 0;
+const draftCampaigns = campaigns?.filter(c => c.status === 'draft').length || 0;
+---
+
+<Layout title="Manage Campaigns">
+  <style>
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+    }
+    
+    .page-title {
+      font-family: var(--font-serif);
+      font-size: 2.5rem;
+      font-weight: 700;
+    }
+    
+    .create-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      background: var(--color-accent);
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    
+    .create-btn:hover {
+      background: #1d4ed8;
+    }
+    
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      background: #d1fae5;
+      color: #065f46;
+    }
+    
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    
+    .stat-card {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 12px;
+      border: 1px solid var(--color-border);
+    }
+    
+    .stat-value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--color-ink);
+    }
+    
+    .stat-label {
+      font-size: 0.875rem;
+      color: var(--color-muted);
+    }
+    
+    .campaigns-table {
+      width: 100%;
+      background: white;
+      border-radius: 12px;
+      border: 1px solid var(--color-border);
+      overflow: hidden;
+    }
+    
+    .campaigns-table th,
+    .campaigns-table td {
+      padding: 1rem 1.5rem;
+      text-align: left;
+      border-bottom: 1px solid var(--color-border);
+    }
+    
+    .campaigns-table th {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      background: #fafafa;
+    }
+    
+    .campaigns-table tr:last-child td {
+      border-bottom: none;
+    }
+    
+    .campaign-title-cell {
+      font-weight: 600;
+    }
+    
+    .campaign-title-cell a {
+      color: var(--color-ink);
+      text-decoration: none;
+    }
+    
+    .campaign-title-cell a:hover {
+      color: var(--color-accent);
+    }
+    
+    .status-badge {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    
+    .status-badge.draft { background: #f3f4f6; color: #6b7280; }
+    .status-badge.active { background: #d1fae5; color: #065f46; }
+    .status-badge.paused { background: #fef3c7; color: #d97706; }
+    .status-badge.completed { background: #dbeafe; color: #2563eb; }
+    .status-badge.cancelled { background: #fee2e2; color: #991b1b; }
+    
+    .action-btn {
+      padding: 0.375rem 0.75rem;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .action-btn.publish {
+      background: var(--color-accent);
+      color: white;
+    }
+    
+    .action-btn.publish:hover {
+      background: #1d4ed8;
+    }
+    
+    .action-btn.pause {
+      background: #fef3c7;
+      color: #d97706;
+    }
+    
+    .action-btn.resume {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    
+    .actions-cell {
+      display: flex;
+      gap: 0.5rem;
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      background: white;
+      border-radius: 12px;
+      border: 1px solid var(--color-border);
+    }
+    
+    .empty-state-icon {
+      font-size: 3rem;
+      margin-bottom: 1rem;
+    }
+    
+    .empty-state-title {
+      font-family: var(--font-serif);
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+    
+    .empty-state-text {
+      color: var(--color-muted);
+      margin-bottom: 1.5rem;
+    }
+    
+    @media (max-width: 768px) {
+      .page-header {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: flex-start;
+      }
+      
+      .campaigns-table {
+        font-size: 0.875rem;
+      }
+    }
+  </style>
+
+  <div class="page-header">
+    <h1 class="page-title">Manager Portal</h1>
+    <a href="/campaigns/create" class="create-btn">+ Create Campaign</a>
+  </div>
+  
+  {message && <div class="alert">{message}</div>}
+  
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-value">{totalCampaigns}</div>
+      <div class="stat-label">Total Campaigns</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{activeCampaigns}</div>
+      <div class="stat-label">Active</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{draftCampaigns}</div>
+      <div class="stat-label">Drafts</div>
+    </div>
+  </div>
+  
+  {campaigns && campaigns.length > 0 ? (
+    <table class="campaigns-table">
+      <thead>
+        <tr>
+          <th>Campaign</th>
+          <th>Status</th>
+          <th>Payout</th>
+          <th>Creators</th>
+          <th>Posts</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {campaigns.map((campaign) => (
+          <tr>
+            <td class="campaign-title-cell">
+              <a href={`/campaigns/${campaign.slug || campaign.id}`}>{campaign.title}</a>
+            </td>
+            <td>
+              <span class={`status-badge ${campaign.status}`}>{campaign.status}</span>
+            </td>
+            <td>${campaign.payout_per_post || 0}</td>
+            <td>{campaign.campaign_participants?.[0]?.count || 0} / {campaign.max_creators}</td>
+            <td>{campaign.posts?.[0]?.count || 0}</td>
+            <td class="actions-cell">
+              <form method="POST" style="display: inline;">
+                <input type="hidden" name="campaignId" value={campaign.id} />
+                {campaign.status === 'draft' && (
+                  <button type="submit" name="action" value="active" class="action-btn publish">
+                    Publish
+                  </button>
+                )}
+                {campaign.status === 'active' && (
+                  <button type="submit" name="action" value="paused" class="action-btn pause">
+                    Pause
+                  </button>
+                )}
+                {campaign.status === 'paused' && (
+                  <button type="submit" name="action" value="active" class="action-btn resume">
+                    Resume
+                  </button>
+                )}
+              </form>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  ) : (
+    <div class="empty-state">
+      <div class="empty-state-icon">📢</div>
+      <h2 class="empty-state-title">No Campaigns Yet</h2>
+      <p class="empty-state-text">Create your first campaign to start connecting with creators.</p>
+      <a href="/campaigns/create" class="create-btn">+ Create Campaign</a>
+    </div>
+  )}
+</Layout>
