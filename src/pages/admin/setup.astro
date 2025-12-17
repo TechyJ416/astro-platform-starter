@@ -1,0 +1,539 @@
+---
+// src/pages/admin/setup.astro
+export const prerender = false;
+
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_KEY;
+const masterKey = import.meta.env.ADMIN_MASTER_KEY;
+
+let errorMessage = '';
+let successMessage = '';
+let step = 1;
+
+// Verify master key first
+const masterSession = Astro.cookies.get('admin-master-session')?.value;
+const isAuthorized = masterSession === masterKey && masterKey;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action') as string;
+  
+  if (action === 'verify_master_key') {
+    const submittedKey = form.get('masterKey') as string;
+    
+    if (!masterKey) {
+      errorMessage = 'Master key not configured. Add ADMIN_MASTER_KEY to environment variables.';
+    } else if (submittedKey === masterKey) {
+      Astro.cookies.set('admin-master-session', masterKey, {
+        path: '/',
+        httpOnly: true,
+        secure: import.meta.env.PROD,
+        sameSite: 'lax',
+        maxAge: 60 * 30 // 30 minutes for setup
+      });
+      step = 2;
+    } else {
+      errorMessage = 'Invalid master key.';
+    }
+  }
+  
+  if (action === 'create_admin' && isAuthorized) {
+    const email = form.get('email') as string;
+    const password = form.get('password') as string;
+    const fullName = form.get('fullName') as string;
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      errorMessage = 'Supabase not configured.';
+    } else if (!supabaseServiceKey) {
+      errorMessage = 'SUPABASE_SERVICE_KEY not configured. Required for admin creation.';
+    } else {
+      // Use service key client for admin operations (bypasses RLS)
+      const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      });
+      
+      try {
+        // Create user in auth
+        const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
+          email,
+          password,
+          email_confirm: true,
+          user_metadata: {
+            full_name: fullName
+          }
+        });
+        
+        if (authError) throw authError;
+        if (!authData.user) throw new Error('Failed to create user');
+        
+        const userId = authData.user.id;
+        
+        // Create/update profile with admin role
+        const { error: profileError } = await adminClient
+          .from('profiles')
+          .upsert({
+            id: userId,
+            email,
+            full_name: fullName,
+            role: 'admin',
+            is_verified: true,
+            is_active: true
+          });
+        
+        if (profileError) {
+          console.error('Profile error:', profileError);
+          // Try updating instead
+          await adminClient
+            .from('profiles')
+            .update({ role: 'admin', full_name: fullName })
+            .eq('id', userId);
+        }
+        
+        // Add to admins table
+        const { error: adminError } = await adminClient
+          .from('admins')
+          .insert({ id: userId });
+        
+        if (adminError && !adminError.message.includes('duplicate')) {
+          throw adminError;
+        }
+        
+        successMessage = `Admin account created! Email: ${email}`;
+        step = 3;
+        
+      } catch (err: any) {
+        errorMessage = `Error: ${err.message}`;
+        step = 2;
+      }
+    }
+  }
+}
+
+// If already authorized via cookie, skip to step 2
+if (isAuthorized && step === 1) {
+  step = 2;
+}
+
+const hasMasterKey = !!masterKey;
+const hasServiceKey = !!supabaseServiceKey;
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Setup - Banity</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    
+    .setup-container {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+      width: 100%;
+      max-width: 500px;
+      overflow: hidden;
+    }
+    
+    .setup-header {
+      background: #1a1a2e;
+      color: white;
+      padding: 2rem;
+      text-align: center;
+    }
+    
+    .setup-logo {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    
+    .setup-subtitle {
+      font-size: 0.875rem;
+      opacity: 0.8;
+    }
+    
+    .setup-body {
+      padding: 2rem;
+    }
+    
+    .steps {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    
+    .step-indicator {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 0.875rem;
+      background: #e5e7eb;
+      color: #6b7280;
+    }
+    
+    .step-indicator.active {
+      background: #2563eb;
+      color: white;
+    }
+    
+    .step-indicator.completed {
+      background: #10b981;
+      color: white;
+    }
+    
+    .step-line {
+      width: 40px;
+      height: 2px;
+      background: #e5e7eb;
+      align-self: center;
+    }
+    
+    .step-line.completed {
+      background: #10b981;
+    }
+    
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+    
+    .form-label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      font-size: 0.875rem;
+      color: #374151;
+    }
+    
+    .form-input {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 1rem;
+      transition: border-color 0.2s;
+    }
+    
+    .form-input:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+    
+    .form-help {
+      font-size: 0.75rem;
+      color: #6b7280;
+      margin-top: 0.25rem;
+    }
+    
+    .submit-btn {
+      width: 100%;
+      padding: 0.875rem;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    .submit-btn:hover {
+      background: #1d4ed8;
+    }
+    
+    .alert {
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      font-size: 0.875rem;
+    }
+    
+    .alert.error {
+      background: #fee2e2;
+      color: #991b1b;
+      border: 1px solid #fecaca;
+    }
+    
+    .alert.success {
+      background: #d1fae5;
+      color: #065f46;
+      border: 1px solid #a7f3d0;
+    }
+    
+    .alert.warning {
+      background: #fef3c7;
+      color: #92400e;
+      border: 1px solid #fcd34d;
+    }
+    
+    .alert.info {
+      background: #dbeafe;
+      color: #1e40af;
+      border: 1px solid #93c5fd;
+    }
+    
+    .config-check {
+      margin-bottom: 1.5rem;
+    }
+    
+    .config-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .config-item:last-child {
+      border-bottom: none;
+    }
+    
+    .config-status {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+    }
+    
+    .config-status.ok {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    
+    .config-status.missing {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    
+    .back-link {
+      display: block;
+      text-align: center;
+      margin-top: 1.5rem;
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+    
+    .back-link:hover {
+      color: #2563eb;
+    }
+    
+    .success-box {
+      text-align: center;
+      padding: 2rem;
+    }
+    
+    .success-icon {
+      font-size: 4rem;
+      margin-bottom: 1rem;
+    }
+    
+    .success-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      color: #065f46;
+    }
+    
+    .success-text {
+      color: #6b7280;
+      margin-bottom: 1.5rem;
+    }
+    
+    .login-btn {
+      display: inline-block;
+      padding: 0.75rem 2rem;
+      background: #2563eb;
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+    }
+    
+    .login-btn:hover {
+      background: #1d4ed8;
+    }
+  </style>
+</head>
+<body>
+  <div class="setup-container">
+    <div class="setup-header">
+      <div class="setup-logo">⚙️ Admin Setup</div>
+      <div class="setup-subtitle">Bootstrap your first admin account</div>
+    </div>
+    
+    <div class="setup-body">
+      <!-- Step indicators -->
+      <div class="steps">
+        <div class={`step-indicator ${step >= 1 ? (step > 1 ? 'completed' : 'active') : ''}`}>
+          {step > 1 ? '✓' : '1'}
+        </div>
+        <div class={`step-line ${step > 1 ? 'completed' : ''}`}></div>
+        <div class={`step-indicator ${step >= 2 ? (step > 2 ? 'completed' : 'active') : ''}`}>
+          {step > 2 ? '✓' : '2'}
+        </div>
+        <div class={`step-line ${step > 2 ? 'completed' : ''}`}></div>
+        <div class={`step-indicator ${step >= 3 ? 'active' : ''}`}>3</div>
+      </div>
+      
+      {errorMessage && <div class="alert error">{errorMessage}</div>}
+      {successMessage && <div class="alert success">{successMessage}</div>}
+      
+      <!-- Step 1: Verify Master Key -->
+      {step === 1 && (
+        <>
+          <h2 style="margin-bottom: 1rem; font-size: 1.25rem;">Verify Master Key</h2>
+          
+          <div class="config-check">
+            <div class="config-item">
+              <div class={`config-status ${hasMasterKey ? 'ok' : 'missing'}`}>
+                {hasMasterKey ? '✓' : '✕'}
+              </div>
+              <span>ADMIN_MASTER_KEY</span>
+            </div>
+            <div class="config-item">
+              <div class={`config-status ${supabaseUrl ? 'ok' : 'missing'}`}>
+                {supabaseUrl ? '✓' : '✕'}
+              </div>
+              <span>PUBLIC_SUPABASE_URL</span>
+            </div>
+            <div class="config-item">
+              <div class={`config-status ${hasServiceKey ? 'ok' : 'missing'}`}>
+                {hasServiceKey ? '✓' : '✕'}
+              </div>
+              <span>SUPABASE_SERVICE_KEY</span>
+            </div>
+          </div>
+          
+          {!hasMasterKey ? (
+            <div class="alert warning">
+              <strong>Master key not configured.</strong><br>
+              Add <code>ADMIN_MASTER_KEY</code> to your environment variables in Netlify.
+            </div>
+          ) : !hasServiceKey ? (
+            <div class="alert warning">
+              <strong>Service key not configured.</strong><br>
+              Add <code>SUPABASE_SERVICE_KEY</code> (from Supabase Dashboard → Settings → API → service_role key) to create admin accounts.
+            </div>
+          ) : (
+            <form method="POST">
+              <input type="hidden" name="action" value="verify_master_key" />
+              
+              <div class="form-group">
+                <label for="masterKey" class="form-label">Master Key</label>
+                <input 
+                  type="password" 
+                  id="masterKey" 
+                  name="masterKey" 
+                  class="form-input"
+                  placeholder="Enter your master key"
+                  required
+                  autocomplete="off"
+                />
+                <p class="form-help">Enter the ADMIN_MASTER_KEY value from your environment</p>
+              </div>
+              
+              <button type="submit" class="submit-btn">Verify & Continue</button>
+            </form>
+          )}
+        </>
+      )}
+      
+      <!-- Step 2: Create Admin Account -->
+      {step === 2 && (
+        <>
+          <h2 style="margin-bottom: 1rem; font-size: 1.25rem;">Create Admin Account</h2>
+          
+          <div class="alert info">
+            This will create a new user with full admin privileges.
+          </div>
+          
+          <form method="POST">
+            <input type="hidden" name="action" value="create_admin" />
+            
+            <div class="form-group">
+              <label for="fullName" class="form-label">Full Name</label>
+              <input 
+                type="text" 
+                id="fullName" 
+                name="fullName" 
+                class="form-input"
+                placeholder="John Doe"
+                required
+              />
+            </div>
+            
+            <div class="form-group">
+              <label for="email" class="form-label">Email</label>
+              <input 
+                type="email" 
+                id="email" 
+                name="email" 
+                class="form-input"
+                placeholder="admin@example.com"
+                required
+              />
+            </div>
+            
+            <div class="form-group">
+              <label for="password" class="form-label">Password</label>
+              <input 
+                type="password" 
+                id="password" 
+                name="password" 
+                class="form-input"
+                placeholder="Minimum 8 characters"
+                minlength="8"
+                required
+              />
+              <p class="form-help">Use a strong password with at least 8 characters</p>
+            </div>
+            
+            <button type="submit" class="submit-btn">Create Admin Account</button>
+          </form>
+        </>
+      )}
+      
+      <!-- Step 3: Success -->
+      {step === 3 && (
+        <div class="success-box">
+          <div class="success-icon">🎉</div>
+          <h2 class="success-title">Admin Created!</h2>
+          <p class="success-text">
+            Your admin account has been created and is ready to use.
+          </p>
+          <a href="/admin/login" class="login-btn">Go to Admin Login</a>
+        </div>
+      )}
+      
+      <a href="/admin/login" class="back-link">← Back to Login</a>
+    </div>
+  </div>
+</body>
+</html>
