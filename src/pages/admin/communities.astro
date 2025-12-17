@@ -2,7 +2,7 @@
 // src/pages/admin/communities.astro
 export const prerender = false;
 
-import AdminLayout from "@/layouts/AdminLayout.astro";
+import AdminLayout from "../../layouts/AdminLayout.astro";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
