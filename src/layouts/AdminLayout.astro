@@ -1,0 +1,59 @@
+---
+export const prerender = false;
+
+const { title = "Admin" } = Astro.props;
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title}</title>
+</head>
+
+<body>
+  <div class="admin-wrapper">
+    <aside class="admin-sidebar">
+      <h2>Admin</h2>
+      <nav>
+        <a href="/admin">Dashboard</a>
+        <a href="/admin/users">Users</a>
+        <a href="/admin/roles">Roles</a>
+        <a href="/admin/communities">Communities</a>
+        <a href="/admin/messages">Messages</a>
+      </nav>
+    </aside>
+
+    <main class="admin-content">
+      <slot />
+    </main>
+  </div>
+</body>
+
+<style>
+  .admin-wrapper {
+    display: flex;
+    min-height: 100vh;
+  }
+  .admin-sidebar {
+    width: 220px;
+    background: #111;
+    color: white;
+    padding: 1rem;
+  }
+  .admin-sidebar a {
+    display: block;
+    color: #ccc;
+    margin: 0.5rem 0;
+    text-decoration: none;
+  }
+  .admin-sidebar a:hover {
+    color: white;
+  }
+  .admin-content {
+    flex: 1;
+    padding: 2rem;
+  }
+</style>
+</html>
