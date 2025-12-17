@@ -94,6 +94,9 @@ if (Astro.request.method === 'POST') {
         errorMessage = `Error: ${err.message}`;
         step = 2;
       }
+    } // ← CLOSE create_admin IF
+  } // ← CLOSE POST IF
+} // ← CLOSE Astro.request.method === 'POST'
 
 if (isAuthorized && step === 1) step = 2;
 
