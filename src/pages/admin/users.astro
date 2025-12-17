@@ -1,0 +1,44 @@
+---
+// src/pages/admin/users.astro
+export const prerender = false;
+
+import AdminLayout from "@/layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  import.meta.env.PUBLIC_SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY
+);
+
+const { data: users, error } = await supabase
+  .from("profiles")
+  .select("id, email, full_name, role, is_active")
+  .order("created_at", { ascending: false });
+---
+
+<AdminLayout title="Users">
+  <h1>Users</h1>
+
+  {error && <p class="error">{error.message}</p>}
+
+  <table class="admin-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Role</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {users?.map(user => (
+        <tr>
+          <td>{user.full_name}</td>
+          <td>{user.email}</td>
+          <td>{user.role}</td>
+          <td>{user.is_active ? "Active" : "Disabled"}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</AdminLayout>
