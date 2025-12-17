@@ -1,0 +1,42 @@
+---
+// src/pages/admin/communities.astro
+export const prerender = false;
+
+import AdminLayout from "@/layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  import.meta.env.PUBLIC_SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY
+);
+
+const { data: communities } = await supabase
+  .from("communities")
+  .select("id, name, slug, is_active, created_at")
+  .order("created_at", { ascending: false });
+---
+
+<AdminLayout title="Communities">
+  <h1>Communities</h1>
+
+  <table class="admin-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Slug</th>
+        <th>Status</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody>
+      {communities?.map(c => (
+        <tr>
+          <td>{c.name}</td>
+          <td>{c.slug}</td>
+          <td>{c.is_active ? "Active" : "Archived"}</td>
+          <td>{new Date(c.created_at).toLocaleDateString()}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</AdminLayout>
