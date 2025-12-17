@@ -1,12 +1,9 @@
 // src/middleware.ts
 import { defineMiddleware } from "astro:middleware";
-import { createClient } from "@supabase/supabase-js";
+import { supabase, getSession, getUserProfile } from "./lib/supabase";
 
 export const onRequest = defineMiddleware(async (context, next) => {
-  const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
   const masterKey = import.meta.env.ADMIN_MASTER_KEY;
-
   const pathname = context.url.pathname;
   
   // Public routes - no auth required
@@ -34,68 +31,26 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // Master key session is valid - grant full admin access
     context.locals.isMasterKeySession = true;
     context.locals.session = null;
+    context.locals.isAdmin = true;
     return next();
   }
 
-  // Check for regular Supabase session
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return context.redirect('/admin/login');
-  }
+  // Normal authentication using lib/supabase helpers
+  const session = await getSession(context.cookies);
 
-  const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-  // Get session from cookies
-  const accessToken = context.cookies.get("sb-access-token")?.value;
-  const refreshToken = context.cookies.get("sb-refresh-token")?.value;
-
-  let session = null;
-
-  if (accessToken && refreshToken) {
-    const { data, error } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-    if (!error) {
-      session = data.session;
-      
-      // Update cookies if tokens were refreshed
-      if (data.session && data.session.access_token !== accessToken) {
-        context.cookies.set('sb-access-token', data.session.access_token, {
-          path: '/',
-          httpOnly: true,
-          secure: import.meta.env.PROD,
-          sameSite: 'lax',
-          maxAge: 60 * 60 * 24 * 7
-        });
-        context.cookies.set('sb-refresh-token', data.session.refresh_token, {
-          path: '/',
-          httpOnly: true,
-          secure: import.meta.env.PROD,
-          sameSite: 'lax',
-          maxAge: 60 * 60 * 24 * 7
-        });
-      }
-    }
-  }
-
-  // No session - redirect to login
   if (!session) {
     return context.redirect('/admin/login');
   }
 
+  // Get user profile and check admin status
+  const profile = await getUserProfile(session.user.id);
+  
   // Check if user is in admins table
   const { data: adminRecord } = await supabase
     .from("admins")
     .select("id")
     .eq("id", session.user.id)
     .maybeSingle();
-
-  // Also check profile role
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", session.user.id)
-    .single();
 
   const isAdmin = !!adminRecord || profile?.role === "admin";
   const isModerator = profile?.role === "moderator";
@@ -104,7 +59,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const adminOnlyRoutes = ['/admin/users', '/admin/settings', '/admin/messages'];
   const isAdminOnlyRoute = adminOnlyRoutes.some(route => pathname.startsWith(route));
 
-  // Moderator-accessible routes
+  // Moderator-accessible routes  
   const modRoutes = ['/admin/review'];
   const isModRoute = modRoutes.some(route => pathname.startsWith(route));
 
@@ -121,9 +76,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return context.redirect('/unauthorized');
   }
 
-  // Store session info in locals
+  // Store in locals for page access
   context.locals.session = session;
-  context.locals.supabase = supabase;
+  context.locals.profile = profile;
   context.locals.isAdmin = isAdmin;
   context.locals.isModerator = isModerator;
   context.locals.isMasterKeySession = false;
