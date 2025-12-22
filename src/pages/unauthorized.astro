@@ -1,0 +1,125 @@
+---
+// src/pages/unauthorized.astro
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Access Denied - Banity">
+  <style>
+    .unauthorized-container {
+      min-height: 60vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2rem;
+    }
+    
+    .unauthorized-content {
+      max-width: 500px;
+    }
+    
+    .unauthorized-icon {
+      font-size: 5rem;
+      margin-bottom: 1.5rem;
+    }
+    
+    .unauthorized-title {
+      font-family: var(--font-serif, Georgia, serif);
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 1rem;
+    }
+    
+    .unauthorized-message {
+      font-size: 1.125rem;
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 2rem;
+    }
+    
+    .unauthorized-actions {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.875rem 1.5rem;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #1d4ed8;
+      transform: translateY(-2px);
+    }
+    
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+      border: 1px solid #e5e7eb;
+    }
+    
+    .btn-secondary:hover {
+      background: #e5e7eb;
+    }
+    
+    .help-text {
+      margin-top: 2rem;
+      padding-top: 2rem;
+      border-top: 1px solid #e5e7eb;
+      font-size: 0.875rem;
+      color: #9ca3af;
+    }
+    
+    .help-text a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+    
+    .help-text a:hover {
+      text-decoration: underline;
+    }
+  </style>
+
+  <div class="unauthorized-container">
+    <div class="unauthorized-content">
+      <div class="unauthorized-icon">🚫</div>
+      <h1 class="unauthorized-title">Access Denied</h1>
+      <p class="unauthorized-message">
+        You don't have permission to access this page. This area is restricted to administrators and moderators only.
+      </p>
+      
+      <div class="unauthorized-actions">
+        <a href="/" class="btn btn-primary">
+          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+          </svg>
+          Go Home
+        </a>
+        <a href="/admin/login" class="btn btn-secondary">
+          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+          </svg>
+          Admin Login
+        </a>
+      </div>
+      
+      <p class="help-text">
+        If you believe this is an error, please <a href="mailto:support@banity.com">contact support</a>.
+      </p>
+    </div>
+  </div>
+</Layout>
