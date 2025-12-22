@@ -2,7 +2,7 @@
 // src/pages/admin/index.astro
 export const prerender = false;
 
-import { supabase, getSession, getUserProfile } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase';
 
 const masterKey = import.meta.env.ADMIN_MASTER_KEY;
 
@@ -14,35 +14,14 @@ if (Astro.url.searchParams.get('logout') === 'true') {
   return Astro.redirect('/admin/login');
 }
 
-// Check for master key session first (bypasses normal auth)
-const masterSession = Astro.cookies.get('admin-master-session')?.value;
-const isMasterKeySession = masterKey && masterSession === masterKey;
+// Get auth state from middleware (already validated)
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
 
-let session = null;
-let profile = null;
-
-if (!isMasterKeySession) {
-  // Normal authentication flow
-  session = await getSession(Astro.cookies);
-  if (!session) {
-    return Astro.redirect('/admin/login');
-  }
-
-  profile = await getUserProfile(session.user.id);
-
-  // Check if user has admin access (admin role or in admins table)
-  const { data: adminRecord } = await supabase
-    .from('admins')
-    .select('id')
-    .eq('id', session.user.id)
-    .maybeSingle();
-
-  const isAdmin = !!adminRecord || profile?.role === 'admin';
-  const isModerator = profile?.role === 'moderator';
-
-  if (!isAdmin && !isModerator) {
-    return Astro.redirect('/unauthorized');
-  }
+// Safety fallback (middleware should prevent this)
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
 }
 
 // Fetch dashboard stats
