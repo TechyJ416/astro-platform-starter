@@ -113,3 +113,27 @@ export async function isCreator(userId: string): Promise<boolean> {
   const profile = await getUserProfile(userId);
   return profile?.role === 'creator';
 }
+
+// --------------------------------------------------
+// Admin Portal Access Check (combines admins table + profile role)
+// --------------------------------------------------
+export async function hasAdminAccess(userId: string): Promise<{ 
+  isAdmin: boolean; 
+  isModerator: boolean; 
+  profile: any;
+}> {
+  // Check admins table
+  const { data: adminRecord } = await supabase
+    .from('admins')
+    .select('id')
+    .eq('id', userId)
+    .maybeSingle();
+
+  // Get profile
+  const profile = await getUserProfile(userId);
+
+  const isAdmin = !!adminRecord || profile?.role === 'admin';
+  const isModerator = profile?.role === 'moderator';
+
+  return { isAdmin, isModerator, profile };
+}
