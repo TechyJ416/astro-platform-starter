@@ -4,7 +4,7 @@
 
 export const prerender = false;
 
-import { requireAdminRole } from '../lib/auth';
+import { requireAdminRole } from '../../lib/auth';
 import { supabase } from '../lib/supabase';
 
 const authResult = await requireAdminRole(Astro.cookies);
