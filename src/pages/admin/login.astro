@@ -1,12 +1,11 @@
 ---
 // src/pages/admin/login.astro
+---
 export const prerender = false;
 
 import { supabase, getSession, hasAdminAccess } from '../../lib/supabase';
 
 const masterKey = import.meta.env.ADMIN_MASTER_KEY;
-
-// Handle error messages from redirects
 const errorParam = Astro.url.searchParams.get('error');
 const errorMessages: Record<string, string> = {
   session_expired: 'Your session has expired. Please log in again.',
@@ -20,15 +19,12 @@ let errorMessage = errorMessages[errorParam || ''] || '';
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const loginType = form.get('loginType') as string;
-  
+
   if (loginType === 'master_key') {
-    // Master key login
     const submittedKey = form.get('masterKey') as string;
-    
     if (!masterKey) {
       errorMessage = 'Master key not configured on server.';
     } else if (submittedKey === masterKey) {
-      // Set master key session cookie (expires in 24 hours)
       const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
       Astro.cookies.set('admin-master-session', masterKey, {
         path: '/',
@@ -42,39 +38,22 @@ if (Astro.request.method === 'POST') {
       errorMessage = 'Invalid master key.';
     }
   } else {
-    // Regular Supabase login
     const email = form.get('email') as string;
     const password = form.get('password') as string;
-    
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
-    
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       errorMessage = error.message;
     } else if (data.session) {
-      // Check if user has admin access using helper
       const { isAdmin, isModerator } = await hasAdminAccess(data.session.user.id);
-      
       if (!isAdmin && !isModerator) {
         errorMessage = 'You do not have admin access.';
         await supabase.auth.signOut();
       } else {
-        // Set session cookies
         Astro.cookies.set('sb-access-token', data.session.access_token, {
-          path: '/',
-          httpOnly: true,
-          secure: import.meta.env.PROD,
-          sameSite: 'lax',
-          maxAge: 60 * 60 * 24 * 7
+          path: '/', httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', maxAge: 60 * 60 * 24 * 7
         });
         Astro.cookies.set('sb-refresh-token', data.session.refresh_token, {
-          path: '/',
-          httpOnly: true,
-          secure: import.meta.env.PROD,
-          sameSite: 'lax',
-          maxAge: 60 * 60 * 24 * 7
+          path: '/', httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', maxAge: 60 * 60 * 24 * 7
         });
         return Astro.redirect('/admin');
       }
@@ -82,34 +61,25 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-// Check if already logged in via master key
 const masterSession = Astro.cookies.get('admin-master-session')?.value;
-if (masterSession === masterKey && masterKey) {
-  return Astro.redirect('/admin');
-}
+if (masterSession === masterKey && masterKey) return Astro.redirect('/admin');
 
-// Check if already logged in via Supabase
 const session = await getSession(Astro.cookies);
 if (session) {
   const { isAdmin, isModerator } = await hasAdminAccess(session.user.id);
-  
-  if (isAdmin || isModerator) {
-    return Astro.redirect('/admin');
-  }
+  if (isAdmin || isModerator) return Astro.redirect('/admin');
 }
-
 const hasMasterKey = !!masterKey;
 ---
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Login - Banity</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -119,63 +89,60 @@ const hasMasterKey = !!masterKey;
       justify-content: center;
       padding: 1rem;
     }
-    
     .login-container {
-      background: white;
+      background: #fff;
       border-radius: 16px;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
       width: 100%;
-      max-width: 420px;
+      max-width: 400px;
       overflow: hidden;
     }
-    
     .login-header {
       background: #1a1a2e;
       color: white;
-      padding: 2rem;
       text-align: center;
-    }
-    
-    .login-logo {
-      font-size: 2rem;
-      font-weight: 700;
-      margin-bottom: 0.5rem;
-    }
-    
-    .login-subtitle {
-      font-size: 0.875rem;
-      opacity: 0.8;
-    }
-    
-    .login-body {
       padding: 2rem;
     }
-    
-    .tabs {
-      display: flex;
-      border-bottom: 2px solid #f0f0f0;
-      margin-bottom: 1.5rem;
-    }
-    
-    .tab {
-      flex: 1;
-      padding: 0.75rem;
-      text-align: center;
-      cursor: pointer;
-      font-weight: 500;
-      color: #666;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -2px;
-      transition: all 0.2s;
-    }
-    
-    .tab:hover { color: #1a1a2e; }
-    .tab.active { color: #2563eb; border-bottom-color: #2563eb; }
-    
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
-    
+    .login-header h1 { font-size: 1.75rem; font-weight: 700; }
+    .login-body { padding: 2rem; }
     .form-group { margin-bottom: 1.25rem; }
-    
-    .form-label {
-      display: b
+    label { display: block; font-weight: 500; margin-bottom: 0.5rem; }
+    input { width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid #ccc; }
+    button { width: 100%; padding: 0.75rem; border-radius: 8px; border: none; background: #2563eb; color: white; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+    button:hover { background: #1e40af; }
+    .error { color: #b91c1c; margin-bottom: 1rem; font-weight: 500; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-header">
+      <h1>Banity Admin</h1>
+      <p>Login to your account</p>
+    </div>
+    <div class="login-body">
+      {errorMessage && <div class="error">{errorMessage}</div>}
+      <form method="POST">
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" name="email" id="email" required />
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" name="password" id="password" required />
+        </div>
+        <button type="submit">Login</button>
+      </form>
+      {hasMasterKey && (
+        <form method="POST" style="margin-top:1rem;">
+          <input type="hidden" name="loginType" value="master_key" />
+          <div class="form-group">
+            <label for="masterKey">Master Key</label>
+            <input type="password" name="masterKey" id="masterKey" />
+          </div>
+          <button type="submit">Login with Master Key</button>
+        </form>
+      )}
+    </div>
+  </div>
+</body>
+</html>
