@@ -1,8 +1,22 @@
 // src/lib/auth.ts
 // Authentication helpers for Astro pages
 
-import { supabase, getSession, isAdmin, isCreator } from './supabase';
 import type { AstroCookies } from 'astro';
+import { supabase } from '../../lib/supabase';
+
+// --------------------------------------------------
+// Auth & role data (from middleware)
+// --------------------------------------------------
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+const isAdmin = Astro.locals.isAdmin;
+const isModerator = Astro.locals.isModerator;
+
+// Safety fallback (middleware should already enforce this)
+if (!session || (!isAdmin && !isModerator)) {
+  return Astro.redirect('/unauthorized');
+}
+// --------------------------------------------------
 
 export interface User {
   id: string;
