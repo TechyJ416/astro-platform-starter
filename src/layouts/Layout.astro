@@ -1,6 +1,12 @@
 ---
-const { title, session = null, userProfile = null, isUserAdmin = false } = Astro.props;
+import { getAuthSession } from '../lib/auth';
 
+const { title } = Astro.props;
+
+// Fetch user session from cookies
+const session = await getAuthSession(Astro.cookies);
+const userProfile = session?.user ?? null;
+const isUserAdmin = session?.isAdmin ?? false;
 const userRole = userProfile?.role ?? null;
 ---
 <!DOCTYPE html>
