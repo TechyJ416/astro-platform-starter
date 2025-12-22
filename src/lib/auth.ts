@@ -15,6 +15,7 @@ export interface AuthSession {
   isAdmin: boolean;
   isCreator: boolean;
 }
+export const getSessionFromCookies = getAuthSession;
 
 /**
  * Get current authenticated session from cookies
