@@ -3,32 +3,154 @@ import Layout from '../layouts/Layout.astro';
 import { getAuthSession } from '../lib/auth';
 
 const session = await getAuthSession(Astro.cookies);
-const userProfile = session ? { full_name: session.user.name } : {};
+const userProfile = session ? { full_name: session.user.name } : null;
 const isUserAdmin = session?.isAdmin ?? false;
 ---
 
 <Layout title="Home" {session} {userProfile} {isUserAdmin}>
-  <section class="hero" style="text-align:center; padding:4rem 2rem;">
+  <style>
+    .hero {
+      text-align: center;
+      padding: 6rem 2rem 3rem;
+      animation: fadeIn 0.6s ease-out;
+      background: linear-gradient(to bottom, #e0f2fe, #f9fafb);
+      border-radius: 12px;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } }
+
+    .hero h1 {
+      font-family: var(--font-serif);
+      font-size: 4.5rem;
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 1.5rem;
+    }
+
+    .hero-subtitle {
+      font-size: 1.375rem;
+      color: var(--color-muted);
+      max-width: 700px;
+      margin: 0 auto 2.5rem;
+      line-height: 1.6;
+    }
+
+    .hero-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1rem 2rem;
+      background: var(--color-accent);
+      color: white;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 1.0625rem;
+      transition: all 0.3s;
+    }
+
+    .hero-cta:hover {
+      background: #1d4ed8;
+      transform: translateY(-3px);
+      box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
+    }
+
+    .section-title {
+      font-family: var(--font-serif);
+      font-size: 2.5rem;
+      font-weight: 700;
+      text-align: center;
+      margin: 5rem 0 3rem;
+      letter-spacing: -0.02em;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 2.5rem;
+      margin-top: 3rem;
+    }
+
+    .feature-card {
+      background: white;
+      padding: 2.5rem;
+      border-radius: 12px;
+      border: 1px solid var(--color-border);
+      transition: all 0.3s;
+    }
+    .feature-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    }
+    .feature-icon {
+      width: 3rem;
+      height: 3rem;
+      background: var(--color-accent-light);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.5rem;
+    }
+    .feature-card h3 {
+      font-family: var(--font-serif);
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+    .feature-card p {
+      color: var(--color-muted);
+      line-height: 1.7;
+    }
+    .cta-section {
+      text-align: center;
+      padding: 4rem 2rem;
+      margin-top: 3rem;
+      background: #e0f2fe;
+      border-radius: 12px;
+    }
+    .cta-section .hero-subtitle { margin-bottom: 2rem; }
+
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 2.5rem; }
+      .hero-subtitle { font-size: 1.125rem; }
+      .features-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+
+  <section class="hero">
     <h1>Create Authentic Content.<br>Get Paid.</h1>
-    <p>Join thousands of creators partnering with top brands to produce engaging user-generated content that drives real results.</p>
-    <a href="#features" class="hero-cta">Explore Campaigns →</a>
+    <p class="hero-subtitle">
+      Join thousands of creators partnering with top brands to produce engaging user-generated content that drives real results.
+    </p>
+    <a href="#features" class="hero-cta">
+      Explore Campaigns
+    </a>
   </section>
 
-  <section id="features" style="padding:4rem 2rem;">
-    <h2>Why Creators Choose Banity</h2>
-    <div class="features-grid" style="display:grid; gap:2rem; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); margin-top:2rem;">
-      <div class="feature-card" style="background:white; padding:2rem; border-radius:12px; border:1px solid #e5e7eb;">
+  <section id="features">
+    <h2 class="section-title">Why Creators Choose Banity</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">💰</div>
         <h3>Fair Pay</h3>
         <p>Transparent compensation for every campaign. Get paid within 30 days of completing approved deliverables.</p>
       </div>
-      <div class="feature-card" style="background:white; padding:2rem; border-radius:12px; border:1px solid #e5e7eb;">
+      <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
         <h3>Rights Protected</h3>
         <p>You retain ownership of your content. Limited 5-year license ensures your work is used fairly.</p>
       </div>
-      <div class="feature-card" style="background:white; padding:2rem; border-radius:12px; border:1px solid #e5e7eb;">
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
         <h3>Fast Matching</h3>
         <p>Our platform connects you with campaigns that match your audience and style in minutes.</p>
       </div>
     </div>
+  </section>
+
+  <section class="cta-section">
+    <h2 class="section-title">Ready to Get Started?</h2>
+    <p class="hero-subtitle">Join our community of creators and start earning from your content today.</p>
+    <a href="#contact" class="hero-cta">Join Banity →</a>
   </section>
 </Layout>
