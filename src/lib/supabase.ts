@@ -1,11 +1,7 @@
 // src/lib/supabase.ts
-// Supabase client for Astro on Netlify
-// Role-based access via profiles.role (NO admins / creators tables)
-
 import { createClient } from '@supabase/supabase-js';
 import type { AstroCookies } from 'astro';
 
-// Environment variables (Netlify)
 const supabaseUrl = import.meta.env.SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.SUPABASE_ANON_KEY;
 const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_KEY;
@@ -18,10 +14,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // Clients
 // --------------------------------------------------
 
-// Public client (respects RLS)
+// Public client (RLS enforced)
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Admin client (bypasses RLS – use ONLY server-side)
+// Admin client (bypasses RLS – SERVER ONLY)
 export const supabaseAdmin = supabaseServiceKey
   ? createClient(supabaseUrl, supabaseServiceKey)
   : supabase;
@@ -59,7 +55,7 @@ export function setAuthCookies(
     httpOnly: true,
     secure: true,
     sameSite: 'lax' as const,
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    maxAge: 60 * 60 * 24 * 7,
   };
 
   cookies.set('sb-access-token', accessToken, options);
@@ -72,65 +68,35 @@ export function clearAuthCookies(cookies: AstroCookies) {
 }
 
 // --------------------------------------------------
-// Profile & Role Helpers (SOURCE OF TRUTH)
+// Admin Access Check (SERVICE ROLE)
 // --------------------------------------------------
 
-export async function getUserProfile(userId: string) {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
-
-  if (error) {
-    console.error('Profile fetch error:', error.message);
-    return null;
-  }
-
-  return data;
-}
-
-// --------------------------------------------------
-// Role Checks (NO extra tables)
-// --------------------------------------------------
-
-export async function isAdmin(userId: string): Promise<boolean> {
-  const profile = await getUserProfile(userId);
-  return profile?.role === 'admin';
-}
-
-export async function isManager(userId: string): Promise<boolean> {
-  const profile = await getUserProfile(userId);
-  return profile?.role === 'manager' || profile?.role === 'admin';
-}
-
-export async function isModerator(userId: string): Promise<boolean> {
-  const profile = await getUserProfile(userId);
-  return profile?.role === 'moderator' || profile?.role === 'admin';
-}
-
-export async function isCreator(userId: string): Promise<boolean> {
-  const profile = await getUserProfile(userId);
-  return profile?.role === 'creator';
-}
-
-// --------------------------------------------------
-// Admin Portal Access Check (combines admins table + profile role)
-// --------------------------------------------------
-export async function hasAdminAccess(userId: string): Promise<{ 
-  isAdmin: boolean; 
-  isModerator: boolean; 
+export async function hasAdminAccess(userId: string): Promise<{
+  isAdmin: boolean;
+  isModerator: boolean;
   profile: any;
 }> {
-  // Check admins table
-  const { data: adminRecord } = await supabase
+  // Admins table (service role)
+  const { data: adminRecord, error: adminError } = await supabaseAdmin
     .from('admins')
     .select('id')
     .eq('id', userId)
     .maybeSingle();
 
-  // Get profile
-  const profile = await getUserProfile(userId);
+  if (adminError) {
+    console.error('Admin table error:', adminError.message);
+  }
+
+  // Profile (service role)
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single();
+
+  if (profileError) {
+    console.error('Profile fetch error:', profileError.message);
+  }
 
   const isAdmin = !!adminRecord || profile?.role === 'admin';
   const isModerator = profile?.role === 'moderator';
