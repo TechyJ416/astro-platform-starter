@@ -1,8 +1,6 @@
 // src/lib/auth.ts
-// Authentication helpers for Astro pages
-
 import type { AstroCookies } from 'astro';
-import { supabase } from './supabase'; // make sure the path is correct
+import { supabase } from './supabase'; // ensure this path is correct
 
 export interface User {
   id: string;
@@ -15,42 +13,85 @@ export interface AuthSession {
   isAdmin: boolean;
   isCreator: boolean;
 }
-export const getSessionFromCookies = getAuthSession;
+
+/**
+ * Check if a user is an admin
+ */
+export async function isAdmin(userId: string): Promise<boolean> {
+  if (!userId) return false;
+
+  const { data, error } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', userId)
+    .single();
+
+  if (error || !data) return false;
+
+  return data.role === 'admin';
+}
+
+/**
+ * Check if a user is a creator
+ */
+export async function isCreator(userId: string): Promise<boolean> {
+  if (!userId) return false;
+
+  const { data, error } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', userId)
+    .single();
+
+  if (error || !data) return false;
+
+  return data.role === 'creator';
+}
 
 /**
  * Get current authenticated session from cookies
  */
 export async function getAuthSession(cookies: AstroCookies): Promise<AuthSession | null> {
-  // Replace with your actual getSession logic
-  const session = await supabase.auth.getSession(); // or your wrapper
+  // Replace with your actual Supabase auth session retrieval
+  const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
 
   const user = session.user;
+
   const [adminCheck, creatorCheck] = await Promise.all([
     isAdmin(user.id),
     isCreator(user.id),
   ]);
 
   return {
-    user: { id: user.id, email: user.email || '', name: user.user_metadata?.name },
+    user: {
+      id: user.id,
+      email: user.email || '',
+      name: user.user_metadata?.name,
+    },
     isAdmin: adminCheck,
     isCreator: creatorCheck,
   };
 }
 
 /**
- * Require authentication
+ * Alias for backwards compatibility
+ */
+export const getSessionFromCookies = getAuthSession;
+
+/**
+ * Require authentication - returns session or throws
  */
 export async function requireAuth(cookies: AstroCookies): Promise<AuthSession> {
   const session = await getAuthSession(cookies);
-  if (!session) throw new Error('Unauthorized'); // page handles redirect
+  if (!session) throw new Error('Unauthorized');
   return session;
 }
 
 /**
  * Require admin role
  */
-export async function requireAdminRole(cookies: AstroCookies): Promise<AuthSession> {
+export async function requireAdmin(cookies: AstroCookies): Promise<AuthSession> {
   const session = await getAuthSession(cookies);
   if (!session || !session.isAdmin) throw new Error('Unauthorized');
   return session;
@@ -59,7 +100,7 @@ export async function requireAdminRole(cookies: AstroCookies): Promise<AuthSessi
 /**
  * Require creator role
  */
-export async function requireCreatorRole(cookies: AstroCookies): Promise<AuthSession> {
+export async function requireCreator(cookies: AstroCookies): Promise<AuthSession> {
   const session = await getAuthSession(cookies);
   if (!session || !session.isCreator) throw new Error('Unauthorized');
   return session;
