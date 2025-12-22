@@ -1,58 +1,161 @@
 ---
-const { title = '', session = null, userProfile = {}, isUserAdmin = false } = Astro.props;
+const { title, session = null, userProfile = null, isUserAdmin = false } = Astro.props;
 const userRole = userProfile?.role ?? null;
 ---
-<div class="layout">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title} - Banity</title>
+  <meta name="description" content="Banity connects creators with brands for authentic UGC campaigns.">
 
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --font-serif: 'Crimson Pro', serif;
+      --font-sans: 'DM Sans', sans-serif;
+      --color-accent: #2563eb;
+      --color-accent-light: #dbeafe;
+      --color-muted: #6b7280;
+      --color-border: #e5e7eb;
+      --color-background: #f9fafb;
+    }
+
+    body {
+      margin: 0;
+      font-family: var(--font-sans);
+      background: var(--color-background);
+      color: #111827;
+    }
+
+    a { text-decoration: none; }
+
+    .site-header {
+      width: 100%;
+      background: white;
+      padding: 1rem 2rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo { font-family: var(--font-serif); font-size: 1.5rem; font-weight: 700; color: var(--color-accent); }
+
+    .nav-links { display: flex; gap: 1.5rem; align-items: center; }
+    .nav-link { color: #111827; font-weight: 500; transition: color 0.2s; }
+    .nav-link:hover { color: var(--color-accent); }
+    .portal-link { font-weight: 600; }
+
+    .nav-right { display: flex; align-items: center; gap: 1rem; }
+    .cta-btn { padding: 0.5rem 1.5rem; background: var(--color-accent); color: white; border-radius: 8px; font-weight: 600; }
+    .cta-btn:hover { background: #1d4ed8; }
+
+    .user-menu {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 500;
+    }
+
+    .user-avatar {
+      width: 2rem;
+      height: 2rem;
+      background: var(--color-accent-light);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: var(--color-accent);
+      text-transform: uppercase;
+    }
+
+    .role-badge {
+      padding: 0.1rem 0.5rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      text-transform: capitalize;
+      color: white;
+    }
+
+    .role-badge.manager { background: #f59e0b; }
+    .role-badge.moderator { background: #10b981; }
+
+    main { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+
+    .footer {
+      width: 100%;
+      background: white;
+      border-top: 1px solid var(--color-border);
+      padding: 2rem;
+      margin-top: 4rem;
+    }
+    .footer-inner { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+    .footer-text { font-size: 0.875rem; color: var(--color-muted); }
+    .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+    .footer-link { font-size: 0.875rem; color: var(--color-muted); transition: color 0.2s; }
+    .footer-link:hover { color: var(--color-accent); }
+  </style>
+</head>
+<body>
   <header class="site-header">
     <div class="header-inner">
       <a href="/" class="logo">Banity</a>
+
       <nav class="nav-links">
         <a href="/" class="nav-link">Home</a>
         <a href="/campaigns" class="nav-link">Campaigns</a>
         <a href="/community" class="nav-link">Community</a>
+
         {isUserAdmin && <a href="/admin" class="nav-link portal-link">Admin Portal</a>}
         {userRole === 'manager' && <a href="/campaigns/manage" class="nav-link portal-link">Manager Portal</a>}
         {userRole === 'moderator' && <a href="/admin/review" class="nav-link portal-link">Mod Queue</a>}
       </nav>
+
       <div class="nav-right">
         {session ? (
           <div class="user-menu">
-            <div class="user-avatar">{userProfile?.full_name?.charAt(0)?.toUpperCase() || 'U'}</div>
-            <span>{userProfile?.display_name || userProfile?.full_name || 'User'}</span>
+            <div class="user-avatar">
+              {userProfile?.full_name?.charAt(0) || session.user.email?.charAt(0).toUpperCase()}
+            </div>
+            <span class="user-name">{userProfile?.full_name || 'User'}</span>
             {userRole && <span class={`role-badge ${userRole}`}>{userRole}</span>}
           </div>
         ) : (
-          <a href="/clips" class="hero-cta">Join Banity</a>
+          <a href="/clips" class="cta-btn">Join Banity</a>
         )}
       </div>
     </div>
   </header>
 
-  <main style="min-height: 70vh;">
+  <main>
     <slot />
   </main>
 
   <footer class="footer">
-    <p>© 2025 Banity Ltd. All rights reserved.</p>
-    <nav class="footer-links">
-      <a href="/">Home</a>
-      <a href="/campaigns">Campaigns</a>
-      <a href="/community">Community</a>
-      <a href="/legal">Legal</a>
-    </nav>
+    <div class="footer-inner">
+      <p class="footer-text">© 2025 Banity Ltd. All rights reserved.</p>
+      <nav class="footer-links">
+        <a href="/" class="footer-link">Home</a>
+        <a href="/campaigns" class="footer-link">Campaigns</a>
+        <a href="/community" class="footer-link">Community</a>
+        <a href="/legal" class="footer-link">Legal</a>
+      </nav>
+    </div>
   </footer>
-</div>
-
-<style>
-/* Basic styling, add back your fonts, colors, etc. */
-.layout { font-family: 'DM Sans', sans-serif; color: #111827; background: #f8f9fa; }
-.site-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; background: white; }
-.header-inner { display: flex; justify-content: space-between; width: 100%; max-width: 1200px; margin: 0 auto; }
-.nav-links { display: flex; gap: 1rem; }
-.nav-link { font-weight: 500; }
-.nav-right { display: flex; align-items: center; gap: 1rem; }
-.hero-cta { padding: 0.75rem 1.5rem; background: #2563eb; color: white; border-radius: 8px; font-weight: 600; }
-.main { min-height: 70vh; }
-.footer { padding: 2rem; text-align: center; border-top: 1px solid #e5e7eb; margin-top: 2rem; }
-</style>
+</body>
+</html>
