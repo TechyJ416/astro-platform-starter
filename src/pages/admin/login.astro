@@ -29,7 +29,6 @@ if (Astro.request.method === 'POST') {
   const loginType = form.get('loginType') as string;
   
   if (loginType === 'master_key') {
-    // Master key login
     const submittedKey = form.get('masterKey') as string;
     
     if (!masterKey) {
@@ -37,20 +36,18 @@ if (Astro.request.method === 'POST') {
     } else if (!submittedKey) {
       errorMessage = 'Please enter the master key.';
     } else if (submittedKey === masterKey) {
-      // Set master key session cookie (expires in 24 hours)
       Astro.cookies.set('admin-master-session', masterKey, {
         path: '/',
         httpOnly: true,
         secure: import.meta.env.PROD,
         sameSite: 'lax',
-        maxAge: 60 * 60 * 24 // 24 hours
+        maxAge: 60 * 60 * 24
       });
       return Astro.redirect('/admin');
     } else {
       errorMessage = 'Invalid master key.';
     }
   } else {
-    // Regular Supabase login
     const email = form.get('email') as string;
     const password = form.get('password') as string;
     
@@ -71,7 +68,6 @@ if (Astro.request.method === 'POST') {
           errorMessage = 'You do not have admin access.';
           await supabase.auth.signOut();
         } else {
-          // Set session cookies
           Astro.cookies.set('sb-access-token', data.session.access_token, {
             path: '/',
             httpOnly: true,
@@ -146,13 +142,12 @@ if (Astro.request.method === 'POST') {
       cursor: pointer;
       font-weight: 500;
       color: #666;
+      border: none;
       border-bottom: 2px solid transparent;
       margin-bottom: -2px;
       transition: all 0.2s;
-      background: none;
-      border-left: none;
-      border-right: none;
-      border-top: none;
+      background: transparent;
+      font-size: 1rem;
     }
     
     .tab:hover { color: #1a1a2e; }
@@ -262,62 +257,9 @@ if (Astro.request.method === 'POST') {
       {errorMessage && <div class="alert error">{errorMessage}</div>}
       
       <div class="tabs">
-        <button type="button" class="tab active" data-tab="credentials">Email Login</button>
-        <button type="button" class="tab" data-tab="master">Master Key</button>
+        <div class="tab active" onclick="showTab('credentials')">Email Login</div>
+        <div class="tab" onclick="showTab('master')">Master Key</div>
       </div>
       
-      <!-- Email/Password Login - SEPARATE FORM -->
-      <div id="credentials-tab" class="tab-content active">
-        <form method="POST">
-          <input type="hidden" name="loginType" value="credentials" />
-          
-          <div class="form-group">
-            <label for="email" class="form-label">Email</label>
-            <input type="email" id="email" name="email" class="form-input" placeholder="admin@example.com" />
-          </div>
-          
-          <div class="form-group">
-            <label for="password" class="form-label">Password</label>
-            <input type="password" id="password" name="password" class="form-input" placeholder="••••••••" />
-          </div>
-          
-          <button type="submit" class="submit-btn">Sign In</button>
-        </form>
-        
-        <a href="/admin/setup" class="setup-link">First time? Set up admin account →</a>
-      </div>
-      
-      <!-- Master Key Login - SEPARATE FORM -->
-      <div id="master-tab" class="tab-content">
-        {hasMasterKey ? (
-          <>
-            <div class="master-key-info">
-              ⚠️ Master key login bypasses normal authentication. Use only for emergency access or initial setup.
-            </div>
-            
-            <form method="POST">
-              <input type="hidden" name="loginType" value="master_key" />
-              
-              <div class="form-group">
-                <label for="masterKey" class="form-label">Master Key</label>
-                <input type="password" id="masterKey" name="masterKey" class="form-input" placeholder="Enter master key" autocomplete="off" />
-              </div>
-              
-              <button type="submit" class="submit-btn master">Access with Master Key</button>
-            </form>
-          </>
-        ) : (
-          <div class="no-master-key">
-            <p>Master key is not configured.</p>
-            <p style="margin-top: 0.5rem; font-size: 0.75rem;">
-              Add <code>ADMIN_MASTER_KEY</code> to your environment variables.
-            </p>
-          </div>
-        )}
-      </div>
-      
-      <a href="/" class="back-link">← Back to Site</a>
-    </div>
-  </div>
-  
-  <script>
+      <!-- Email/Password Login -->
+      <div id="credentials-tab" cl
