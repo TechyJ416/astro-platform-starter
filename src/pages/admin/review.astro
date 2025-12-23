@@ -5,7 +5,7 @@ export const prerender = false;
 import AdminLayout from "../../layouts/AdminLayout.astro";
 import { supabase } from '../../lib/supabase';
 
-// Auth from middleware - CHECK MASTER KEY SESSION TOO
+// Auth from middleware
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
 const session = Astro.locals.session;
 const isAdmin = Astro.locals.isAdmin;
@@ -32,7 +32,6 @@ if (Astro.request.method === 'POST') {
     else if (action === 'reject') newStatus = 'rejected';
     else if (action === 'revision') newStatus = 'revision_requested';
 
-    // For master key sessions, use a placeholder reviewer ID
     const reviewerId = session?.user?.id || 'master-key-admin';
 
     const { error } = await supabase
@@ -69,133 +68,627 @@ const { data: recentlyReviewed } = await supabase
   .from('posts')
   .select(`
     *,
-    profiles!creator_id(full_name),
+    profiles!creator_id(full_name, avatar_url),
     campaigns(title)
   `)
   .neq('status', 'pending')
   .order('reviewed_at', { ascending: false })
   .limit(10);
+
+// Stats
+const pendingCount = pendingPosts?.length || 0;
+const approvedToday = recentlyReviewed?.filter(p => {
+  const reviewDate = new Date(p.reviewed_at);
+  const today = new Date();
+  return p.status === 'approved' && reviewDate.toDateString() === today.toDateString();
+}).length || 0;
+const rejectedToday = recentlyReviewed?.filter(p => {
+  const reviewDate = new Date(p.reviewed_at);
+  const today = new Date();
+  return p.status === 'rejected' && reviewDate.toDateString() === today.toDateString();
+}).length || 0;
+
+// View state
+const view = Astro.url.searchParams.get('view') || 'pending';
 ---
 
 <AdminLayout title="Review Queue">
   {actionMessage && <div class="alert success">{actionMessage}</div>}
   {actionError && <div class="alert error">{actionError}</div>}
   
-  <div class="panel">
-    <div class="panel-header">
-      <h2 class="panel-title">Pending Reviews ({pendingPosts?.length || 0})</h2>
-    </div>
-    
-    {pendingPosts && pendingPosts.length > 0 ? (
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>Post</th>
-            <th>Creator</th>
-            <th>Campaign</th>
-            <th>Submitted</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pendingPosts.map(post => (
-            <tr>
-              <td>
-                <strong>{post.title || 'Untitled'}</strong>
-                {post.media_url && (
-                  <div style="margin-top: 0.25rem;">
-                    <a href={post.media_url} target="_blank" class="btn btn-sm btn-secondary">View Media</a>
-                  </div>
-                )}
-              </td>
-              <td>
-                <div>{post.profiles?.full_name || 'Unknown'}</div>
-                <div style="font-size: 0.75rem; color: #666;">{post.profiles?.email}</div>
-              </td>
-              <td>{post.campaigns?.title || '—'}</td>
-              <td>{new Date(post.created_at).toLocaleDateString()}</td>
-              <td>
-                <form method="POST" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                  <input type="hidden" name="postId" value={post.id} />
-                  <button type="submit" name="action" value="approve" class="btn btn-sm btn-success">✓ Approve</button>
-                  <button type="submit" name="action" value="reject" class="btn btn-sm btn-danger">✗ Reject</button>
-                  <button type="submit" name="action" value="revision" class="btn btn-sm btn-secondary">↻ Revision</button>
-                </form>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    ) : (
-      <div class="empty-state">
-        <div class="empty-state-icon">🎉</div>
-        <div class="empty-state-title">All caught up!</div>
-        <p>No posts pending review.</p>
+  <!-- Stats Cards -->
+  <div class="stats-grid">
+    <div class="stat-card urgent">
+      <div class="stat-icon">⏳</div>
+      <div class="stat-content">
+        <div class="stat-value">{pendingCount}</div>
+        <div class="stat-label">Pending Review</div>
       </div>
-    )}
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">✅</div>
+      <div class="stat-content">
+        <div class="stat-value">{approvedToday}</div>
+        <div class="stat-label">Approved Today</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">❌</div>
+      <div class="stat-content">
+        <div class="stat-value">{rejectedToday}</div>
+        <div class="stat-label">Rejected Today</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">📊</div>
+      <div class="stat-content">
+        <div class="stat-value">{approvedToday + rejectedToday}</div>
+        <div class="stat-label">Reviewed Today</div>
+      </div>
+    </div>
   </div>
   
-  <div class="panel" style="margin-top: 2rem;">
-    <div class="panel-header">
-      <h2 class="panel-title">Recently Reviewed</h2>
-    </div>
-    
-    {recentlyReviewed && recentlyReviewed.length > 0 ? (
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>Post</th>
-            <th>Creator</th>
-            <th>Campaign</th>
-            <th>Status</th>
-            <th>Reviewed</th>
-          </tr>
-        </thead>
-        <tbody>
-          {recentlyReviewed.map(post => (
-            <tr>
-              <td>{post.title || 'Untitled'}</td>
-              <td>{post.profiles?.full_name || 'Unknown'}</td>
-              <td>{post.campaigns?.title || '—'}</td>
-              <td><span class={`badge ${post.status}`}>{post.status}</span></td>
-              <td>{post.reviewed_at ? new Date(post.reviewed_at).toLocaleDateString() : '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    ) : (
-      <div class="empty-state">
-        <p>No recently reviewed posts.</p>
-      </div>
-    )}
+  <!-- View Toggle -->
+  <div class="view-toggle">
+    <a href="/admin/review" class:list={["toggle-btn", { active: view === 'pending' }]}>
+      <span>⏳</span> Pending ({pendingCount})
+    </a>
+    <a href="/admin/review?view=history" class:list={["toggle-btn", { active: view === 'history' }]}>
+      <span>📜</span> History
+    </a>
   </div>
+  
+  {view === 'pending' ? (
+    <!-- Pending Reviews -->
+    pendingPosts && pendingPosts.length > 0 ? (
+      <div class="review-grid">
+        {pendingPosts.map((post, index) => (
+          <div class="review-card">
+            <div class="review-header">
+              <div class="review-number">#{index + 1}</div>
+              <div class="review-time">
+                <span>🕐</span> {Math.floor((Date.now() - new Date(post.created_at).getTime()) / (1000 * 60 * 60))}h ago
+              </div>
+            </div>
+            
+            <!-- Media Preview -->
+            <div class="review-media">
+              {post.media_url ? (
+                post.media_type === 'video' ? (
+                  <video src={post.media_url} controls class="media-preview"></video>
+                ) : (
+                  <img src={post.media_url} alt={post.title} class="media-preview" />
+                )
+              ) : (
+                <div class="media-placeholder">
+                  <span>📄</span>
+                  <span>No media</span>
+                </div>
+              )}
+            </div>
+            
+            <!-- Post Info -->
+            <div class="review-body">
+              <h3 class="review-title">{post.title || 'Untitled Post'}</h3>
+              
+              {post.caption && (
+                <p class="review-caption">
+                  {post.caption.substring(0, 150)}{post.caption.length > 150 ? '...' : ''}
+                </p>
+              )}
+              
+              <!-- Creator Info -->
+              <div class="creator-info">
+                <div class="creator-avatar">
+                  {post.profiles?.avatar_url ? (
+                    <img src={post.profiles.avatar_url} alt={post.profiles.full_name} />
+                  ) : (
+                    <span>{post.profiles?.full_name?.charAt(0) || '?'}</span>
+                  )}
+                </div>
+                <div class="creator-details">
+                  <div class="creator-name">{post.profiles?.full_name || 'Unknown Creator'}</div>
+                  <div class="creator-email">{post.profiles?.email}</div>
+                </div>
+              </div>
+              
+              <!-- Campaign Info -->
+              {post.campaigns && (
+                <div class="campaign-tag">
+                  <span>📢</span> {post.campaigns.title}
+                </div>
+              )}
+            </div>
+            
+            <!-- Review Actions -->
+            <div class="review-actions">
+              <form method="POST" class="review-form">
+                <input type="hidden" name="postId" value={post.id} />
+                
+                <div class="notes-field">
+                  <input 
+                    type="text" 
+                    name="notes" 
+                    placeholder="Add review notes (optional)" 
+                    class="notes-input"
+                  />
+                </div>
+                
+                <div class="action-buttons">
+                  <button type="submit" name="action" value="approve" class="btn btn-success">
+                    <span>✓</span> Approve
+                  </button>
+                  <button type="submit" name="action" value="revision" class="btn btn-warning">
+                    <span>↻</span> Revision
+                  </button>
+                  <button type="submit" name="action" value="reject" class="btn btn-danger">
+                    <span>✗</span> Reject
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        ))}
+      </div>
+    ) : (
+      <div class="panel">
+        <div class="empty-state">
+          <div class="empty-state-icon">🎉</div>
+          <div class="empty-state-title">All caught up!</div>
+          <p>No posts are waiting for review. Great job!</p>
+        </div>
+      </div>
+    )
+  ) : (
+    <!-- Review History -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Review History</h2>
+      </div>
+      
+      {recentlyReviewed && recentlyReviewed.length > 0 ? (
+        <div class="history-list">
+          {recentlyReviewed.map(post => (
+            <div class="history-item">
+              <div class="history-avatar">
+                {post.profiles?.avatar_url ? (
+                  <img src={post.profiles.avatar_url} alt={post.profiles.full_name} />
+                ) : (
+                  <span>{post.profiles?.full_name?.charAt(0) || '?'}</span>
+                )}
+              </div>
+              
+              <div class="history-content">
+                <div class="history-title">
+                  {post.title || 'Untitled Post'}
+                  <span class={`status-badge status-${post.status}`}>
+                    {post.status === 'approved' ? '✓ Approved' : 
+                     post.status === 'rejected' ? '✗ Rejected' : 
+                     '↻ Revision'}
+                  </span>
+                </div>
+                <div class="history-meta">
+                  <span>{post.profiles?.full_name}</span>
+                  <span>•</span>
+                  <span>{post.campaigns?.title}</span>
+                  <span>•</span>
+                  <span>{new Date(post.reviewed_at).toLocaleString()}</span>
+                </div>
+                {post.review_notes && (
+                  <div class="history-notes">
+                    <strong>Notes:</strong> {post.review_notes}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div class="empty-state">
+          <div class="empty-state-icon">📜</div>
+          <div class="empty-state-title">No review history</div>
+          <p>Reviewed posts will appear here.</p>
+        </div>
+      )}
+    </div>
+  )}
+  
+  <style>
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    
+    .stat-card {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    
+    .stat-card.urgent {
+      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+      border: 2px solid #f59e0b;
+    }
+    
+    .stat-card.urgent .stat-icon {
+      background: #f59e0b;
+      color: white;
+    }
+    
+    .stat-icon {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+    }
+    
+    .stat-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+    
+    .stat-label {
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+    
+    .view-toggle {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 2rem;
+      background: white;
+      padding: 0.5rem;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      width: fit-content;
+    }
+    
+    .toggle-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #6b7280;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    
+    .toggle-btn:hover {
+      background: #f3f4f6;
+      color: #1a1a2e;
+    }
+    
+    .toggle-btn.active {
+      background: #2563eb;
+      color: white;
+    }
+    
+    .review-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+      gap: 1.5rem;
+    }
+    
+    .review-card {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      overflow: hidden;
+    }
+    
+    .review-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.25rem;
+      background: #f9fafb;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .review-number {
+      font-weight: 700;
+      color: #2563eb;
+      font-size: 0.875rem;
+    }
+    
+    .review-time {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    
+    .review-media {
+      aspect-ratio: 16/9;
+      background: #f3f4f6;
+      position: relative;
+    }
+    
+    .media-preview {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    
+    .media-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      color: #9ca3af;
+    }
+    
+    .media-placeholder span:first-child {
+      font-size: 2rem;
+    }
+    
+    .review-body {
+      padding: 1.25rem;
+    }
+    
+    .review-title {
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+    
+    .review-caption {
+      font-size: 0.875rem;
+      color: #6b7280;
+      line-height: 1.5;
+      margin-bottom: 1rem;
+    }
+    
+    .creator-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 8px;
+      margin-bottom: 0.75rem;
+    }
+    
+    .creator-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #dbeafe 0%, #c7d2fe 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: #2563eb;
+      overflow: hidden;
+    }
+    
+    .creator-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    
+    .creator-name {
+      font-weight: 600;
+      color: #1a1a2e;
+      font-size: 0.875rem;
+    }
+    
+    .creator-email {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+    
+    .campaign-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.375rem 0.75rem;
+      background: #dbeafe;
+      color: #2563eb;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    
+    .review-actions {
+      padding: 1rem 1.25rem;
+      background: #f9fafb;
+      border-top: 1px solid #f0f0f0;
+    }
+    
+    .review-form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    
+    .notes-field {
+      width: 100%;
+    }
+    
+    .notes-input {
+      width: 100%;
+      padding: 0.625rem 0.875rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      transition: border-color 0.2s;
+    }
+    
+    .notes-input:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+    
+    .action-buttons {
+      display: flex;
+      gap: 0.5rem;
+    }
+    
+    .action-buttons .btn {
+      flex: 1;
+      justify-content: center;
+    }
+    
+    .btn-warning {
+      background: #f59e0b;
+      color: white;
+    }
+    
+    .btn-warning:hover {
+      background: #d97706;
+    }
+    
+    /* History styles */
+    .history-list {
+      padding: 0;
+    }
+    
+    .history-item {
+      display: flex;
+      gap: 1rem;
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .history-item:last-child {
+      border-bottom: none;
+    }
+    
+    .history-item:hover {
+      background: #f9fafb;
+    }
+    
+    .history-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #dbeafe 0%, #c7d2fe 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: #2563eb;
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+    
+    .history-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    
+    .history-content {
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .history-title {
+      font-weight: 600;
+      color: #1a1a2e;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    
+    .status-badge {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    
+    .status-approved {
+      background: #d1fae5;
+      color: #059669;
+    }
+    
+    .status-rejected {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+    
+    .status-revision_requested {
+      background: #fef3c7;
+      color: #d97706;
+    }
+    
+    .history-meta {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      margin-top: 0.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    
+    .history-notes {
+      margin-top: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      background: #f3f4f6;
+      border-radius: 6px;
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      color: #6b7280;
+    }
+    
+    .empty-state-icon {
+      font-size: 4rem;
+      margin-bottom: 1rem;
+    }
+    
+    .empty-state-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.5rem;
+    }
+    
+    @media (max-width: 1024px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    
+    @media (max-width: 768px) {
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .review-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .action-buttons {
+        flex-direction: column;
+      }
+    }
+  </style>
 </AdminLayout>
-```
-
----
-
-## Summary of Fixes
-
-| File | Issue | Fix |
-|------|-------|-----|
-| `AdminLayout.astro` | Missing/no CSS | Complete layout with all admin styles |
-| `users.astro` | Wrong env var, no master key check | Use shared supabase, check `isMasterKeySession` |
-| `communities.astro` | Same as above | Same fixes |
-| `campaigns.astro` | Didn't exist (404) | Created new page |
-| `review.astro` | `!session` fails for master key | Check `isMasterKeySession \|\| session` |
-
----
-
-## File Structure
-```
-src/
-├── layouts/
-│   └── AdminLayout.astro    ← UPDATED (full CSS)
-└── pages/
-    └── admin/
-        ├── index.astro      ← Dashboard (already working)
-        ├── login.astro      ← Login (already fixed)
-        ├── users.astro      ← FIXED
-        ├── communities.astro ← FIXED
-        ├── campaigns.astro  ← NEW
-        └── review.astro     ← FIXED
