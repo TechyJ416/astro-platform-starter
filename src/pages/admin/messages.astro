@@ -3,40 +3,107 @@
 export const prerender = false;
 
 import AdminLayout from "../../layouts/AdminLayout.astro";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "../../lib/supabase";
 
-const supabase = createClient(
-  import.meta.env.PUBLIC_SUPABASE_URL,
-  import.meta.env.SUPABASE_SERVICE_KEY
-);
+// Auth from middleware
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
 
-const { data: messages } = await supabase
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+// Handle mark as read
+let actionMessage = '';
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const messageId = form.get('messageId') as string;
+  const action = form.get('action') as string;
+  
+  if (messageId && action === 'mark_read') {
+    await supabase
+      .from('messages')
+      .update({ is_read: true })
+      .eq('id', messageId);
+    actionMessage = 'Message marked as read.';
+  } else if (messageId && action === 'delete') {
+    await supabase
+      .from('messages')
+      .delete()
+      .eq('id', messageId);
+    actionMessage = 'Message deleted.';
+  }
+}
+
+const { data: messages, error } = await supabase
   .from("messages")
   .select("id, email, subject, body, created_at, is_read")
   .order("created_at", { ascending: false });
+
+const unreadCount = messages?.filter(m => !m.is_read).length || 0;
 ---
 
 <AdminLayout title="Messages">
-  <h1>Messages</h1>
-
-  <table class="admin-table">
-    <thead>
-      <tr>
-        <th>From</th>
-        <th>Subject</th>
-        <th>Status</th>
-        <th>Date</th>
-      </tr>
-    </thead>
-    <tbody>
-      {messages?.map(msg => (
-        <tr>
-          <td>{msg.email}</td>
-          <td>{msg.subject}</td>
-          <td>{msg.is_read ? "Read" : "Unread"}</td>
-          <td>{new Date(msg.created_at).toLocaleString()}</td>
-        </tr>
-      ))}
-    </tbody>
-  </table>
+  {actionMessage && <div class="alert success">{actionMessage}</div>}
+  {error && <div class="alert error">{error.message}</div>}
+  
+  <div class="panel">
+    <div class="panel-header">
+      <h2 class="panel-title">Inbox {unreadCount > 0 && <span class="badge pending">{unreadCount} unread</span>}</h2>
+    </div>
+    
+    {messages && messages.length > 0 ? (
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>From</th>
+            <th>Subject</th>
+            <th>Status</th>
+            <th>Date</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {messages.map(msg => (
+            <tr style={!msg.is_read ? 'background: #fef3c7;' : ''}>
+              <td>{msg.email}</td>
+              <td>
+                <strong>{msg.subject || '(No subject)'}</strong>
+                {msg.body && (
+                  <div style="font-size: 0.75rem; color: #666; margin-top: 0.25rem; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    {msg.body.substring(0, 100)}...
+                  </div>
+                )}
+              </td>
+              <td>
+                <span class={`badge ${msg.is_read ? 'active' : 'pending'}`}>
+                  {msg.is_read ? 'Read' : 'Unread'}
+                </span>
+              </td>
+              <td>{new Date(msg.created_at).toLocaleString()}</td>
+              <td>
+                <form method="POST" style="display: flex; gap: 0.5rem;">
+                  <input type="hidden" name="messageId" value={msg.id} />
+                  {!msg.is_read && (
+                    <button type="submit" name="action" value="mark_read" class="btn btn-sm btn-secondary">
+                      ✓ Mark Read
+                    </button>
+                  )}
+                  <button type="submit" name="action" value="delete" class="btn btn-sm btn-danger" onclick="return confirm('Delete this message?')">
+                    ✗ Delete
+                  </button>
+                </form>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ) : (
+      <div class="empty-state">
+        <div class="empty-state-icon">📭</div>
+        <div class="empty-state-title">No messages</div>
+        <p>Messages from the contact form will appear here.</p>
+      </div>
+    )}
+  </div>
 </AdminLayout>
