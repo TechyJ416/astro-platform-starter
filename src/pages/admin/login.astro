@@ -1,35 +1,108 @@
 ---
-import { handleAdminLogin } from '../../lib/adminAuth.js';
+// src/pages/admin/login.astro
 export const prerender = false;
 
+import { supabase, getSession, hasAdminAccess } from '../../lib/supabase';
+
+const masterKey = import.meta.env.ADMIN_MASTER_KEY;
+const hasMasterKey = !!masterKey;
+
 let errorMessage = '';
-let redirectUrl = '';
 
+// Check if already logged in
+const masterSession = Astro.cookies.get('admin-master-session')?.value;
+if (masterSession === masterKey && masterKey) {
+  return Astro.redirect('/admin');
+}
+
+const session = await getSession(Astro.cookies);
+if (session) {
+  const { isAdmin, isModerator } = await hasAdminAccess(session.user.id);
+  if (isAdmin || isModerator) {
+    return Astro.redirect('/admin');
+  }
+}
+
+// Handle form submission
 if (Astro.request.method === 'POST') {
-  const result = await handleAdminLogin({ 
-    request: Astro.request, 
-    cookies: Astro.cookies, 
-    masterKey: import.meta.env.ADMIN_MASTER_KEY 
-  });
-  errorMessage = result.error || '';
-  redirectUrl = result.redirect || '';
+  const form = await Astro.request.formData();
+  const loginType = form.get('loginType') as string;
+  
+  if (loginType === 'master_key') {
+    // Master key login
+    const submittedKey = form.get('masterKey') as string;
+    
+    if (!masterKey) {
+      errorMessage = 'Master key not configured on server.';
+    } else if (!submittedKey) {
+      errorMessage = 'Please enter the master key.';
+    } else if (submittedKey === masterKey) {
+      // Set master key session cookie (expires in 24 hours)
+      Astro.cookies.set('admin-master-session', masterKey, {
+        path: '/',
+        httpOnly: true,
+        secure: import.meta.env.PROD,
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 // 24 hours
+      });
+      return Astro.redirect('/admin');
+    } else {
+      errorMessage = 'Invalid master key.';
+    }
+  } else {
+    // Regular Supabase login
+    const email = form.get('email') as string;
+    const password = form.get('password') as string;
+    
+    if (!email || !password) {
+      errorMessage = 'Email and password are required.';
+    } else {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+      
+      if (error) {
+        errorMessage = error.message;
+      } else if (data.session) {
+        const { isAdmin, isModerator } = await hasAdminAccess(data.session.user.id);
+        
+        if (!isAdmin && !isModerator) {
+          errorMessage = 'You do not have admin access.';
+          await supabase.auth.signOut();
+        } else {
+          // Set session cookies
+          Astro.cookies.set('sb-access-token', data.session.access_token, {
+            path: '/',
+            httpOnly: true,
+            secure: import.meta.env.PROD,
+            sameSite: 'lax',
+            maxAge: 60 * 60 * 24 * 7
+          });
+          Astro.cookies.set('sb-refresh-token', data.session.refresh_token, {
+            path: '/',
+            httpOnly: true,
+            secure: import.meta.env.PROD,
+            sameSite: 'lax',
+            maxAge: 60 * 60 * 24 * 7
+          });
+          return Astro.redirect('/admin');
+        }
+      }
+    }
+  }
 }
-
-if (redirectUrl) {
-  return Astro.redirect(redirectUrl);
-}
-
-const hasMasterKey = !!import.meta.env.ADMIN_MASTER_KEY;
 ---
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Admin Login - Banity</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -39,6 +112,7 @@ const hasMasterKey = !!import.meta.env.ADMIN_MASTER_KEY;
       justify-content: center;
       padding: 1rem;
     }
+    
     .login-container {
       background: white;
       border-radius: 16px;
@@ -47,77 +121,203 @@ const hasMasterKey = !!import.meta.env.ADMIN_MASTER_KEY;
       max-width: 420px;
       overflow: hidden;
     }
+    
     .login-header {
       background: #1a1a2e;
       color: white;
       padding: 2rem;
       text-align: center;
     }
+    
     .login-logo { font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem; }
     .login-subtitle { font-size: 0.875rem; opacity: 0.8; }
     .login-body { padding: 2rem; }
-    .form-group { margin-bottom: 1rem; }
-    label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
-    input { width: 100%; padding: 0.5rem; border-radius: 8px; border: 1px solid #ccc; }
-    button {
-      width: 100%;
+    
+    .tabs {
+      display: flex;
+      border-bottom: 2px solid #f0f0f0;
+      margin-bottom: 1.5rem;
+    }
+    
+    .tab {
+      flex: 1;
       padding: 0.75rem;
-      border: none;
+      text-align: center;
+      cursor: pointer;
+      font-weight: 500;
+      color: #666;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: all 0.2s;
+      background: none;
+      border-left: none;
+      border-right: none;
+      border-top: none;
+    }
+    
+    .tab:hover { color: #1a1a2e; }
+    .tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+    
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    
+    .form-group { margin-bottom: 1.25rem; }
+    
+    .form-label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      font-size: 0.875rem;
+      color: #374151;
+    }
+    
+    .form-input {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 1rem;
+      transition: border-color 0.2s;
+    }
+    
+    .form-input:focus { outline: none; border-color: #2563eb; }
+    
+    .submit-btn {
+      width: 100%;
+      padding: 0.875rem;
       background: #2563eb;
       color: white;
-      font-weight: 600;
+      border: none;
       border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
       cursor: pointer;
       transition: background 0.2s;
-      margin-top: 0.5rem;
     }
-    button:hover { background: #1e4bb8; }
-    .error { color: red; margin-bottom: 1rem; text-align: center; }
-    .master-key-indicator {
-      margin-top: 1rem;
+    
+    .submit-btn:hover { background: #1d4ed8; }
+    .submit-btn.master { background: #1a1a2e; }
+    .submit-btn.master:hover { background: #0f0f1a; }
+    
+    .alert {
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
       font-size: 0.875rem;
-      color: #555;
+    }
+    
+    .alert.error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    
+    .back-link {
+      display: block;
       text-align: center;
+      margin-top: 1.5rem;
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.875rem;
     }
-    .master-key-indicator input {
-      margin-top: 0.25rem;
+    
+    .back-link:hover { color: #2563eb; }
+    
+    .master-key-info {
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      padding: 0.75rem;
+      margin-bottom: 1rem;
+      font-size: 0.8125rem;
+      color: #92400e;
     }
+    
+    .no-master-key {
+      text-align: center;
+      padding: 1rem;
+      color: #6b7280;
+      font-size: 0.875rem;
+    }
+    
+    .setup-link {
+      display: block;
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: #f3f4f6;
+      border-radius: 8px;
+      text-align: center;
+      color: #374151;
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+    
+    .setup-link:hover { background: #e5e7eb; }
   </style>
 </head>
 <body>
   <div class="login-container">
     <div class="login-header">
-      <div class="login-logo">Banity Admin</div>
-      <div class="login-subtitle">Sign in to your account</div>
+      <div class="login-logo">🛡️ Admin Portal</div>
+      <div class="login-subtitle">Banity Platform Administration</div>
     </div>
-
+    
     <div class="login-body">
-      {errorMessage && <div class="error">{errorMessage}</div>}
-
-      <form method="POST">
-        <input type="hidden" name="loginType" value="supabase" />
-
-        <div class="form-group">
-          <label>Email:</label>
-          <input type="email" name="email" required />
-        </div>
-
-        <div class="form-group">
-          <label>Password:</label>
-          <input type="password" name="password" required />
-        </div>
-
-        {hasMasterKey && (
-          <div class="master-key-indicator">
-            <label>Or enter Master Key:</label>
-            <input type="password" name="masterKey" />
-            <input type="hidden" name="loginType" value="master_key" />
+      {errorMessage && <div class="alert error">{errorMessage}</div>}
+      
+      <div class="tabs">
+        <button type="button" class="tab active" data-tab="credentials">Email Login</button>
+        <button type="button" class="tab" data-tab="master">Master Key</button>
+      </div>
+      
+      <!-- Email/Password Login - SEPARATE FORM -->
+      <div id="credentials-tab" class="tab-content active">
+        <form method="POST">
+          <input type="hidden" name="loginType" value="credentials" />
+          
+          <div class="form-group">
+            <label for="email" class="form-label">Email</label>
+            <input type="email" id="email" name="email" class="form-input" placeholder="admin@example.com" />
+          </div>
+          
+          <div class="form-group">
+            <label for="password" class="form-label">Password</label>
+            <input type="password" id="password" name="password" class="form-input" placeholder="••••••••" />
+          </div>
+          
+          <button type="submit" class="submit-btn">Sign In</button>
+        </form>
+        
+        <a href="/admin/setup" class="setup-link">First time? Set up admin account →</a>
+      </div>
+      
+      <!-- Master Key Login - SEPARATE FORM -->
+      <div id="master-tab" class="tab-content">
+        {hasMasterKey ? (
+          <>
+            <div class="master-key-info">
+              ⚠️ Master key login bypasses normal authentication. Use only for emergency access or initial setup.
+            </div>
+            
+            <form method="POST">
+              <input type="hidden" name="loginType" value="master_key" />
+              
+              <div class="form-group">
+                <label for="masterKey" class="form-label">Master Key</label>
+                <input type="password" id="masterKey" name="masterKey" class="form-input" placeholder="Enter master key" autocomplete="off" />
+              </div>
+              
+              <button type="submit" class="submit-btn master">Access with Master Key</button>
+            </form>
+          </>
+        ) : (
+          <div class="no-master-key">
+            <p>Master key is not configured.</p>
+            <p style="margin-top: 0.5rem; font-size: 0.75rem;">
+              Add <code>ADMIN_MASTER_KEY</code> to your environment variables.
+            </p>
           </div>
         )}
-
-        <button type="submit">Sign In</button>
-      </form>
+      </div>
+      
+      <a href="/" class="back-link">← Back to Site</a>
     </div>
   </div>
-</body>
-</html>
+  
+  <script>
