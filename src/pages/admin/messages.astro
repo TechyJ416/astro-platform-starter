@@ -13,97 +13,633 @@ if (!isMasterKeySession && !session) {
   return Astro.redirect('/admin/login');
 }
 
-// Handle mark as read
+// Handle message actions
 let actionMessage = '';
+let actionError = '';
+
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const messageId = form.get('messageId') as string;
   const action = form.get('action') as string;
   
   if (messageId && action === 'mark_read') {
-    await supabase
+    const { error } = await supabase
       .from('messages')
       .update({ is_read: true })
       .eq('id', messageId);
-    actionMessage = 'Message marked as read.';
-  } else if (messageId && action === 'delete') {
-    await supabase
+    
+    if (error) actionError = error.message;
+    else actionMessage = 'Message marked as read.';
+  }
+  
+  if (messageId && action === 'mark_unread') {
+    const { error } = await supabase
+      .from('messages')
+      .update({ is_read: false })
+      .eq('id', messageId);
+    
+    if (error) actionError = error.message;
+    else actionMessage = 'Message marked as unread.';
+  }
+  
+  if (messageId && action === 'delete') {
+    const { error } = await supabase
       .from('messages')
       .delete()
       .eq('id', messageId);
-    actionMessage = 'Message deleted.';
+    
+    if (error) actionError = error.message;
+    else actionMessage = 'Message deleted.';
+  }
+  
+  if (action === 'mark_all_read') {
+    const { error } = await supabase
+      .from('messages')
+      .update({ is_read: true })
+      .eq('is_read', false);
+    
+    if (error) actionError = error.message;
+    else actionMessage = 'All messages marked as read.';
   }
 }
 
+// Fetch messages
 const { data: messages, error } = await supabase
   .from("messages")
-  .select("id, email, subject, body, created_at, is_read")
+  .select("id, email, name, subject, body, created_at, is_read")
   .order("created_at", { ascending: false });
 
-const unreadCount = messages?.filter(m => !m.is_read).length || 0;
+// Calculate stats
+const totalMessages = messages?.length || 0;
+const unreadMessages = messages?.filter(m => !m.is_read).length || 0;
+const todayMessages = messages?.filter(m => {
+  const msgDate = new Date(m.created_at);
+  const today = new Date();
+  return msgDate.toDateString() === today.toDateString();
+}).length || 0;
+
+// Get filter from URL
+const filter = Astro.url.searchParams.get('filter') || 'all';
+const filteredMessages = messages?.filter(message => {
+  if (filter === 'all') return true;
+  if (filter === 'unread') return !message.is_read;
+  if (filter === 'read') return message.is_read;
+  return true;
+});
+
+// Get selected message
+const selectedId = Astro.url.searchParams.get('id');
+const selectedMessage = selectedId ? messages?.find(m => m.id === selectedId) : null;
+
+// If viewing a message, mark it as read
+if (selectedMessage && !selectedMessage.is_read) {
+  await supabase
+    .from('messages')
+    .update({ is_read: true })
+    .eq('id', selectedMessage.id);
+  selectedMessage.is_read = true;
+}
 ---
 
 <AdminLayout title="Messages">
   {actionMessage && <div class="alert success">{actionMessage}</div>}
+  {actionError && <div class="alert error">{actionError}</div>}
   {error && <div class="alert error">{error.message}</div>}
   
-  <div class="panel">
-    <div class="panel-header">
-      <h2 class="panel-title">Inbox {unreadCount > 0 && <span class="badge pending">{unreadCount} unread</span>}</h2>
+  <!-- Stats Cards -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-icon">📬</div>
+      <div class="stat-content">
+        <div class="stat-value">{totalMessages}</div>
+        <div class="stat-label">Total Messages</div>
+      </div>
+    </div>
+    <div class="stat-card urgent">
+      <div class="stat-icon">🔔</div>
+      <div class="stat-content">
+        <div class="stat-value">{unreadMessages}</div>
+        <div class="stat-label">Unread</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">📅</div>
+      <div class="stat-content">
+        <div class="stat-value">{todayMessages}</div>
+        <div class="stat-label">Today</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">✉️</div>
+      <div class="stat-content">
+        <div class="stat-value">{totalMessages - unreadMessages}</div>
+        <div class="stat-label">Read</div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Inbox Layout -->
+  <div class="inbox-layout">
+    <!-- Message List -->
+    <div class="message-list-container">
+      <div class="list-header">
+        <div class="filter-tabs">
+          <a href="/admin/messages" class:list={["filter-tab", { active: filter === 'all' }]}>All</a>
+          <a href="/admin/messages?filter=unread" class:list={["filter-tab", { active: filter === 'unread' }]}>
+            Unread {unreadMessages > 0 && <span class="badge-count">{unreadMessages}</span>}
+          </a>
+          <a href="/admin/messages?filter=read" class:list={["filter-tab", { active: filter === 'read' }]}>Read</a>
+        </div>
+        
+        {unreadMessages > 0 && (
+          <form method="POST">
+            <button type="submit" name="action" value="mark_all_read" class="btn btn-sm btn-secondary">
+              ✓ Mark All Read
+            </button>
+          </form>
+        )}
+      </div>
+      
+      <div class="message-list">
+        {filteredMessages && filteredMessages.length > 0 ? (
+          filteredMessages.map(message => (
+            <a 
+              href={`/admin/messages?id=${message.id}${filter !== 'all' ? `&filter=${filter}` : ''}`}
+              class:list={["message-item", { unread: !message.is_read, selected: selectedId === message.id }]}
+            >
+              <div class="message-avatar">
+                <span>{message.name?.charAt(0) || message.email?.charAt(0)?.toUpperCase() || '?'}</span>
+              </div>
+              
+              <div class="message-preview">
+                <div class="message-header-row">
+                  <span class="message-sender">{message.name || message.email.split('@')[0]}</span>
+                  <span class="message-time">
+                    {new Date(message.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+                <div class="message-subject">
+                  {!message.is_read && <span class="unread-dot"></span>}
+                  {message.subject || '(No subject)'}
+                </div>
+                <div class="message-snippet">
+                  {message.body?.substring(0, 80) || '(No content)'}{message.body?.length > 80 ? '...' : ''}
+                </div>
+              </div>
+            </a>
+          ))
+        ) : (
+          <div class="empty-list">
+            <span>📭</span>
+            <p>No messages</p>
+          </div>
+        )}
+      </div>
     </div>
     
-    {messages && messages.length > 0 ? (
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>From</th>
-            <th>Subject</th>
-            <th>Status</th>
-            <th>Date</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {messages.map(msg => (
-            <tr style={!msg.is_read ? 'background: #fef3c7;' : ''}>
-              <td>{msg.email}</td>
-              <td>
-                <strong>{msg.subject || '(No subject)'}</strong>
-                {msg.body && (
-                  <div style="font-size: 0.75rem; color: #666; margin-top: 0.25rem; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                    {msg.body.substring(0, 100)}...
-                  </div>
-                )}
-              </td>
-              <td>
-                <span class={`badge ${msg.is_read ? 'active' : 'pending'}`}>
-                  {msg.is_read ? 'Read' : 'Unread'}
-                </span>
-              </td>
-              <td>{new Date(msg.created_at).toLocaleString()}</td>
-              <td>
-                <form method="POST" style="display: flex; gap: 0.5rem;">
-                  <input type="hidden" name="messageId" value={msg.id} />
-                  {!msg.is_read && (
-                    <button type="submit" name="action" value="mark_read" class="btn btn-sm btn-secondary">
-                      ✓ Mark Read
-                    </button>
-                  )}
-                  <button type="submit" name="action" value="delete" class="btn btn-sm btn-danger" onclick="return confirm('Delete this message?')">
-                    ✗ Delete
+    <!-- Message Detail -->
+    <div class="message-detail-container">
+      {selectedMessage ? (
+        <div class="message-detail">
+          <div class="detail-header">
+            <h2 class="detail-subject">{selectedMessage.subject || '(No subject)'}</h2>
+            
+            <div class="detail-actions">
+              <form method="POST" class="inline-form">
+                <input type="hidden" name="messageId" value={selectedMessage.id} />
+                {selectedMessage.is_read ? (
+                  <button type="submit" name="action" value="mark_unread" class="btn btn-sm btn-secondary" title="Mark as Unread">
+                    📩 Unread
                   </button>
-                </form>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    ) : (
-      <div class="empty-state">
-        <div class="empty-state-icon">📭</div>
-        <div class="empty-state-title">No messages</div>
-        <p>Messages from the contact form will appear here.</p>
-      </div>
-    )}
+                ) : (
+                  <button type="submit" name="action" value="mark_read" class="btn btn-sm btn-secondary" title="Mark as Read">
+                    ✓ Read
+                  </button>
+                )}
+              </form>
+              <form method="POST" class="inline-form">
+                <input type="hidden" name="messageId" value={selectedMessage.id} />
+                <button 
+                  type="submit" 
+                  name="action" 
+                  value="delete" 
+                  class="btn btn-sm btn-danger"
+                  onclick="return confirm('Delete this message?')"
+                  title="Delete"
+                >
+                  🗑️ Delete
+                </button>
+              </form>
+            </div>
+          </div>
+          
+          <div class="sender-info">
+            <div class="sender-avatar">
+              <span>{selectedMessage.name?.charAt(0) || selectedMessage.email?.charAt(0)?.toUpperCase() || '?'}</span>
+            </div>
+            <div class="sender-details">
+              <div class="sender-name">{selectedMessage.name || 'Unknown'}</div>
+              <div class="sender-email">{selectedMessage.email}</div>
+            </div>
+            <div class="message-timestamp">
+              {new Date(selectedMessage.created_at).toLocaleString()}
+            </div>
+          </div>
+          
+          <div class="message-body">
+            {selectedMessage.body || '(No content)'}
+          </div>
+          
+          <div class="reply-section">
+            <a href={`mailto:${selectedMessage.email}?subject=Re: ${selectedMessage.subject}`} class="btn btn-primary">
+              <span>↩️</span> Reply via Email
+            </a>
+          </div>
+        </div>
+      ) : (
+        <div class="no-message-selected">
+          <div class="placeholder-icon">📬</div>
+          <h3>Select a message</h3>
+          <p>Choose a message from the list to view its contents</p>
+        </div>
+      )}
+    </div>
   </div>
+  
+  <style>
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    
+    .stat-card {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    
+    .stat-card.urgent {
+      background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+      border: 2px solid #f87171;
+    }
+    
+    .stat-card.urgent .stat-icon {
+      background: #ef4444;
+      color: white;
+    }
+    
+    .stat-icon {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+    }
+    
+    .stat-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+    
+    .stat-label {
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+    
+    .inbox-layout {
+      display: grid;
+      grid-template-columns: 400px 1fr;
+      gap: 1.5rem;
+      height: calc(100vh - 300px);
+      min-height: 500px;
+    }
+    
+    .message-list-container {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    
+    .list-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #f0f0f0;
+      background: #f9fafb;
+    }
+    
+    .filter-tabs {
+      display: flex;
+      gap: 0.25rem;
+    }
+    
+    .filter-tab {
+      padding: 0.375rem 0.75rem;
+      border-radius: 6px;
+      text-decoration: none;
+      color: #6b7280;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+    }
+    
+    .filter-tab:hover {
+      background: #e5e7eb;
+      color: #1a1a2e;
+    }
+    
+    .filter-tab.active {
+      background: #2563eb;
+      color: white;
+    }
+    
+    .badge-count {
+      background: #ef4444;
+      color: white;
+      font-size: 0.625rem;
+      padding: 0.125rem 0.375rem;
+      border-radius: 999px;
+    }
+    
+    .filter-tab.active .badge-count {
+      background: white;
+      color: #2563eb;
+    }
+    
+    .message-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+    
+    .message-item {
+      display: flex;
+      gap: 0.75rem;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #f0f0f0;
+      text-decoration: none;
+      color: inherit;
+      transition: background 0.2s;
+    }
+    
+    .message-item:hover {
+      background: #f9fafb;
+    }
+    
+    .message-item.selected {
+      background: #dbeafe;
+      border-left: 3px solid #2563eb;
+    }
+    
+    .message-item.unread {
+      background: #fffbeb;
+    }
+    
+    .message-item.unread.selected {
+      background: #dbeafe;
+    }
+    
+    .message-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #dbeafe 0%, #c7d2fe 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: #2563eb;
+      flex-shrink: 0;
+    }
+    
+    .message-preview {
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .message-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.25rem;
+    }
+    
+    .message-sender {
+      font-weight: 600;
+      color: #1a1a2e;
+      font-size: 0.875rem;
+    }
+    
+    .message-item.unread .message-sender {
+      color: #1e40af;
+    }
+    
+    .message-time {
+      font-size: 0.6875rem;
+      color: #9ca3af;
+    }
+    
+    .message-subject {
+      font-size: 0.8125rem;
+      color: #374151;
+      margin-bottom: 0.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .unread-dot {
+      width: 8px;
+      height: 8px;
+      background: #2563eb;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    
+    .message-snippet {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .empty-list {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem;
+      color: #9ca3af;
+    }
+    
+    .empty-list span {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+    }
+    
+    .message-detail-container {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .message-detail {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    
+    .detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 1.5rem;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .detail-subject {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #1a1a2e;
+      flex: 1;
+    }
+    
+    .detail-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+    
+    .inline-form {
+      display: inline;
+    }
+    
+    .sender-info {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem 1.5rem;
+      background: #f9fafb;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .sender-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #dbeafe 0%, #c7d2fe 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 1.25rem;
+      color: #2563eb;
+    }
+    
+    .sender-details {
+      flex: 1;
+    }
+    
+    .sender-name {
+      font-weight: 600;
+      color: #1a1a2e;
+    }
+    
+    .sender-email {
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+    
+    .message-timestamp {
+      font-size: 0.8125rem;
+      color: #9ca3af;
+    }
+    
+    .message-body {
+      flex: 1;
+      padding: 1.5rem;
+      font-size: 0.9375rem;
+      line-height: 1.7;
+      color: #374151;
+      white-space: pre-wrap;
+      overflow-y: auto;
+    }
+    
+    .reply-section {
+      padding: 1rem 1.5rem;
+      border-top: 1px solid #f0f0f0;
+      background: #f9fafb;
+    }
+    
+    .no-message-selected {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #9ca3af;
+      text-align: center;
+    }
+    
+    .placeholder-icon {
+      font-size: 4rem;
+      margin-bottom: 1rem;
+    }
+    
+    .no-message-selected h3 {
+      font-size: 1.125rem;
+      color: #6b7280;
+      margin-bottom: 0.5rem;
+    }
+    
+    @media (max-width: 1024px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      
+      .inbox-layout {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+      
+      .message-list-container {
+        max-height: 400px;
+      }
+      
+      .message-detail-container {
+        min-height: 400px;
+      }
+    }
+    
+    @media (max-width: 768px) {
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .list-header {
+        flex-direction: column;
+        gap: 0.75rem;
+        align-items: stretch;
+      }
+    }
+  </style>
 </AdminLayout>
