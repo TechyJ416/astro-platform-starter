@@ -25,8 +25,8 @@ const hasMasterKey = !!import.meta.env.ADMIN_MASTER_KEY;
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Login - Banity</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -56,7 +56,7 @@ const hasMasterKey = !!import.meta.env.ADMIN_MASTER_KEY;
     .login-logo { font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem; }
     .login-subtitle { font-size: 0.875rem; opacity: 0.8; }
     .login-body { padding: 2rem; }
-    .form-group { margin-bottom: 1.25rem; }
+    .form-group { margin-bottom: 1rem; }
     label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
     input { width: 100%; padding: 0.5rem; border-radius: 8px; border: 1px solid #ccc; }
     button {
@@ -69,9 +69,19 @@ const hasMasterKey = !!import.meta.env.ADMIN_MASTER_KEY;
       border-radius: 8px;
       cursor: pointer;
       transition: background 0.2s;
+      margin-top: 0.5rem;
     }
     button:hover { background: #1e4bb8; }
     .error { color: red; margin-bottom: 1rem; text-align: center; }
+    .master-key-indicator {
+      margin-top: 1rem;
+      font-size: 0.875rem;
+      color: #555;
+      text-align: center;
+    }
+    .master-key-indicator input {
+      margin-top: 0.25rem;
+    }
   </style>
 </head>
 <body>
@@ -84,27 +94,27 @@ const hasMasterKey = !!import.meta.env.ADMIN_MASTER_KEY;
     <div class="login-body">
       {errorMessage && <div class="error">{errorMessage}</div>}
 
-      {hasMasterKey && (
-        <form method="POST">
-          <input type="hidden" name="loginType" value="master_key" />
-          <div class="form-group">
-            <label>Master Key:</label>
-            <input type="password" name="masterKey" required />
-          </div>
-          <button type="submit">Sign In</button>
-        </form>
-      )}
-
       <form method="POST">
         <input type="hidden" name="loginType" value="supabase" />
+
         <div class="form-group">
           <label>Email:</label>
           <input type="email" name="email" required />
         </div>
+
         <div class="form-group">
           <label>Password:</label>
           <input type="password" name="password" required />
         </div>
+
+        {hasMasterKey && (
+          <div class="master-key-indicator">
+            <label>Or enter Master Key:</label>
+            <input type="password" name="masterKey" />
+            <input type="hidden" name="loginType" value="master_key" />
+          </div>
+        )}
+
         <button type="submit">Sign In</button>
       </form>
     </div>
