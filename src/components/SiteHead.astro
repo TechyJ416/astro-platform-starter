@@ -1,0 +1,66 @@
+---
+// src/components/SiteHead.astro
+// This component loads settings and applies them to the page head
+
+import { getSetting } from "../lib/settings";
+
+// Load settings
+const general = await getSetting('general');
+const appearance = await getSetting('appearance');
+
+// Props for page-specific overrides
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const { title, description } = Astro.props;
+
+// Build page title
+const pageTitle = title 
+  ? `${title} | ${general.siteName}` 
+  : `${general.siteName} - ${general.tagline}`;
+
+const pageDescription = description || general.description;
+---
+
+<!-- Primary Meta Tags -->
+<title>{pageTitle}</title>
+<meta name="title" content={pageTitle} />
+<meta name="description" content={pageDescription} />
+
+<!-- Favicon -->
+{appearance.faviconUrl ? (
+  <link rel="icon" type="image/x-icon" href={appearance.faviconUrl} />
+) : (
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+)}
+
+<!-- Theme Colors as CSS Variables -->
+<style define:vars={{ 
+  primaryColor: appearance.primaryColor,
+  accentColor: appearance.accentColor 
+}}>
+  :root {
+    --color-primary: var(--primaryColor);
+    --color-accent: var(--accentColor);
+    
+    /* Generate lighter/darker variants */
+    --color-primary-light: color-mix(in srgb, var(--primaryColor) 80%, white);
+    --color-primary-dark: color-mix(in srgb, var(--primaryColor) 80%, black);
+    --color-accent-light: color-mix(in srgb, var(--accentColor) 80%, white);
+    --color-accent-dark: color-mix(in srgb, var(--accentColor) 80%, black);
+  }
+</style>
+
+<!-- Open Graph / Facebook -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content={pageTitle} />
+<meta property="og:description" content={pageDescription} />
+{appearance.logoUrl && <meta property="og:image" content={appearance.logoUrl} />}
+
+<!-- Twitter -->
+<meta property="twitter:card" content="summary_large_image" />
+<meta property="twitter:title" content={pageTitle} />
+<meta property="twitter:description" content={pageDescription} />
+{appearance.logoUrl && <meta property="twitter:image" content={appearance.logoUrl} />}
