@@ -4,265 +4,412 @@ export const prerender = false;
 
 import Layout from "../layouts/Layout.astro";
 import { supabase } from "../lib/supabase";
-import { getSetting } from "../lib/settings";
 
-// Check if signup is enabled
-const security = await getSetting('security');
-if (!security.enableSignup) {
-  return Astro.redirect('/?error=signup_disabled');
+let error = '';
+let success = false;
+
+// Check if registration is open or waitlist mode
+let registrationMode = 'waitlist'; // 'open', 'waitlist', 'closed'
+try {
+  const { data } = await supabase
+    .from('site_settings')
+    .select('value')
+    .eq('key', 'general')
+    .single();
+  if (data?.value?.registrationMode) {
+    registrationMode = data.value.registrationMode;
+  }
+} catch (e) {
+  // Default to waitlist
 }
 
-// Get appearance settings for button colors
-const appearance = await getSetting('appearance');
-const general = await getSetting('general');
-
-let errorMessage = '';
-let successMessage = '';
+if (registrationMode === 'closed') {
+  return Astro.redirect('/?error=registration_closed');
+}
 
 if (Astro.request.method === 'POST') {
-  const form = await Astro.request.formData();
-  const email = form.get('email') as string;
-  const password = form.get('password') as string;
-  const confirmPassword = form.get('confirmPassword') as string;
-  const fullName = form.get('fullName') as string;
-  
-  if (password !== confirmPassword) {
-    errorMessage = 'Passwords do not match.';
+  const formData = await Astro.request.formData();
+  const email = formData.get('email') as string;
+  const password = formData.get('password') as string;
+  const confirmPassword = formData.get('confirmPassword') as string;
+  const fullName = formData.get('fullName') as string;
+
+  if (!email || !password) {
+    error = 'Email and password are required.';
   } else if (password.length < 8) {
-    errorMessage = 'Password must be at least 8 characters.';
+    error = 'Password must be at least 8 characters.';
+  } else if (password !== confirmPassword) {
+    error = 'Passwords do not match.';
   } else {
-    const { data, error } = await supabase.auth.signUp({
+    // Create auth user
+    const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
           full_name: fullName,
         },
-        emailRedirectTo: `${Astro.url.origin}/auth/callback`,
       },
     });
-    
-    if (error) {
-      errorMessage = error.message;
-    } else if (data.user) {
-      // Create profile
-      await supabase.from('profiles').upsert({
-        id: data.user.id,
-        email: data.user.email,
+
+    if (authError) {
+      error = authError.message;
+    } else if (authData.user) {
+      // Determine user status based on registration mode
+      const userStatus = registrationMode === 'waitlist' ? 'pending' : 'active';
+      const isActive = registrationMode !== 'waitlist';
+      
+      // Create profile with appropriate status
+      const { error: profileError } = await supabase.from('profiles').upsert({
+        id: authData.user.id,
+        email,
         full_name: fullName,
         role: 'creator',
-        is_active: true,
+        status: userStatus,
+        is_active: isActive,
+        is_verified: false,
+        created_at: new Date().toISOString(),
       });
-      
-      if (security.requireEmailVerify) {
-        successMessage = 'Account created! Please check your email to verify your account.';
-      } else {
-        return Astro.redirect('/dashboard');
+
+      if (profileError) {
+        console.error('Profile creation error:', profileError);
       }
+
+      // Create notification for admins (waitlist mode)
+      if (registrationMode === 'waitlist') {
+        await supabase.from('messages').insert({
+          name: 'System',
+          email: 'system@banity.com',
+          subject: `New Waitlist Signup: ${fullName || email}`,
+          body: `A new user has joined the waitlist:\n\nName: ${fullName || 'Not provided'}\nEmail: ${email}\n\nReview their application in the Users section of the admin panel.`,
+          is_read: false,
+          is_announcement: false,
+        });
+      }
+
+      success = true;
     }
   }
 }
 ---
 
-<Layout title="Sign Up">
-  <div class="auth-page">
-    <div class="auth-container">
-      <div class="auth-header">
-        <h1>Create an Account</h1>
-        <p>Join {general.siteName} and start creating</p>
-      </div>
-      
-      {errorMessage && <div class="alert error">{errorMessage}</div>}
-      {successMessage && <div class="alert success">{successMessage}</div>}
-      
-      {!successMessage && (
-        <form method="POST" class="auth-form">
-          <div class="form-group">
-            <label for="fullName">Full Name</label>
-            <input 
-              type="text" 
-              id="fullName" 
-              name="fullName" 
-              required 
-              placeholder="John Doe"
-            />
+<Layout>
+  <div class="signup-page">
+    <div class="signup-container">
+      {success ? (
+        <div class="success-card">
+          <div class="success-icon">🎉</div>
+          <h1>{registrationMode === 'waitlist' ? "You're on the Waitlist!" : 'Account Created!'}</h1>
+          {registrationMode === 'waitlist' ? (
+            <>
+              <p>Thanks for signing up! We've added you to our waitlist.</p>
+              <p class="subtext">We'll review your application and send you an email once your account is approved. This usually takes 1-2 business days.</p>
+              <div class="next-steps">
+                <h3>What happens next?</h3>
+                <ol>
+                  <li>Our team reviews your application</li>
+                  <li>You'll receive an email notification</li>
+                  <li>Once approved, you can log in and start creating</li>
+                </ol>
+              </div>
+            </>
+          ) : (
+            <>
+              <p>Your account has been created successfully!</p>
+              <p class="subtext">Please check your email to verify your account, then you can log in.</p>
+            </>
+          )}
+          <a href="/login" class="btn btn-primary">Go to Login</a>
+        </div>
+      ) : (
+        <div class="signup-card">
+          <div class="card-header">
+            <h1>{registrationMode === 'waitlist' ? 'Join the Waitlist' : 'Create Account'}</h1>
+            <p>{registrationMode === 'waitlist' 
+              ? "We're currently in private beta. Sign up to join our waitlist!"
+              : 'Start your creator journey today.'}</p>
           </div>
-          
-          <div class="form-group">
-            <label for="email">Email</label>
-            <input 
-              type="email" 
-              id="email" 
-              name="email" 
-              required 
-              placeholder="you@example.com"
-            />
+
+          {error && <div class="alert error">{error}</div>}
+
+          {registrationMode === 'waitlist' && (
+            <div class="waitlist-notice">
+              <span class="notice-icon">⏳</span>
+              <div>
+                <strong>Private Beta</strong>
+                <p>Accounts require approval. You'll be notified by email once accepted.</p>
+              </div>
+            </div>
+          )}
+
+          <form method="POST" class="signup-form">
+            <div class="form-group">
+              <label for="fullName">Full Name</label>
+              <input 
+                type="text" 
+                id="fullName" 
+                name="fullName" 
+                placeholder="Your full name"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="email">Email Address *</label>
+              <input 
+                type="email" 
+                id="email" 
+                name="email" 
+                placeholder="you@example.com"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="password">Password *</label>
+              <input 
+                type="password" 
+                id="password" 
+                name="password" 
+                placeholder="At least 8 characters"
+                minlength="8"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="confirmPassword">Confirm Password *</label>
+              <input 
+                type="password" 
+                id="confirmPassword" 
+                name="confirmPassword" 
+                placeholder="Confirm your password"
+                minlength="8"
+                required
+              />
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-full">
+              {registrationMode === 'waitlist' ? 'Join Waitlist' : 'Create Account'}
+            </button>
+          </form>
+
+          <div class="card-footer">
+            <p>Already have an account? <a href="/login">Log in</a></p>
           </div>
-          
-          <div class="form-group">
-            <label for="password">Password</label>
-            <input 
-              type="password" 
-              id="password" 
-              name="password" 
-              required 
-              minlength="8"
-              placeholder="••••••••"
-            />
-            <span class="form-hint">At least 8 characters</span>
-          </div>
-          
-          <div class="form-group">
-            <label for="confirmPassword">Confirm Password</label>
-            <input 
-              type="password" 
-              id="confirmPassword" 
-              name="confirmPassword" 
-              required 
-              placeholder="••••••••"
-            />
-          </div>
-          
-          <button type="submit" class="btn btn-primary btn-block">
-            Create Account
-          </button>
-          
-          <p class="auth-footer">
-            Already have an account? <a href="/login">Log in</a>
-          </p>
-        </form>
+        </div>
       )}
     </div>
   </div>
-  
-  <style define:vars={{ primaryColor: appearance.primaryColor }}>
-    .auth-page {
-      min-height: calc(100vh - 70px);
+
+  <style>
+    .signup-page {
+      min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 2rem;
-      background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+      background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
     }
-    
-    .auth-container {
-      background: white;
-      padding: 2.5rem;
-      border-radius: 16px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+
+    .signup-container {
       width: 100%;
-      max-width: 420px;
+      max-width: 440px;
     }
-    
-    .auth-header {
+
+    .signup-card, .success-card {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 2rem 2rem 0;
       text-align: center;
-      margin-bottom: 2rem;
     }
-    
-    .auth-header h1 {
+
+    .card-header h1 {
       font-size: 1.75rem;
       color: #1a1a2e;
       margin-bottom: 0.5rem;
     }
-    
-    .auth-header p {
+
+    .card-header p {
       color: #6b7280;
-    }
-    
-    .alert {
-      padding: 1rem;
-      border-radius: 8px;
-      margin-bottom: 1.5rem;
       font-size: 0.9375rem;
     }
-    
+
+    .waitlist-notice {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      margin: 1.5rem 2rem 0;
+      padding: 1rem;
+      border-radius: 10px;
+    }
+
+    .notice-icon {
+      font-size: 1.5rem;
+    }
+
+    .waitlist-notice strong {
+      color: #92400e;
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+
+    .waitlist-notice p {
+      font-size: 0.8125rem;
+      color: #78350f;
+      margin: 0;
+    }
+
+    .signup-form {
+      padding: 1.5rem 2rem 2rem;
+    }
+
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.5rem;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 0.875rem 1rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 1rem;
+      transition: all 0.2s;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .btn {
+      padding: 0.875rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 1rem;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-full {
+      width: 100%;
+      justify-content: center;
+    }
+
+    .card-footer {
+      padding: 1.5rem 2rem;
+      background: #f9fafb;
+      text-align: center;
+      font-size: 0.9375rem;
+      color: #6b7280;
+    }
+
+    .card-footer a {
+      color: #2563eb;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .card-footer a:hover {
+      text-decoration: underline;
+    }
+
+    .alert {
+      margin: 1.5rem 2rem 0;
+      padding: 1rem;
+      border-radius: 10px;
+      font-size: 0.9375rem;
+    }
+
     .alert.error {
       background: #fee2e2;
       color: #991b1b;
-      border: 1px solid #fecaca;
     }
-    
-    .alert.success {
-      background: #d1fae5;
-      color: #065f46;
-      border: 1px solid #a7f3d0;
-    }
-    
-    .auth-form {
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
-    }
-    
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-    
-    .form-group label {
-      font-weight: 600;
-      font-size: 0.875rem;
-      color: #374151;
-    }
-    
-    .form-group input {
-      padding: 0.75rem 1rem;
-      border: 2px solid #e5e7eb;
-      border-radius: 8px;
-      font-size: 1rem;
-      transition: border-color 0.2s;
-    }
-    
-    .form-group input:focus {
-      outline: none;
-      border-color: var(--primaryColor);
-    }
-    
-    .form-hint {
-      font-size: 0.75rem;
-      color: #9ca3af;
-    }
-    
-    .btn {
-      padding: 0.875rem 1.5rem;
-      border: none;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 1rem;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    
-    .btn-primary {
-      background: var(--primaryColor);
-      color: white;
-    }
-    
-    .btn-primary:hover {
-      opacity: 0.9;
-      transform: translateY(-1px);
-    }
-    
-    .btn-block {
-      width: 100%;
-    }
-    
-    .auth-footer {
+
+    /* Success Card */
+    .success-card {
+      padding: 3rem 2rem;
       text-align: center;
+    }
+
+    .success-icon {
+      font-size: 4rem;
+      margin-bottom: 1rem;
+    }
+
+    .success-card h1 {
+      font-size: 1.75rem;
+      color: #1a1a2e;
+      margin-bottom: 1rem;
+    }
+
+    .success-card p {
+      color: #374151;
+      font-size: 1rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .success-card .subtext {
       color: #6b7280;
       font-size: 0.9375rem;
-      margin-top: 0.5rem;
     }
-    
-    .auth-footer a {
-      color: var(--primaryColor);
-      font-weight: 600;
-      text-decoration: none;
+
+    .next-steps {
+      background: #f9fafb;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+      text-align: left;
     }
-    
-    .auth-footer a:hover {
-      text-decoration: underline;
+
+    .next-steps h3 {
+      font-size: 0.9375rem;
+      color: #374151;
+      margin-bottom: 1rem;
+    }
+
+    .next-steps ol {
+      margin: 0;
+      padding-left: 1.25rem;
+      color: #6b7280;
+      font-size: 0.9375rem;
+    }
+
+    .next-steps li {
+      margin-bottom: 0.5rem;
+    }
+
+    .success-card .btn {
+      margin-top: 1rem;
     }
   </style>
 </Layout>
