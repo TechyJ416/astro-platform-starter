@@ -1,0 +1,455 @@
+---
+// src/pages/dashboard/submit.astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { supabase } from "../../lib/supabase";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!session) {
+  return Astro.redirect('/login?redirect=/dashboard/submit');
+}
+
+// Fetch user's accepted campaign assignments
+const { data: assignments } = await supabase
+  .from('campaign_assignments')
+  .select('*, campaigns(id, title, slug)')
+  .eq('creator_id', session.user.id)
+  .eq('status', 'accepted');
+
+// Fetch campaigns for submissions
+const campaignIds = assignments?.map(a => a.campaigns?.id).filter(Boolean) || [];
+
+let successMessage = '';
+let errorMessage = '';
+
+// Handle form submission
+if (Astro.request.method === 'POST') {
+  const formData = await Astro.request.formData();
+  const action = formData.get('action');
+
+  if (action === 'submit_content') {
+    const title = formData.get('title') as string;
+    const caption = formData.get('caption') as string;
+    const contentUrl = formData.get('contentUrl') as string;
+    const thumbnailUrl = formData.get('thumbnailUrl') as string;
+    const campaignId = formData.get('campaignId') as string;
+
+    if (!title) {
+      errorMessage = 'Please enter a title for your submission.';
+    } else if (!contentUrl) {
+      errorMessage = 'Please provide a content URL.';
+    } else {
+      const { error } = await supabase
+        .from('posts')
+        .insert({
+          title,
+          caption,
+          content_url: contentUrl,
+          thumbnail_url: thumbnailUrl || null,
+          creator_id: session.user.id,
+          campaign_id: campaignId || null,
+          status: 'pending',
+          created_at: new Date().toISOString(),
+        });
+
+      if (error) {
+        errorMessage = error.message;
+      } else {
+        successMessage = 'Content submitted successfully! It will be reviewed shortly.';
+      }
+    }
+  }
+}
+
+// Fetch recent submissions
+const { data: recentSubmissions } = await supabase
+  .from('posts')
+  .select('id, title, status, created_at, campaigns(title)')
+  .eq('creator_id', session.user.id)
+  .order('created_at', { ascending: false })
+  .limit(5);
+
+function getStatusBadge(status: string) {
+  const badges: Record<string, { label: string; class: string }> = {
+    pending: { label: 'Pending Review', class: 'pending' },
+    approved: { label: 'Approved', class: 'approved' },
+    rejected: { label: 'Rejected', class: 'rejected' },
+    revision_requested: { label: 'Revision Needed', class: 'revision' },
+  };
+  return badges[status] || { label: status, class: 'default' };
+}
+---
+
+<Layout title="Submit Content">
+  <div class="submit-page">
+    <div class="submit-container">
+      <!-- Header -->
+      <div class="page-header">
+        <a href="/dashboard" class="back-link">← Back to Dashboard</a>
+        <h1>📤 Submit Content</h1>
+        <p class="subtitle">Submit your work for review and get paid</p>
+      </div>
+
+      {successMessage && <div class="alert success">{successMessage}</div>}
+      {errorMessage && <div class="alert error">{errorMessage}</div>}
+
+      <div class="submit-grid">
+        <!-- Submit Form -->
+        <div class="card form-card">
+          <div class="card-header">
+            <h2>New Submission</h2>
+          </div>
+          <form method="POST" class="submit-form">
+            <input type="hidden" name="action" value="submit_content" />
+
+            <div class="form-group">
+              <label for="campaignId">Campaign (Optional)</label>
+              <select id="campaignId" name="campaignId">
+                <option value="">No specific campaign</option>
+                {assignments?.map(a => (
+                  <option value={a.campaigns?.id}>{a.campaigns?.title}</option>
+                ))}
+              </select>
+              <span class="hint">Select if this submission is for a specific campaign</span>
+            </div>
+
+            <div class="form-group">
+              <label for="title">Title *</label>
+              <input 
+                type="text" 
+                id="title" 
+                name="title" 
+                placeholder="Give your content a descriptive title"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="caption">Description / Caption</label>
+              <textarea 
+                id="caption" 
+                name="caption" 
+                rows="3"
+                placeholder="Describe your content, include relevant hashtags, etc."
+              ></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="contentUrl">Content URL *</label>
+              <input 
+                type="url" 
+                id="contentUrl" 
+                name="contentUrl" 
+                placeholder="https://drive.google.com/... or https://youtube.com/..."
+                required
+              />
+              <span class="hint">Link to your content (Google Drive, YouTube, Instagram, etc.)</span>
+            </div>
+
+            <div class="form-group">
+              <label for="thumbnailUrl">Thumbnail URL (Optional)</label>
+              <input 
+                type="url" 
+                id="thumbnailUrl" 
+                name="thumbnailUrl" 
+                placeholder="https://example.com/thumbnail.jpg"
+              />
+              <span class="hint">Preview image for your content</span>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Submit for Review</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="sidebar">
+          <!-- Tips Card -->
+          <div class="card tips-card">
+            <h3>📝 Submission Tips</h3>
+            <ul>
+              <li>Ensure your content meets campaign requirements</li>
+              <li>Use a Google Drive or cloud storage link</li>
+              <li>Make sure the link is accessible (not private)</li>
+              <li>Include a thumbnail for better visibility</li>
+              <li>Double-check before submitting!</li>
+            </ul>
+          </div>
+
+          <!-- Recent Submissions -->
+          <div class="card recent-card">
+            <h3>Recent Submissions</h3>
+            {recentSubmissions && recentSubmissions.length > 0 ? (
+              <div class="submissions-list">
+                {recentSubmissions.map(sub => (
+                  <div class="submission-item">
+                    <div class="submission-info">
+                      <div class="submission-title">{sub.title}</div>
+                      <div class="submission-date">
+                        {new Date(sub.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <span class={`status-badge ${getStatusBadge(sub.status).class}`}>
+                      {getStatusBadge(sub.status).label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p class="empty-hint">No submissions yet</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .submit-page {
+      min-height: 100vh;
+      background: #f5f6fa;
+      padding: 2rem;
+    }
+
+    .submit-container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .page-header {
+      margin-bottom: 2rem;
+    }
+
+    .back-link {
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.875rem;
+      display: inline-block;
+      margin-bottom: 0.5rem;
+    }
+
+    .back-link:hover {
+      color: #2563eb;
+    }
+
+    .page-header h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin: 0 0 0.5rem;
+    }
+
+    .subtitle {
+      color: #6b7280;
+      margin: 0;
+    }
+
+    .alert {
+      padding: 1rem 1.25rem;
+      border-radius: 10px;
+      margin-bottom: 1.5rem;
+    }
+
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+
+    .submit-grid {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 1.5rem;
+      align-items: start;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .card-header h2 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    /* Form */
+    .submit-form {
+      padding: 1.5rem;
+    }
+
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.5rem;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 1rem;
+      transition: all 0.2s;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .hint {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      margin-top: 0.25rem;
+      display: block;
+    }
+
+    .form-actions {
+      padding-top: 0.5rem;
+    }
+
+    /* Sidebar Cards */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .sidebar .card {
+      padding: 1.5rem;
+    }
+
+    .sidebar h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0 0 1rem;
+    }
+
+    .tips-card ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .tips-card li {
+      padding: 0.5rem 0;
+      color: #4b5563;
+      font-size: 0.875rem;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .tips-card li:last-child {
+      border-bottom: none;
+    }
+
+    .tips-card li::before {
+      content: "✓ ";
+      color: #10b981;
+    }
+
+    /* Recent Submissions */
+    .submissions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .submission-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 8px;
+    }
+
+    .submission-title {
+      font-weight: 500;
+      color: #1a1a2e;
+      font-size: 0.875rem;
+    }
+
+    .submission-date {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    .status-badge {
+      font-size: 0.625rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 6px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+    .status-badge.approved { background: #d1fae5; color: #059669; }
+    .status-badge.rejected { background: #fee2e2; color: #dc2626; }
+    .status-badge.revision { background: #dbeafe; color: #2563eb; }
+
+    .empty-hint {
+      color: #9ca3af;
+      font-size: 0.875rem;
+      text-align: center;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.9375rem;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .submit-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        order: -1;
+      }
+    }
+  </style>
+</Layout>
