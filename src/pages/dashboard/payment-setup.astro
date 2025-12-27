@@ -1,4 +1,4 @@
- ---
+---
 // src/pages/dashboard/payment-setup.astro
 export const prerender = false;
 
@@ -51,22 +51,28 @@ if (Astro.request.method === 'POST' && hasStripe) {
   // Start Stripe Connect onboarding
   if (action === 'start_onboarding') {
     try {
-      const stripe = (await import('stripe')).default;
-      const stripeClient = new stripe(STRIPE_SECRET_KEY);
-
       // Create connected account if doesn't exist
       if (!paymentProfile?.stripe_account_id) {
-        const account = await stripeClient.accounts.create({
-          type: 'express',
-          country: 'US', // TODO: Make dynamic
-          email: session.user.email,
-          metadata: {
-            creator_id: session.user.id,
+        const createAccountResponse = await fetch('https://api.stripe.com/v1/accounts', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${STRIPE_SECRET_KEY}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
           },
-          capabilities: {
-            transfers: { requested: true },
-          },
+          body: new URLSearchParams({
+            'type': 'express',
+            'country': 'US',
+            'email': session.user.email || '',
+            'metadata[creator_id]': session.user.id,
+            'capabilities[transfers][requested]': 'true',
+          }),
         });
+
+        const account = await createAccountResponse.json();
+        
+        if (account.error) {
+          throw new Error(account.error.message);
+        }
 
         await supabase
           .from('creator_payment_profiles')
@@ -81,12 +87,25 @@ if (Astro.request.method === 'POST' && hasStripe) {
       }
 
       // Create account link for onboarding
-      const accountLink = await stripeClient.accountLinks.create({
-        account: paymentProfile.stripe_account_id,
-        refresh_url: `${Astro.url.origin}/dashboard/payment-setup?refresh=true`,
-        return_url: `${Astro.url.origin}/dashboard/payment-setup?success=true`,
-        type: 'account_onboarding',
+      const accountLinkResponse = await fetch('https://api.stripe.com/v1/account_links', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${STRIPE_SECRET_KEY}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          'account': paymentProfile.stripe_account_id,
+          'refresh_url': `${Astro.url.origin}/dashboard/payment-setup?refresh=true`,
+          'return_url': `${Astro.url.origin}/dashboard/payment-setup?success=true`,
+          'type': 'account_onboarding',
+        }),
       });
+
+      const accountLink = await accountLinkResponse.json();
+      
+      if (accountLink.error) {
+        throw new Error(accountLink.error.message);
+      }
 
       onboardingUrl = accountLink.url;
       
