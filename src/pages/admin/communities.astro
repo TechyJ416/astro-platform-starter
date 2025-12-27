@@ -5,7 +5,6 @@ export const prerender = false;
 import AdminLayout from "../../layouts/AdminLayout.astro";
 import { supabase } from "../../lib/supabase";
 
-// Auth from middleware
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
 const session = Astro.locals.session;
 
@@ -13,243 +12,191 @@ if (!isMasterKeySession && !session) {
   return Astro.redirect('/admin/login');
 }
 
-// Fetch communities - only query columns that exist
-const { data: communities, error } = await supabase
-  .from("communities")
-  .select("*")
-  .order("created_at", { ascending: false });
+let successMessage = '';
+let errorMessage = '';
+const showForm = Astro.url.searchParams.get('action') === 'new';
 
-// Stats
-const totalCommunities = communities?.length || 0;
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action') as string;
+
+  if (action === 'create') {
+    const name = form.get('name') as string;
+    const slug = form.get('slug') as string || name?.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    const description = form.get('description') as string;
+
+    const { error } = await supabase.from('communities').insert({
+      name,
+      slug,
+      description,
+    });
+
+    if (error) errorMessage = error.message;
+    else {
+      successMessage = 'Community created successfully!';
+      return Astro.redirect('/admin/communities?created=true');
+    }
+  }
+
+  if (action === 'delete') {
+    const communityId = form.get('communityId') as string;
+    const { error } = await supabase.from('communities').delete().eq('id', communityId);
+    if (error) errorMessage = error.message;
+    else successMessage = 'Community deleted.';
+  }
+
+  if (action === 'update') {
+    const communityId = form.get('communityId') as string;
+    const name = form.get('name') as string;
+    const description = form.get('description') as string;
+    
+    const { error } = await supabase.from('communities').update({ name, description }).eq('id', communityId);
+    if (error) errorMessage = error.message;
+    else successMessage = 'Community updated.';
+  }
+}
+
+if (Astro.url.searchParams.get('created')) successMessage = 'Community created successfully!';
+
+const { data: communities } = await supabase.from('communities').select('*').order('created_at', { ascending: false });
 ---
 
 <AdminLayout title="Communities">
-  {error && <div class="alert error">{error.message}</div>}
-  
-  <!-- Stats Cards -->
-  <div class="stats-grid">
-    <div class="stat-card">
-      <div class="stat-icon">💬</div>
-      <div class="stat-content">
-        <div class="stat-value">{totalCommunities}</div>
-        <div class="stat-label">Total Communities</div>
+  {successMessage && <div class="alert success">{successMessage}</div>}
+  {errorMessage && <div class="alert error">{errorMessage}</div>}
+
+  {showForm ? (
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Create New Community</h2>
+        <a href="/admin/communities" class="btn btn-secondary">← Back</a>
       </div>
+      <form method="POST" class="form">
+        <input type="hidden" name="action" value="create" />
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label>Community Name *</label>
+            <input type="text" name="name" required placeholder="Fashion Creators" />
+          </div>
+          <div class="form-group">
+            <label>Slug</label>
+            <input type="text" name="slug" placeholder="auto-generated-from-name" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Description</label>
+          <textarea name="description" rows="4" placeholder="What is this community about?"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Create Community</button>
+          <a href="/admin/communities" class="btn btn-secondary">Cancel</a>
+        </div>
+      </form>
     </div>
-  </div>
-  
-  <!-- Communities List -->
-  <div class="panel">
-    <div class="panel-header">
-      <h2 class="panel-title">All Communities</h2>
-      <span class="panel-count">{totalCommunities} communities</span>
-    </div>
-    
-    {communities && communities.length > 0 ? (
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Slug</th>
-            <th>Description</th>
-            <th>Created</th>
-          </tr>
-        </thead>
-        <tbody>
+  ) : (
+    <>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">💬</div>
+          <div>
+            <div class="stat-value">{communities?.length || 0}</div>
+            <div class="stat-label">Total Communities</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <h2>All Communities</h2>
+        <a href="?action=new" class="btn btn-primary">+ New Community</a>
+      </div>
+
+      {communities && communities.length > 0 ? (
+        <div class="grid">
           {communities.map(c => (
-            <tr>
-              <td>
-                <div class="community-name">
-                  <span class="community-icon">💬</span>
-                  <strong>{c.name}</strong>
+            <div class="card">
+              <div class="card-header">
+                <div class="community-icon">💬</div>
+                <div>
+                  <h3>{c.name}</h3>
+                  <span class="slug">/{c.slug}</span>
                 </div>
-              </td>
-              <td><code class="slug-code">/{c.slug}</code></td>
-              <td class="description-cell">
-                {c.description ? (
-                  <span>{c.description.substring(0, 50)}{c.description.length > 50 ? '...' : ''}</span>
-                ) : (
-                  <span class="no-desc">No description</span>
-                )}
-              </td>
-              <td>{new Date(c.created_at).toLocaleDateString()}</td>
-            </tr>
+              </div>
+              {c.description && <p class="card-desc">{c.description}</p>}
+              <div class="card-meta">
+                <span>Created {new Date(c.created_at).toLocaleDateString()}</span>
+              </div>
+              <div class="card-actions">
+                <a href={`/community/${c.slug}`} class="btn btn-sm btn-secondary" target="_blank">View →</a>
+                <form method="POST" class="inline">
+                  <input type="hidden" name="communityId" value={c.id} />
+                  <button name="action" value="delete" class="btn btn-sm btn-danger" onclick="return confirm('Delete this community?')">🗑️</button>
+                </form>
+              </div>
+            </div>
           ))}
-        </tbody>
-      </table>
-    ) : (
-      <div class="empty-state">
-        <div class="empty-state-icon">💬</div>
-        <div class="empty-state-title">No communities yet</div>
-        <p>Communities will appear here once created.</p>
-      </div>
-    )}
-  </div>
-  
+        </div>
+      ) : (
+        <div class="empty">
+          <span>💬</span>
+          <p>No communities yet</p>
+          <a href="?action=new" class="btn btn-primary">Create First Community</a>
+        </div>
+      )}
+    </>
+  )}
+
   <style>
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 1.5rem;
-      margin-bottom: 2rem;
-    }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+    .stat-card { background: white; padding: 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 1rem; }
+    .stat-icon { font-size: 1.5rem; width: 44px; height: 44px; background: #f3f4f6; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+    .stat-value { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
+    .stat-label { font-size: 0.8125rem; color: #6b7280; }
     
-    .stat-card {
-      background: white;
-      padding: 1.5rem;
-      border-radius: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; background: white; padding: 1rem 1.25rem; border-radius: 12px; }
+    .toolbar h2 { font-size: 1rem; color: #1a1a2e; }
     
-    .stat-icon {
-      width: 48px;
-      height: 48px;
-      background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.5rem;
-    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; }
+    .card { background: white; border-radius: 12px; padding: 1.25rem; }
+    .card-header { display: flex; gap: 1rem; align-items: center; margin-bottom: 0.75rem; }
+    .community-icon { width: 48px; height: 48px; background: linear-gradient(135deg, #dbeafe, #c7d2fe); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; }
+    .card-header h3 { font-size: 1rem; color: #1a1a2e; margin-bottom: 0.125rem; }
+    .slug { font-size: 0.75rem; color: #9ca3af; font-family: monospace; }
+    .card-desc { font-size: 0.875rem; color: #6b7280; margin-bottom: 1rem; line-height: 1.5; }
+    .card-meta { font-size: 0.8125rem; color: #9ca3af; margin-bottom: 1rem; }
+    .card-actions { display: flex; gap: 0.5rem; }
+    .inline { display: inline; }
     
-    .stat-value {
-      font-size: 1.75rem;
-      font-weight: 700;
-      color: #1a1a2e;
-    }
+    .panel { background: white; border-radius: 12px; overflow: hidden; }
+    .panel-header { display: flex; justify-content: space-between; align-items: center; padding: 1.25rem; border-bottom: 1px solid #e5e7eb; }
+    .panel-header h2 { font-size: 1.125rem; color: #1a1a2e; }
+    .form { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .form-group { display: flex; flex-direction: column; gap: 0.5rem; }
+    .form-group label { font-weight: 600; font-size: 0.875rem; color: #374151; }
+    .form-group input, .form-group textarea { padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 1rem; }
+    .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #2563eb; }
+    .form-actions { display: flex; gap: 1rem; margin-top: 0.5rem; }
     
-    .stat-label {
-      font-size: 0.875rem;
-      color: #6b7280;
-    }
+    .btn { padding: 0.625rem 1.25rem; border-radius: 8px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; }
+    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+    .btn-danger { background: #dc2626; color: white; }
     
-    .panel {
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-      overflow: hidden;
-    }
+    .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
     
-    .panel-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 1rem 1.5rem;
-      border-bottom: 1px solid #f0f0f0;
-    }
-    
-    .panel-title {
-      font-size: 1rem;
-      font-weight: 600;
-      color: #1a1a2e;
-    }
-    
-    .panel-count {
-      font-size: 0.875rem;
-      color: #6b7280;
-    }
-    
-    .admin-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    
-    .admin-table th {
-      text-align: left;
-      padding: 1rem 1.5rem;
-      background: #f9fafb;
-      font-weight: 600;
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      color: #6b7280;
-      border-bottom: 1px solid #e5e7eb;
-    }
-    
-    .admin-table td {
-      padding: 1rem 1.5rem;
-      border-bottom: 1px solid #f0f0f0;
-      font-size: 0.875rem;
-    }
-    
-    .admin-table tr:last-child td {
-      border-bottom: none;
-    }
-    
-    .admin-table tr:hover {
-      background: #f9fafb;
-    }
-    
-    .community-name {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    
-    .community-icon {
-      width: 36px;
-      height: 36px;
-      background: linear-gradient(135deg, #dbeafe 0%, #c7d2fe 100%);
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1rem;
-    }
-    
-    .slug-code {
-      font-family: monospace;
-      font-size: 0.75rem;
-      background: #f3f4f6;
-      padding: 0.25rem 0.5rem;
-      border-radius: 4px;
-      color: #6b7280;
-    }
-    
-    .description-cell {
-      max-width: 300px;
-      color: #6b7280;
-    }
-    
-    .no-desc {
-      color: #9ca3af;
-      font-style: italic;
-    }
-    
-    .empty-state {
-      text-align: center;
-      padding: 4rem 2rem;
-      color: #6b7280;
-    }
-    
-    .empty-state-icon {
-      font-size: 4rem;
-      margin-bottom: 1rem;
-    }
-    
-    .empty-state-title {
-      font-size: 1.25rem;
-      font-weight: 600;
-      color: #374151;
-      margin-bottom: 0.5rem;
-    }
-    
-    @media (max-width: 1024px) {
-      .stats-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-    }
+    .empty { text-align: center; padding: 4rem 2rem; background: white; border-radius: 12px; }
+    .empty span { font-size: 3rem; display: block; margin-bottom: 1rem; }
+    .empty p { color: #6b7280; margin-bottom: 1rem; }
     
     @media (max-width: 768px) {
-      .stats-grid {
-        grid-template-columns: 1fr;
-      }
-      
-      .admin-table {
-        display: block;
-        overflow-x: auto;
-      }
+      .stats-grid { grid-template-columns: 1fr; }
+      .form-row { grid-template-columns: 1fr; }
     }
   </style>
 </AdminLayout>
