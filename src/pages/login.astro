@@ -4,443 +4,323 @@ export const prerender = false;
 
 import Layout from "../layouts/Layout.astro";
 import { supabase } from "../lib/supabase";
-import { getSetting } from "../lib/settings";
 
-// Check if already logged in
-const accessToken = Astro.cookies.get("sb-access-token")?.value;
-const refreshToken = Astro.cookies.get("sb-refresh-token")?.value;
-
-if (accessToken && refreshToken) {
-  const { data } = await supabase.auth.setSession({
-    access_token: accessToken,
-    refresh_token: refreshToken,
-  });
-  
-  if (data.session) {
-    // Redirect to dashboard if already logged in
-    const redirectTo = Astro.url.searchParams.get('redirect') || '/dashboard';
-    return Astro.redirect(redirectTo);
-  }
+// Redirect if already logged in
+const session = Astro.locals.session;
+if (session?.user) {
+  return Astro.redirect('/dashboard');
 }
 
-// Get settings for styling
-const appearance = await getSetting('appearance');
-const general = await getSetting('general');
+let error = '';
+let pendingAccount = false;
+let deniedAccount = false;
+let suspendedAccount = false;
 
-let errorMessage = '';
-const urlError = Astro.url.searchParams.get('error');
+// Check for status from URL (redirected from middleware)
+const statusParam = Astro.url.searchParams.get('status');
+if (statusParam === 'pending') pendingAccount = true;
+if (statusParam === 'denied') deniedAccount = true;
+if (statusParam === 'suspended') suspendedAccount = true;
 
-if (urlError === 'session_expired') {
-  errorMessage = 'Your session has expired. Please log in again.';
-} else if (urlError === 'unauthorized') {
-  errorMessage = 'Please log in to access that page.';
-}
-
-// Handle login
 if (Astro.request.method === 'POST') {
-  const form = await Astro.request.formData();
-  const email = form.get('email') as string;
-  const password = form.get('password') as string;
-  
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
-  
-  if (error) {
-    errorMessage = error.message;
-  } else if (data.session) {
-    // Set cookies
-    Astro.cookies.set("sb-access-token", data.session.access_token, {
-      path: "/",
-      httpOnly: true,
-      secure: import.meta.env.PROD,
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 7,
+  const formData = await Astro.request.formData();
+  const email = formData.get('email') as string;
+  const password = formData.get('password') as string;
+
+  if (!email || !password) {
+    error = 'Email and password are required.';
+  } else {
+    const { data, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
     });
-    Astro.cookies.set("sb-refresh-token", data.session.refresh_token, {
-      path: "/",
-      httpOnly: true,
-      secure: import.meta.env.PROD,
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 30,
-    });
-    
-    // Redirect to dashboard or requested page
-    const redirectTo = Astro.url.searchParams.get('redirect') || '/dashboard';
-    return Astro.redirect(redirectTo);
+
+    if (authError) {
+      error = authError.message;
+    } else if (data.user) {
+      // Check user profile status
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('status, is_active')
+        .eq('id', data.user.id)
+        .single();
+
+      if (profile?.status === 'pending') {
+        await supabase.auth.signOut();
+        pendingAccount = true;
+      } else if (profile?.status === 'denied') {
+        await supabase.auth.signOut();
+        deniedAccount = true;
+      } else if (!profile?.is_active || profile?.status === 'suspended') {
+        await supabase.auth.signOut();
+        suspendedAccount = true;
+      } else {
+        // Set session cookie and redirect
+        const response = Astro.response;
+        response.headers.set(
+          'Set-Cookie',
+          `sb-access-token=${data.session?.access_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`
+        );
+        return Astro.redirect('/dashboard');
+      }
+    }
   }
 }
+
+const returnTo = Astro.url.searchParams.get('returnTo') || '/dashboard';
 ---
 
-<Layout title="Log In">
-  <div class="auth-page">
-    <div class="auth-container">
-      <div class="auth-header">
-        <h1>Welcome Back</h1>
-        <p>Log in to your {general.siteName} account</p>
-      </div>
-      
-      {errorMessage && <div class="alert error">{errorMessage}</div>}
-      
-      <form method="POST" class="auth-form">
-        <div class="form-group">
-          <label for="email">Email</label>
-          <input 
-            type="email" 
-            id="email" 
-            name="email" 
-            required 
-            placeholder="you@example.com"
-            autocomplete="email"
-          />
-        </div>
-        
-        <div class="form-group">
-          <label for="password">Password</label>
-          <input 
-            type="password" 
-            id="password" 
-            name="password" 
-            required 
-            placeholder="••••••••"
-            autocomplete="current-password"
-          />
-        </div>
-        
-        <div class="form-options">
-          <label class="checkbox-label">
-            <input type="checkbox" name="remember" />
-            <span>Remember me</span>
-          </label>
-          <a href="/forgot-password" class="forgot-link">Forgot password?</a>
-        </div>
-        
-        <button type="submit" class="btn btn-primary btn-block">
-          Log In
-        </button>
-        
-        <p class="auth-footer">
-          Don't have an account? <a href="/signup">Sign up</a>
-        </p>
-      </form>
-      
-      <div class="auth-divider">
-        <span>or</span>
-      </div>
-      
-      <div class="social-login">
-        <button type="button" class="btn btn-social btn-google" disabled>
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
-            <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/>
-            <path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
-            <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
-          </svg>
-          Continue with Google
-        </button>
-      </div>
-    </div>
-    
-    <div class="auth-sidebar">
-      <div class="sidebar-content">
-        <h2>Join thousands of creators</h2>
-        <p>Connect with brands, create authentic content, and get paid for your creativity.</p>
-        
-        <div class="features">
-          <div class="feature">
-            <span class="feature-icon">📢</span>
-            <div>
-              <strong>Browse Campaigns</strong>
-              <p>Find opportunities that match your style</p>
-            </div>
-          </div>
-          <div class="feature">
-            <span class="feature-icon">🎬</span>
-            <div>
-              <strong>Create Content</strong>
-              <p>Use your creativity to make authentic UGC</p>
-            </div>
-          </div>
-          <div class="feature">
-            <span class="feature-icon">💰</span>
-            <div>
-              <strong>Get Paid</strong>
-              <p>Earn money for approved content</p>
-            </div>
+<Layout>
+  <div class="login-page">
+    <div class="login-container">
+      {pendingAccount ? (
+        <div class="status-card pending">
+          <div class="status-icon">⏳</div>
+          <h1>Account Pending Approval</h1>
+          <p>Your account is still being reviewed by our team.</p>
+          <p class="subtext">We'll send you an email as soon as your account is approved. This usually takes 1-2 business days.</p>
+          <div class="status-actions">
+            <a href="/" class="btn btn-secondary">Go Home</a>
           </div>
         </div>
-      </div>
+      ) : deniedAccount ? (
+        <div class="status-card denied">
+          <div class="status-icon">❌</div>
+          <h1>Application Not Approved</h1>
+          <p>Unfortunately, your application was not approved at this time.</p>
+          <p class="subtext">If you believe this is a mistake, please contact our support team.</p>
+          <div class="status-actions">
+            <a href="/" class="btn btn-secondary">Go Home</a>
+          </div>
+        </div>
+      ) : suspendedAccount ? (
+        <div class="status-card suspended">
+          <div class="status-icon">🚫</div>
+          <h1>Account Suspended</h1>
+          <p>Your account has been suspended.</p>
+          <p class="subtext">Please contact support if you believe this is an error.</p>
+          <div class="status-actions">
+            <a href="/" class="btn btn-secondary">Go Home</a>
+          </div>
+        </div>
+      ) : (
+        <div class="login-card">
+          <div class="card-header">
+            <h1>Welcome Back</h1>
+            <p>Log in to your creator account</p>
+          </div>
+
+          {error && <div class="alert error">{error}</div>}
+
+          <form method="POST" class="login-form">
+            <div class="form-group">
+              <label for="email">Email Address</label>
+              <input 
+                type="email" 
+                id="email" 
+                name="email" 
+                placeholder="you@example.com"
+                required
+                autocomplete="email"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="password">Password</label>
+              <input 
+                type="password" 
+                id="password" 
+                name="password" 
+                placeholder="••••••••"
+                required
+                autocomplete="current-password"
+              />
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-full">Log In</button>
+          </form>
+
+          <div class="card-footer">
+            <p>Don't have an account? <a href="/signup">Join the waitlist</a></p>
+          </div>
+        </div>
+      )}
     </div>
   </div>
-  
-  <style define:vars={{ primaryColor: appearance.primaryColor, accentColor: appearance.accentColor }}>
-    .auth-page {
-      min-height: calc(100vh - 70px);
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-    }
-    
-    .auth-container {
+
+  <style>
+    .login-page {
+      min-height: 100vh;
       display: flex;
-      flex-direction: column;
+      align-items: center;
       justify-content: center;
-      padding: 3rem;
-      max-width: 480px;
-      margin: 0 auto;
+      padding: 2rem;
+      background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+    }
+
+    .login-container {
       width: 100%;
+      max-width: 420px;
     }
-    
-    .auth-header {
+
+    .login-card, .status-card {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 2rem 2rem 0;
       text-align: center;
-      margin-bottom: 2rem;
     }
-    
-    .auth-header h1 {
-      font-size: 2rem;
+
+    .card-header h1 {
+      font-size: 1.75rem;
       color: #1a1a2e;
       margin-bottom: 0.5rem;
     }
-    
-    .auth-header p {
+
+    .card-header p {
       color: #6b7280;
-    }
-    
-    .alert {
-      padding: 1rem;
-      border-radius: 8px;
-      margin-bottom: 1.5rem;
       font-size: 0.9375rem;
     }
-    
-    .alert.error {
-      background: #fee2e2;
-      color: #991b1b;
-      border: 1px solid #fecaca;
+
+    .login-form {
+      padding: 1.5rem 2rem 2rem;
     }
-    
-    .auth-form {
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
-    }
-    
+
     .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
+      margin-bottom: 1.25rem;
     }
-    
+
     .form-group label {
-      font-weight: 600;
+      display: block;
       font-size: 0.875rem;
+      font-weight: 600;
       color: #374151;
+      margin-bottom: 0.5rem;
     }
-    
+
     .form-group input {
+      width: 100%;
       padding: 0.875rem 1rem;
       border: 2px solid #e5e7eb;
       border-radius: 10px;
       font-size: 1rem;
       transition: all 0.2s;
     }
-    
+
     .form-group input:focus {
       outline: none;
-      border-color: var(--primaryColor);
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primaryColor) 20%, transparent);
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
     }
-    
-    .form-options {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    
-    .checkbox-label {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.875rem;
-      color: #6b7280;
-      cursor: pointer;
-    }
-    
-    .checkbox-label input {
-      width: 16px;
-      height: 16px;
-      accent-color: var(--primaryColor);
-    }
-    
-    .forgot-link {
-      font-size: 0.875rem;
-      color: var(--primaryColor);
-      text-decoration: none;
-    }
-    
-    .forgot-link:hover {
-      text-decoration: underline;
-    }
-    
+
     .btn {
       padding: 0.875rem 1.5rem;
-      border: none;
       border-radius: 10px;
       font-weight: 600;
       font-size: 1rem;
+      text-decoration: none;
+      border: none;
       cursor: pointer;
       transition: all 0.2s;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 0.75rem;
     }
-    
+
     .btn-primary {
-      background: var(--primaryColor);
+      background: #2563eb;
       color: white;
     }
-    
+
     .btn-primary:hover {
-      opacity: 0.9;
-      transform: translateY(-1px);
+      background: #1d4ed8;
     }
-    
-    .btn-block {
-      width: 100%;
-    }
-    
-    .auth-footer {
-      text-align: center;
-      color: #6b7280;
-      font-size: 0.9375rem;
-      margin-top: 0.5rem;
-    }
-    
-    .auth-footer a {
-      color: var(--primaryColor);
-      font-weight: 600;
-      text-decoration: none;
-    }
-    
-    .auth-footer a:hover {
-      text-decoration: underline;
-    }
-    
-    .auth-divider {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      margin: 1.5rem 0;
-    }
-    
-    .auth-divider::before,
-    .auth-divider::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: #e5e7eb;
-    }
-    
-    .auth-divider span {
-      color: #9ca3af;
-      font-size: 0.875rem;
-    }
-    
-    .social-login {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-    
-    .btn-social {
-      background: white;
-      border: 2px solid #e5e7eb;
+
+    .btn-secondary {
+      background: #f3f4f6;
       color: #374151;
     }
-    
-    .btn-social:hover:not(:disabled) {
-      border-color: #d1d5db;
+
+    .btn-full {
+      width: 100%;
+    }
+
+    .card-footer {
+      padding: 1.5rem 2rem;
       background: #f9fafb;
+      text-align: center;
+      font-size: 0.9375rem;
+      color: #6b7280;
     }
-    
-    .btn-social:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
+
+    .card-footer a {
+      color: #2563eb;
+      text-decoration: none;
+      font-weight: 600;
     }
-    
-    /* Sidebar */
-    .auth-sidebar {
-      background: linear-gradient(135deg, var(--primaryColor) 0%, color-mix(in srgb, var(--primaryColor) 80%, #1a1a2e) 100%);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 3rem;
+
+    .card-footer a:hover {
+      text-decoration: underline;
     }
-    
-    .sidebar-content {
-      max-width: 400px;
-      color: white;
+
+    .alert {
+      margin: 1.5rem 2rem 0;
+      padding: 1rem;
+      border-radius: 10px;
+      font-size: 0.9375rem;
     }
-    
-    .sidebar-content h2 {
-      font-size: 2rem;
+
+    .alert.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    /* Status Cards */
+    .status-card {
+      padding: 3rem 2rem;
+      text-align: center;
+    }
+
+    .status-card.pending {
+      border-top: 4px solid #f59e0b;
+    }
+
+    .status-card.denied {
+      border-top: 4px solid #ef4444;
+    }
+
+    .status-card.suspended {
+      border-top: 4px solid #6b7280;
+    }
+
+    .status-icon {
+      font-size: 4rem;
       margin-bottom: 1rem;
     }
-    
-    .sidebar-content > p {
-      font-size: 1.125rem;
-      opacity: 0.9;
-      margin-bottom: 3rem;
-      line-height: 1.6;
-    }
-    
-    .features {
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
-    }
-    
-    .feature {
-      display: flex;
-      gap: 1rem;
-      align-items: flex-start;
-    }
-    
-    .feature-icon {
+
+    .status-card h1 {
       font-size: 1.5rem;
-      width: 48px;
-      height: 48px;
-      background: rgba(255,255,255,0.15);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      color: #1a1a2e;
+      margin-bottom: 1rem;
     }
-    
-    .feature strong {
-      display: block;
-      margin-bottom: 0.25rem;
+
+    .status-card p {
+      color: #374151;
+      font-size: 1rem;
+      margin-bottom: 0.5rem;
     }
-    
-    .feature p {
-      font-size: 0.875rem;
-      opacity: 0.8;
-      margin: 0;
+
+    .status-card .subtext {
+      color: #6b7280;
+      font-size: 0.9375rem;
     }
-    
-    @media (max-width: 1024px) {
-      .auth-page {
-        grid-template-columns: 1fr;
-      }
-      
-      .auth-sidebar {
-        display: none;
-      }
-      
-      .auth-container {
-        padding: 2rem;
-      }
+
+    .status-actions {
+      margin-top: 1.5rem;
     }
   </style>
 </Layout>
