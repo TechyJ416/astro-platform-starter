@@ -1,7 +1,6 @@
 ---
 // src/layouts/Layout.astro
-import SiteHead from "../components/SiteHead.astro";
-import { getSetting } from "../lib/settings";
+import { supabase } from "../lib/supabase";
 
 interface Props {
   title?: string;
@@ -10,15 +9,46 @@ interface Props {
 
 const { title, description } = Astro.props;
 
-// Load settings for header/footer
-const general = await getSetting('general');
-const appearance = await getSetting('appearance');
+// Load settings from database
+let general = {
+  siteName: 'Banity',
+  tagline: 'Create Authentic Content. Get Paid.',
+  description: 'Banity connects creators with brands for authentic UGC campaigns.',
+  supportEmail: 'support@banity.com',
+  contactEmail: 'hello@banity.com',
+};
 
-// Check if user is logged in (from middleware locals)
-const session = Astro.locals.session;
-const profile = Astro.locals.profile;
-const isAdmin = Astro.locals.isAdmin;
-const isModerator = Astro.locals.isModerator;
+let appearance = {
+  primaryColor: '#2563eb',
+  accentColor: '#059669',
+  logoUrl: '',
+  faviconUrl: '',
+};
+
+try {
+  const { data: rows } = await supabase.from('site_settings').select('key, value');
+  if (rows) {
+    for (const row of rows) {
+      if (row.key === 'general' && row.value) {
+        general = { ...general, ...row.value };
+      }
+      if (row.key === 'appearance' && row.value) {
+        appearance = { ...appearance, ...row.value };
+      }
+    }
+  }
+} catch (e) {
+  console.error('Failed to load settings:', e);
+}
+
+// Build page title
+const pageTitle = title ? `${title} | ${general.siteName}` : `${general.siteName} - ${general.tagline}`;
+const pageDescription = description || general.description;
+
+// Check auth state from middleware
+const session = Astro.locals?.session;
+const isAdmin = Astro.locals?.isAdmin;
+const isModerator = Astro.locals?.isModerator;
 ---
 
 <!doctype html>
@@ -26,9 +56,20 @@ const isModerator = Astro.locals.isModerator;
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <SiteHead title={title} description={description} />
+    <title>{pageTitle}</title>
+    <meta name="description" content={pageDescription} />
+    
+    {appearance.faviconUrl ? (
+      <link rel="icon" href={appearance.faviconUrl} />
+    ) : (
+      <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    )}
+    
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={pageDescription} />
+    {appearance.logoUrl && <meta property="og:image" content={appearance.logoUrl} />}
   </head>
-  <body>
+  <body style={`--primary-color: ${appearance.primaryColor}; --accent-color: ${appearance.accentColor};`}>
     <header class="site-header">
       <div class="header-container">
         <a href="/" class="logo">
@@ -62,12 +103,6 @@ const isModerator = Astro.locals.isModerator;
             </>
           )}
         </div>
-        
-        <button class="mobile-menu-toggle" aria-label="Toggle menu">
-          <span></span>
-          <span></span>
-          <span></span>
-        </button>
       </div>
     </header>
     
@@ -83,34 +118,25 @@ const isModerator = Astro.locals.isModerator;
           ) : (
             <span class="footer-logo-text">{general.siteName}</span>
           )}
-          <p class="footer-tagline">{general.tagline}</p>
+          <p>{general.tagline}</p>
         </div>
         
         <div class="footer-links">
           <div class="footer-column">
             <h4>Platform</h4>
-            <a href="/campaigns">Browse Campaigns</a>
-            <a href="/creators">For Creators</a>
-            <a href="/brands">For Brands</a>
+            <a href="/campaigns">Campaigns</a>
+            <a href="/creators">Creators</a>
+            <a href="/brands">Brands</a>
           </div>
-          
           <div class="footer-column">
             <h4>Company</h4>
-            <a href="/about">About Us</a>
+            <a href="/about">About</a>
             <a href="/contact">Contact</a>
-            <a href="/blog">Blog</a>
           </div>
-          
-          <div class="footer-column">
-            <h4>Legal</h4>
-            <a href="/privacy">Privacy Policy</a>
-            <a href="/terms">Terms of Service</a>
-          </div>
-          
           <div class="footer-column">
             <h4>Support</h4>
-            <a href="/help">Help Center</a>
             <a href={`mailto:${general.supportEmail}`}>Email Support</a>
+            <a href={`mailto:${general.contactEmail}`}>Contact Us</a>
           </div>
         </div>
         
@@ -119,32 +145,23 @@ const isModerator = Astro.locals.isModerator;
         </div>
       </div>
     </footer>
-    
+
     <style>
-      :root {
-        --header-height: 70px;
-      }
-      
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
       
       body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        font-family: system-ui, -apple-system, sans-serif;
         line-height: 1.6;
         color: #1a1a2e;
         background: #f8fafc;
       }
       
-      /* Header */
       .site-header {
         position: fixed;
         top: 0;
         left: 0;
         right: 0;
-        height: var(--header-height);
+        height: 70px;
         background: white;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         z-index: 1000;
@@ -161,21 +178,12 @@ const isModerator = Astro.locals.isModerator;
         gap: 2rem;
       }
       
-      .logo {
-        text-decoration: none;
-        display: flex;
-        align-items: center;
-      }
-      
-      .logo-image {
-        height: 36px;
-        width: auto;
-      }
-      
+      .logo { text-decoration: none; }
+      .logo-image { height: 36px; }
       .logo-text {
         font-size: 1.5rem;
         font-weight: 700;
-        color: var(--color-primary, #2563eb);
+        color: var(--primary-color, #2563eb);
       }
       
       .main-nav {
@@ -187,12 +195,10 @@ const isModerator = Astro.locals.isModerator;
         text-decoration: none;
         color: #4b5563;
         font-weight: 500;
-        font-size: 0.9375rem;
-        transition: color 0.2s;
       }
       
       .main-nav a:hover {
-        color: var(--color-primary, #2563eb);
+        color: var(--primary-color, #2563eb);
       }
       
       .header-actions {
@@ -202,25 +208,21 @@ const isModerator = Astro.locals.isModerator;
       
       .btn {
         display: inline-flex;
-        align-items: center;
-        justify-content: center;
         padding: 0.5rem 1.25rem;
         border-radius: 8px;
         font-weight: 600;
         font-size: 0.875rem;
         text-decoration: none;
         transition: all 0.2s;
-        border: none;
-        cursor: pointer;
       }
       
       .btn-primary {
-        background: var(--color-primary, #2563eb);
+        background: var(--primary-color, #2563eb);
         color: white;
       }
       
       .btn-primary:hover {
-        background: var(--color-primary-dark, #1d4ed8);
+        filter: brightness(0.9);
       }
       
       .btn-secondary {
@@ -230,35 +232,15 @@ const isModerator = Astro.locals.isModerator;
       }
       
       .btn-secondary:hover {
-        border-color: var(--color-primary, #2563eb);
-        color: var(--color-primary, #2563eb);
+        border-color: var(--primary-color, #2563eb);
+        color: var(--primary-color, #2563eb);
       }
       
-      .mobile-menu-toggle {
-        display: none;
-        flex-direction: column;
-        gap: 5px;
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 5px;
-      }
-      
-      .mobile-menu-toggle span {
-        display: block;
-        width: 24px;
-        height: 2px;
-        background: #1a1a2e;
-        transition: all 0.3s;
-      }
-      
-      /* Main Content */
       main {
-        min-height: calc(100vh - var(--header-height) - 300px);
-        padding-top: var(--header-height);
+        min-height: calc(100vh - 70px - 300px);
+        padding-top: 70px;
       }
       
-      /* Footer */
       .site-footer {
         background: #1a1a2e;
         color: #9ca3af;
@@ -271,30 +253,14 @@ const isModerator = Astro.locals.isModerator;
         padding: 0 1.5rem;
       }
       
-      .footer-brand {
-        margin-bottom: 3rem;
-      }
-      
-      .footer-logo {
-        height: 32px;
-        width: auto;
-        filter: brightness(0) invert(1);
-      }
-      
-      .footer-logo-text {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: white;
-      }
-      
-      .footer-tagline {
-        margin-top: 0.5rem;
-        font-size: 0.9375rem;
-      }
+      .footer-brand { margin-bottom: 3rem; }
+      .footer-logo { height: 32px; filter: brightness(0) invert(1); }
+      .footer-logo-text { font-size: 1.5rem; font-weight: 700; color: white; }
+      .footer-brand p { margin-top: 0.5rem; }
       
       .footer-links {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(3, 1fr);
         gap: 2rem;
         margin-bottom: 3rem;
       }
@@ -302,24 +268,18 @@ const isModerator = Astro.locals.isModerator;
       .footer-column h4 {
         color: white;
         font-size: 0.875rem;
-        font-weight: 600;
         margin-bottom: 1rem;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
       }
       
       .footer-column a {
         display: block;
         color: #9ca3af;
         text-decoration: none;
-        font-size: 0.9375rem;
         margin-bottom: 0.75rem;
-        transition: color 0.2s;
       }
       
-      .footer-column a:hover {
-        color: white;
-      }
+      .footer-column a:hover { color: white; }
       
       .footer-bottom {
         padding-top: 2rem;
@@ -328,35 +288,10 @@ const isModerator = Astro.locals.isModerator;
         font-size: 0.875rem;
       }
       
-      /* Responsive */
       @media (max-width: 768px) {
-        .main-nav,
-        .header-actions {
-          display: none;
-        }
-        
-        .mobile-menu-toggle {
-          display: flex;
-        }
-        
-        .footer-links {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-      
-      @media (max-width: 480px) {
-        .footer-links {
-          grid-template-columns: 1fr;
-        }
+        .main-nav, .header-actions { display: none; }
+        .footer-links { grid-template-columns: 1fr; }
       }
     </style>
-    
-    <script is:inline>
-      // Mobile menu toggle
-      document.querySelector('.mobile-menu-toggle')?.addEventListener('click', function() {
-        this.classList.toggle('active');
-        // Add mobile menu logic here
-      });
-    </script>
   </body>
 </html>
