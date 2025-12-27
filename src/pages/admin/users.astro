@@ -5,7 +5,6 @@ export const prerender = false;
 import AdminLayout from "../../layouts/AdminLayout.astro";
 import { createClient } from "@supabase/supabase-js";
 
-// Auth from middleware
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
 const session = Astro.locals.session;
 
@@ -18,7 +17,6 @@ const supabaseUrl = import.meta.env.SUPABASE_URL;
 const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_KEY;
 const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
 
-// Use service key if available (required for admin operations)
 const supabase = createClient(
   supabaseUrl,
   supabaseServiceKey || supabaseAnonKey,
@@ -61,23 +59,22 @@ if (Astro.request.method === 'POST') {
       } else if (password.length < 8) {
         actionError = 'Password must be at least 8 characters.';
       } else {
-        // Create auth user
         const { data: authData, error: authError } = await supabase.auth.admin.createUser({
           email,
           password,
-          email_confirm: true, // Auto-confirm email
+          email_confirm: true,
           user_metadata: { full_name: fullName },
         });
 
         if (authError) {
           actionError = authError.message;
         } else if (authData.user) {
-          // Create profile
           const { error: profileError } = await supabase.from('profiles').upsert({
             id: authData.user.id,
             email,
             full_name: fullName,
             role,
+            status: 'active',
             is_active: true,
             is_verified: true,
           });
@@ -89,6 +86,42 @@ if (Astro.request.method === 'POST') {
           }
         }
       }
+    }
+  }
+
+  // ============ APPROVE WAITLIST USER ============
+  if (formAction === 'approve') {
+    const userId = form.get('userId') as string;
+    const { data: user } = await supabase.from('profiles').select('email, full_name').eq('id', userId).single();
+    
+    const { error } = await supabase.from('profiles').update({
+      status: 'active',
+      is_active: true,
+    }).eq('id', userId);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = `${user?.full_name || user?.email} has been approved and can now log in.`;
+      // TODO: Send approval email to user
+    }
+  }
+
+  // ============ DENY WAITLIST USER ============
+  if (formAction === 'deny') {
+    const userId = form.get('userId') as string;
+    const { data: user } = await supabase.from('profiles').select('email, full_name').eq('id', userId).single();
+    
+    const { error } = await supabase.from('profiles').update({
+      status: 'denied',
+      is_active: false,
+    }).eq('id', userId);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = `${user?.full_name || user?.email}'s application has been denied.`;
+      // TODO: Send denial email to user
     }
   }
 
@@ -109,11 +142,8 @@ if (Astro.request.method === 'POST') {
           password: newPassword,
         });
 
-        if (error) {
-          actionError = error.message;
-        } else {
-          actionMessage = 'Password reset successfully.';
-        }
+        if (error) actionError = error.message;
+        else actionMessage = 'Password reset successfully.';
       }
     }
   }
@@ -123,21 +153,20 @@ if (Astro.request.method === 'POST') {
     const userId = form.get('userId') as string;
     const fullName = (form.get('fullName') as string)?.trim();
     const role = form.get('role') as string;
+    const status = form.get('status') as string;
     const isActive = form.get('isActive') === 'on';
     const isVerified = form.get('isVerified') === 'on';
 
     const { error } = await supabase.from('profiles').update({
       full_name: fullName,
       role,
+      status,
       is_active: isActive,
       is_verified: isVerified,
     }).eq('id', userId);
 
-    if (error) {
-      actionError = error.message;
-    } else {
-      return Astro.redirect('/admin/users?updated=true');
-    }
+    if (error) actionError = error.message;
+    else return Astro.redirect('/admin/users?updated=true');
   }
 
   // ============ QUICK ACTIONS ============
@@ -145,9 +174,12 @@ if (Astro.request.method === 'POST') {
   
   if (formAction === 'toggle_active' && userId) {
     const { data: user } = await supabase.from('profiles').select('is_active').eq('id', userId).single();
-    const { error } = await supabase.from('profiles').update({ is_active: !user?.is_active }).eq('id', userId);
+    const { error } = await supabase.from('profiles').update({ 
+      is_active: !user?.is_active,
+      status: !user?.is_active ? 'active' : 'suspended'
+    }).eq('id', userId);
     if (error) actionError = error.message;
-    else actionMessage = `User ${user?.is_active ? 'disabled' : 'enabled'} successfully.`;
+    else actionMessage = `User ${user?.is_active ? 'suspended' : 'activated'}.`;
   }
 
   if (formAction === 'set_role' && userId) {
@@ -163,9 +195,7 @@ if (Astro.request.method === 'POST') {
     } else if (!hasServiceKey) {
       actionError = 'SUPABASE_SERVICE_KEY is required to delete users.';
     } else {
-      // Delete profile first
       await supabase.from('profiles').delete().eq('id', userId);
-      // Delete auth user
       const { error } = await supabase.auth.admin.deleteUser(userId);
       if (error) actionError = error.message;
       else actionMessage = 'User deleted permanently.';
@@ -180,41 +210,40 @@ if (Astro.url.searchParams.get('updated')) actionMessage = 'User updated success
 // Fetch all users
 const { data: users, error } = await supabase
   .from("profiles")
-  .select("id, email, full_name, role, is_active, is_verified, avatar_url, bio, created_at")
+  .select("id, email, full_name, role, status, is_active, is_verified, avatar_url, bio, created_at")
   .order("created_at", { ascending: false });
 
 // Stats
-const totalUsers = users?.length || 0;
-const activeUsers = users?.filter(u => u.is_active).length || 0;
-const verifiedUsers = users?.filter(u => u.is_verified).length || 0;
-const adminCount = users?.filter(u => u.role === 'admin').length || 0;
-const modCount = users?.filter(u => u.role === 'moderator').length || 0;
-const creatorCount = users?.filter(u => u.role === 'creator').length || 0;
+const allUsers = users || [];
+const pendingUsers = allUsers.filter(u => u.status === 'pending');
+const activeUsers = allUsers.filter(u => u.status === 'active' && u.is_active);
+const deniedUsers = allUsers.filter(u => u.status === 'denied');
+const adminCount = allUsers.filter(u => u.role === 'admin').length;
+const modCount = allUsers.filter(u => u.role === 'moderator').length;
+const creatorCount = allUsers.filter(u => u.role === 'creator').length;
 
 // Filter
-const filter = Astro.url.searchParams.get('filter') || 'all';
+const filter = Astro.url.searchParams.get('filter') || (pendingUsers.length > 0 ? 'pending' : 'all');
 const searchQuery = Astro.url.searchParams.get('q')?.toLowerCase() || '';
 
-const filteredUsers = users?.filter(user => {
-  // Apply role/status filter
+const filteredUsers = allUsers.filter(user => {
   let matchesFilter = true;
-  if (filter === 'active') matchesFilter = user.is_active;
-  else if (filter === 'inactive') matchesFilter = !user.is_active;
-  else if (filter === 'verified') matchesFilter = user.is_verified;
+  if (filter === 'pending') matchesFilter = user.status === 'pending';
+  else if (filter === 'active') matchesFilter = user.status === 'active' && user.is_active;
+  else if (filter === 'denied') matchesFilter = user.status === 'denied';
+  else if (filter === 'suspended') matchesFilter = user.status === 'suspended' || (!user.is_active && user.status !== 'denied' && user.status !== 'pending');
   else if (filter === 'admin') matchesFilter = user.role === 'admin';
   else if (filter === 'moderator') matchesFilter = user.role === 'moderator';
   else if (filter === 'creator') matchesFilter = user.role === 'creator';
 
-  // Apply search
   if (searchQuery) {
     const matchesSearch = 
       user.email?.toLowerCase().includes(searchQuery) ||
       user.full_name?.toLowerCase().includes(searchQuery);
     return matchesFilter && matchesSearch;
   }
-
   return matchesFilter;
-}) || [];
+});
 
 const showForm = action === 'new' || editUserId;
 ---
@@ -226,8 +255,7 @@ const showForm = action === 'new' || editUserId;
 
   {!hasServiceKey && isMasterKeySession && (
     <div class="alert warning">
-      ⚠️ SUPABASE_SERVICE_KEY not configured. Password reset and user creation features are disabled.
-      <a href="/admin/settings?section=debug">Check settings</a>
+      ⚠️ SUPABASE_SERVICE_KEY not configured. Password reset and user creation disabled.
     </div>
   )}
 
@@ -239,12 +267,11 @@ const showForm = action === 'new' || editUserId;
       </div>
       
       {action === 'new' ? (
-        <!-- Create User Form -->
         <form method="POST" class="form">
           <input type="hidden" name="action" value="create_user" />
           
           {!isMasterKeySession && (
-            <div class="alert warning">⚠️ Only master key sessions can create users. Log in with master key.</div>
+            <div class="alert warning">⚠️ Only master key sessions can create users.</div>
           )}
           
           <div class="form-row">
@@ -260,7 +287,7 @@ const showForm = action === 'new' || editUserId;
 
           <div class="form-row">
             <div class="form-group">
-              <label>Password * <span class="hint">(min 8 characters)</span></label>
+              <label>Password * <span class="hint">(min 8 chars)</span></label>
               <input type="password" name="password" required minlength="8" placeholder="••••••••" />
             </div>
             <div class="form-group">
@@ -279,108 +306,141 @@ const showForm = action === 'new' || editUserId;
           </div>
         </form>
       ) : editUser ? (
-        <!-- Edit User Form -->
-        <form method="POST" class="form">
-          <input type="hidden" name="action" value="update_user" />
-          <input type="hidden" name="userId" value={editUser.id} />
-          
-          <div class="user-header">
-            <div class="user-avatar large">
-              {editUser.avatar_url ? (
-                <img src={editUser.avatar_url} alt={editUser.full_name || 'User'} />
-              ) : (
-                <span>{editUser.full_name?.charAt(0) || editUser.email?.charAt(0)?.toUpperCase() || '?'}</span>
-              )}
+        <>
+          <form method="POST" class="form">
+            <input type="hidden" name="action" value="update_user" />
+            <input type="hidden" name="userId" value={editUser.id} />
+            
+            <div class="user-header">
+              <div class="user-avatar large">
+                {editUser.avatar_url ? (
+                  <img src={editUser.avatar_url} alt={editUser.full_name || 'User'} />
+                ) : (
+                  <span>{editUser.full_name?.charAt(0) || editUser.email?.charAt(0)?.toUpperCase() || '?'}</span>
+                )}
+              </div>
+              <div>
+                <div class="user-email-display">{editUser.email}</div>
+                <div class="user-id">ID: {editUser.id}</div>
+              </div>
             </div>
-            <div>
-              <div class="user-email-display">{editUser.email}</div>
-              <div class="user-id">ID: {editUser.id}</div>
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label>Full Name</label>
+                <input type="text" name="fullName" value={editUser.full_name || ''} placeholder="John Doe" />
+              </div>
+              <div class="form-group">
+                <label>Role</label>
+                <select name="role">
+                  <option value="creator" selected={editUser.role === 'creator'}>Creator</option>
+                  <option value="moderator" selected={editUser.role === 'moderator'}>Moderator</option>
+                  <option value="admin" selected={editUser.role === 'admin'}>Admin</option>
+                </select>
+              </div>
             </div>
-          </div>
-          
-          <div class="form-row">
-            <div class="form-group">
-              <label>Full Name</label>
-              <input type="text" name="fullName" value={editUser.full_name || ''} placeholder="John Doe" />
-            </div>
-            <div class="form-group">
-              <label>Role</label>
-              <select name="role">
-                <option value="creator" selected={editUser.role === 'creator'}>Creator</option>
-                <option value="moderator" selected={editUser.role === 'moderator'}>Moderator</option>
-                <option value="admin" selected={editUser.role === 'admin'}>Admin</option>
-              </select>
-            </div>
-          </div>
 
-          <div class="form-row">
-            <div class="form-group">
-              <label class="toggle-label">
-                <input type="checkbox" name="isActive" checked={editUser.is_active} />
-                <span>Account Active</span>
-              </label>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Status</label>
+                <select name="status">
+                  <option value="pending" selected={editUser.status === 'pending'}>Pending (Waitlist)</option>
+                  <option value="active" selected={editUser.status === 'active'}>Active</option>
+                  <option value="suspended" selected={editUser.status === 'suspended'}>Suspended</option>
+                  <option value="denied" selected={editUser.status === 'denied'}>Denied</option>
+                </select>
+              </div>
+              <div class="form-group checkboxes">
+                <label class="checkbox-label">
+                  <input type="checkbox" name="isActive" checked={editUser.is_active} />
+                  <span>Account Active</span>
+                </label>
+                <label class="checkbox-label">
+                  <input type="checkbox" name="isVerified" checked={editUser.is_verified} />
+                  <span>Email Verified</span>
+                </label>
+              </div>
             </div>
-            <div class="form-group">
-              <label class="toggle-label">
-                <input type="checkbox" name="isVerified" checked={editUser.is_verified} />
-                <span>Email Verified</span>
-              </label>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Save Changes</button>
+              <a href="/admin/users" class="btn btn-secondary">Cancel</a>
             </div>
-          </div>
+          </form>
 
-          <div class="form-actions">
-            <button type="submit" class="btn btn-primary">Save Changes</button>
-            <a href="/admin/users" class="btn btn-secondary">Cancel</a>
-          </div>
-        </form>
+          {isMasterKeySession && hasServiceKey && (
+            <>
+              <div class="section-divider">
+                <h3>🔐 Reset Password</h3>
+                <p>Set a new password for this user.</p>
+                <form method="POST" class="inline-form">
+                  <input type="hidden" name="action" value="reset_password" />
+                  <input type="hidden" name="userId" value={editUser.id} />
+                  <input type="password" name="newPassword" required minlength="8" placeholder="New password (min 8 chars)" class="form-input" />
+                  <button type="submit" class="btn btn-warning">Reset Password</button>
+                </form>
+              </div>
 
-        <!-- Password Reset Section (Master Key Only) -->
-        {isMasterKeySession && hasServiceKey && (
-          <div class="password-reset-section">
-            <h3>🔐 Reset Password</h3>
-            <p class="section-desc">Set a new password for this user. They will be able to log in immediately with the new password.</p>
-            <form method="POST" class="inline-form">
-              <input type="hidden" name="action" value="reset_password" />
-              <input type="hidden" name="userId" value={editUser.id} />
-              <input type="password" name="newPassword" required minlength="8" placeholder="New password (min 8 chars)" class="form-input" />
-              <button type="submit" class="btn btn-warning">Reset Password</button>
-            </form>
-          </div>
-        )}
-
-        <!-- Danger Zone -->
-        {isMasterKeySession && hasServiceKey && (
-          <div class="danger-zone">
-            <h3>⚠️ Danger Zone</h3>
-            <p class="section-desc">Permanently delete this user and all associated data. This cannot be undone.</p>
-            <form method="POST" onsubmit="return confirm('Are you ABSOLUTELY sure? This will permanently delete this user and cannot be undone.');">
-              <input type="hidden" name="action" value="delete_user" />
-              <input type="hidden" name="userId" value={editUser.id} />
-              <button type="submit" class="btn btn-danger">Delete User Permanently</button>
-            </form>
-          </div>
-        )}
+              <div class="section-divider danger">
+                <h3>⚠️ Danger Zone</h3>
+                <p>Permanently delete this user. This cannot be undone.</p>
+                <form method="POST" onsubmit="return confirm('Permanently delete this user? This cannot be undone.');">
+                  <input type="hidden" name="action" value="delete_user" />
+                  <input type="hidden" name="userId" value={editUser.id} />
+                  <button type="submit" class="btn btn-danger">Delete User Permanently</button>
+                </form>
+              </div>
+            </>
+          )}
+        </>
       ) : null}
     </div>
   ) : (
     <>
       <!-- Stats Cards -->
       <div class="stats-grid">
-        <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-content"><div class="stat-value">{totalUsers}</div><div class="stat-label">Total Users</div></div></div>
-        <div class="stat-card"><div class="stat-icon">✅</div><div class="stat-content"><div class="stat-value">{activeUsers}</div><div class="stat-label">Active</div></div></div>
-        <div class="stat-card"><div class="stat-icon">🛡️</div><div class="stat-content"><div class="stat-value">{adminCount + modCount}</div><div class="stat-label">Staff</div></div></div>
-        <div class="stat-card"><div class="stat-icon">⭐</div><div class="stat-content"><div class="stat-value">{verifiedUsers}</div><div class="stat-label">Verified</div></div></div>
+        <div class={`stat-card ${pendingUsers.length > 0 ? 'highlight-warning' : ''}`}>
+          <div class="stat-icon">⏳</div>
+          <div><div class="stat-value">{pendingUsers.length}</div><div class="stat-label">Pending Approval</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">✅</div>
+          <div><div class="stat-value">{activeUsers.length}</div><div class="stat-label">Active Users</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">👥</div>
+          <div><div class="stat-value">{allUsers.length}</div><div class="stat-label">Total Users</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🛡️</div>
+          <div><div class="stat-value">{adminCount + modCount}</div><div class="stat-label">Staff</div></div>
+        </div>
       </div>
+
+      <!-- Pending Waitlist Alert -->
+      {pendingUsers.length > 0 && filter !== 'pending' && (
+        <div class="pending-alert">
+          <span class="pending-icon">⏳</span>
+          <div>
+            <strong>{pendingUsers.length} user{pendingUsers.length > 1 ? 's' : ''} waiting for approval</strong>
+            <p>Review and approve or deny pending signups.</p>
+          </div>
+          <a href="?filter=pending" class="btn btn-warning">Review Waitlist</a>
+        </div>
+      )}
 
       <!-- Toolbar -->
       <div class="toolbar">
         <div class="filter-tabs">
-          <a href="/admin/users" class:list={["filter-tab", { active: filter === 'all' }]}>All ({totalUsers})</a>
+          <a href="?filter=pending" class:list={["filter-tab", { active: filter === 'pending' }]}>
+            ⏳ Pending ({pendingUsers.length})
+          </a>
+          <a href="?filter=all" class:list={["filter-tab", { active: filter === 'all' }]}>All</a>
           <a href="?filter=active" class:list={["filter-tab", { active: filter === 'active' }]}>Active</a>
-          <a href="?filter=inactive" class:list={["filter-tab", { active: filter === 'inactive' }]}>Inactive</a>
           <a href="?filter=admin" class:list={["filter-tab", { active: filter === 'admin' }]}>Admins</a>
           <a href="?filter=moderator" class:list={["filter-tab", { active: filter === 'moderator' }]}>Mods</a>
           <a href="?filter=creator" class:list={["filter-tab", { active: filter === 'creator' }]}>Creators</a>
+          <a href="?filter=denied" class:list={["filter-tab", { active: filter === 'denied' }]}>Denied</a>
         </div>
         <div class="toolbar-actions">
           <form class="search-form" method="GET">
@@ -396,14 +456,18 @@ const showForm = action === 'new' || editUserId;
       <!-- Users List -->
       <div class="panel">
         <div class="panel-header">
-          <h2>{filter === 'all' ? 'All Users' : `${filter.charAt(0).toUpperCase() + filter.slice(1)} Users`}</h2>
+          <h2>
+            {filter === 'pending' ? '⏳ Waitlist - Pending Approval' : 
+             filter === 'all' ? 'All Users' : 
+             `${filter.charAt(0).toUpperCase() + filter.slice(1)} Users`}
+          </h2>
           <span class="panel-count">{filteredUsers.length} users</span>
         </div>
 
         {filteredUsers.length > 0 ? (
           <div class="users-list">
             {filteredUsers.map(user => (
-              <div class="user-card">
+              <div class={`user-card ${user.status === 'pending' ? 'pending-user' : ''}`}>
                 <div class="user-main">
                   <div class="user-avatar">
                     {user.avatar_url ? (
@@ -411,59 +475,71 @@ const showForm = action === 'new' || editUserId;
                     ) : (
                       <span>{user.full_name?.charAt(0) || user.email?.charAt(0)?.toUpperCase() || '?'}</span>
                     )}
-                    {user.is_verified && <div class="verified-badge" title="Verified">✓</div>}
                   </div>
                   <div class="user-info">
                     <div class="user-name">
                       {user.full_name || 'No name'}
-                      {!user.is_active && <span class="inactive-tag">Disabled</span>}
+                      {user.status === 'pending' && <span class="status-tag pending">Pending</span>}
+                      {user.status === 'denied' && <span class="status-tag denied">Denied</span>}
+                      {user.status === 'suspended' && <span class="status-tag suspended">Suspended</span>}
+                      {!user.is_active && user.status === 'active' && <span class="status-tag suspended">Inactive</span>}
                     </div>
                     <div class="user-email">{user.email}</div>
+                    <div class="user-date">Signed up {new Date(user.created_at).toLocaleDateString()}</div>
                   </div>
                 </div>
 
                 <div class="user-meta">
                   <span class={`role-badge ${user.role || 'creator'}`}>{user.role || 'creator'}</span>
-                  <span class="user-date">Joined {new Date(user.created_at).toLocaleDateString()}</span>
                 </div>
 
                 <div class="user-actions">
-                  <a href={`?edit=${user.id}`} class="btn btn-sm btn-secondary">✏️ Edit</a>
-                  <div class="dropdown">
-                    <button class="btn btn-sm btn-secondary dropdown-trigger">Role ▾</button>
-                    <div class="dropdown-menu">
-                      <form method="POST">
+                  {user.status === 'pending' ? (
+                    <div class="waitlist-actions">
+                      <form method="POST" class="inline">
                         <input type="hidden" name="userId" value={user.id} />
-                        <input type="hidden" name="action" value="set_role" />
-                        <button type="submit" name="newRole" value="admin" class="dropdown-item" disabled={user.role === 'admin'}>👑 Admin</button>
+                        <button name="action" value="approve" class="btn btn-sm btn-success">✓ Approve</button>
                       </form>
-                      <form method="POST">
+                      <form method="POST" class="inline">
                         <input type="hidden" name="userId" value={user.id} />
-                        <input type="hidden" name="action" value="set_role" />
-                        <button type="submit" name="newRole" value="moderator" class="dropdown-item" disabled={user.role === 'moderator'}>🛡️ Moderator</button>
+                        <button name="action" value="deny" class="btn btn-sm btn-danger">✕ Deny</button>
                       </form>
-                      <form method="POST">
-                        <input type="hidden" name="userId" value={user.id} />
-                        <input type="hidden" name="action" value="set_role" />
-                        <button type="submit" name="newRole" value="creator" class="dropdown-item" disabled={user.role === 'creator'}>🎨 Creator</button>
-                      </form>
+                      <a href={`?edit=${user.id}`} class="btn btn-sm btn-secondary">View</a>
                     </div>
-                  </div>
-                  <form method="POST" class="inline">
-                    <input type="hidden" name="userId" value={user.id} />
-                    <button type="submit" name="action" value="toggle_active" class={`btn btn-sm ${user.is_active ? 'btn-warning' : 'btn-success'}`}>
-                      {user.is_active ? '🚫' : '✅'}
-                    </button>
-                  </form>
+                  ) : (
+                    <>
+                      <a href={`?edit=${user.id}`} class="btn btn-sm btn-secondary">Edit</a>
+                      <div class="dropdown">
+                        <button class="btn btn-sm btn-secondary dropdown-trigger">Role ▾</button>
+                        <div class="dropdown-menu">
+                          {['admin', 'moderator', 'creator'].map(role => (
+                            <form method="POST">
+                              <input type="hidden" name="userId" value={user.id} />
+                              <input type="hidden" name="action" value="set_role" />
+                              <button type="submit" name="newRole" value={role} class="dropdown-item" disabled={user.role === role}>
+                                {role === 'admin' ? '👑' : role === 'moderator' ? '🛡️' : '🎨'} {role}
+                              </button>
+                            </form>
+                          ))}
+                        </div>
+                      </div>
+                      <form method="POST" class="inline">
+                        <input type="hidden" name="userId" value={user.id} />
+                        <button type="submit" name="action" value="toggle_active" class={`btn btn-sm ${user.is_active ? 'btn-warning' : 'btn-success'}`}>
+                          {user.is_active ? '🚫' : '✅'}
+                        </button>
+                      </form>
+                    </>
+                  )}
                 </div>
               </div>
             ))}
           </div>
         ) : (
           <div class="empty-state">
-            <div class="empty-state-icon">👥</div>
-            <div class="empty-state-title">No users found</div>
-            <p>{searchQuery ? 'Try a different search term.' : 'No users match the selected filter.'}</p>
+            <div class="empty-icon">{filter === 'pending' ? '🎉' : '👥'}</div>
+            <h3>{filter === 'pending' ? 'No pending applications!' : 'No users found'}</h3>
+            <p>{filter === 'pending' ? 'All waitlist applications have been reviewed.' : searchQuery ? 'Try a different search.' : 'No users match this filter.'}</p>
           </div>
         )}
       </div>
@@ -471,11 +547,18 @@ const showForm = action === 'new' || editUserId;
   )}
 
   <style>
-    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 1.5rem; }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
     .stat-card { background: white; padding: 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 1rem; }
-    .stat-icon { width: 48px; height: 48px; background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; }
+    .stat-card.highlight-warning { background: linear-gradient(135deg, #fef3c7, #fde68a); border: 2px solid #f59e0b; }
+    .stat-icon { font-size: 1.5rem; width: 44px; height: 44px; background: #f3f4f6; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
     .stat-value { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
     .stat-label { font-size: 0.8125rem; color: #6b7280; }
+
+    .pending-alert { display: flex; align-items: center; gap: 1rem; background: #fef3c7; border: 2px solid #f59e0b; border-radius: 12px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; }
+    .pending-icon { font-size: 2rem; }
+    .pending-alert strong { color: #92400e; }
+    .pending-alert p { font-size: 0.875rem; color: #78350f; margin: 0.25rem 0 0; }
+    .pending-alert .btn { margin-left: auto; flex-shrink: 0; }
 
     .toolbar { display: flex; justify-content: space-between; align-items: center; background: white; border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
     .toolbar-actions { display: flex; gap: 0.75rem; align-items: center; }
@@ -497,29 +580,37 @@ const showForm = action === 'new' || editUserId;
     .user-card { display: flex; align-items: center; gap: 1.5rem; padding: 1rem 1.5rem; border-bottom: 1px solid #f0f0f0; }
     .user-card:last-child { border-bottom: none; }
     .user-card:hover { background: #f9fafb; }
+    .user-card.pending-user { background: #fffbeb; }
+    .user-card.pending-user:hover { background: #fef3c7; }
+
     .user-main { display: flex; align-items: center; gap: 1rem; flex: 1; min-width: 0; }
-    .user-avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #dbeafe 0%, #c7d2fe 100%); display: flex; align-items: center; justify-content: center; font-weight: 600; color: #2563eb; position: relative; flex-shrink: 0; }
+    .user-avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #dbeafe, #c7d2fe); display: flex; align-items: center; justify-content: center; font-weight: 600; color: #2563eb; flex-shrink: 0; overflow: hidden; }
     .user-avatar.large { width: 64px; height: 64px; font-size: 1.5rem; }
-    .user-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
-    .verified-badge { position: absolute; bottom: -2px; right: -2px; width: 16px; height: 16px; background: #2563eb; border: 2px solid white; border-radius: 50%; color: white; font-size: 0.5rem; display: flex; align-items: center; justify-content: center; }
+    .user-avatar img { width: 100%; height: 100%; object-fit: cover; }
     .user-info { min-width: 0; }
-    .user-name { font-weight: 600; color: #1a1a2e; display: flex; align-items: center; gap: 0.5rem; }
+    .user-name { font-weight: 600; color: #1a1a2e; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
     .user-email { font-size: 0.875rem; color: #6b7280; }
     .user-email-display { font-size: 1rem; color: #374151; }
     .user-id { font-size: 0.75rem; color: #9ca3af; font-family: monospace; }
-    .inactive-tag { font-size: 0.625rem; padding: 0.125rem 0.5rem; background: #fee2e2; color: #dc2626; border-radius: 4px; font-weight: 500; }
-    .user-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem; min-width: 100px; }
-    .user-date { font-size: 0.75rem; color: #9ca3af; }
-    .user-actions { display: flex; gap: 0.5rem; align-items: center; }
+    .user-date { font-size: 0.75rem; color: #9ca3af; margin-top: 0.125rem; }
     
+    .status-tag { font-size: 0.625rem; padding: 0.125rem 0.5rem; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+    .status-tag.pending { background: #fef3c7; color: #d97706; }
+    .status-tag.denied { background: #fee2e2; color: #dc2626; }
+    .status-tag.suspended { background: #f3f4f6; color: #6b7280; }
+
+    .user-meta { display: flex; align-items: center; gap: 0.5rem; }
     .role-badge { font-size: 0.6875rem; padding: 0.25rem 0.75rem; border-radius: 999px; font-weight: 600; text-transform: uppercase; }
     .role-badge.admin { background: #fee2e2; color: #dc2626; }
     .role-badge.moderator { background: #fef3c7; color: #d97706; }
     .role-badge.creator { background: #d1fae5; color: #059669; }
 
+    .user-actions { display: flex; gap: 0.5rem; align-items: center; }
+    .waitlist-actions { display: flex; gap: 0.5rem; }
+    
     .dropdown { position: relative; }
     .dropdown-trigger { cursor: pointer; }
-    .dropdown-menu { position: absolute; top: 100%; right: 0; margin-top: 0.5rem; background: white; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); min-width: 150px; z-index: 50; display: none; }
+    .dropdown-menu { position: absolute; top: 100%; right: 0; margin-top: 0.5rem; background: white; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); min-width: 140px; z-index: 50; display: none; }
     .dropdown:hover .dropdown-menu, .dropdown:focus-within .dropdown-menu { display: block; }
     .dropdown-item { display: block; width: 100%; padding: 0.5rem 1rem; text-align: left; border: none; background: none; font-size: 0.875rem; color: #374151; cursor: pointer; }
     .dropdown-item:hover { background: #f3f4f6; }
@@ -532,20 +623,20 @@ const showForm = action === 'new' || editUserId;
     .form-group .hint { font-weight: 400; color: #9ca3af; font-size: 0.75rem; }
     .form-group input, .form-group select { padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 1rem; }
     .form-group input:focus, .form-group select:focus { outline: none; border-color: #2563eb; }
+    .form-group.checkboxes { flex-direction: row; gap: 1.5rem; align-items: center; padding-top: 1.5rem; }
+    .checkbox-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-weight: 500; color: #374151; }
+    .checkbox-label input { width: 18px; height: 18px; }
     .form-input { padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 1rem; flex: 1; }
     .form-actions { display: flex; gap: 1rem; margin-top: 0.5rem; }
     
-    .toggle-label { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; padding: 0.75rem; background: #f9fafb; border-radius: 8px; }
-    .toggle-label input { width: 18px; height: 18px; }
-
     .user-header { display: flex; align-items: center; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb; margin-bottom: 0.5rem; }
 
-    .password-reset-section, .danger-zone { padding: 1.5rem; border-top: 1px solid #e5e7eb; }
-    .password-reset-section h3, .danger-zone h3 { font-size: 1rem; margin-bottom: 0.5rem; }
-    .section-desc { font-size: 0.875rem; color: #6b7280; margin-bottom: 1rem; }
+    .section-divider { padding: 1.5rem; border-top: 1px solid #e5e7eb; }
+    .section-divider h3 { font-size: 1rem; margin-bottom: 0.5rem; }
+    .section-divider p { font-size: 0.875rem; color: #6b7280; margin-bottom: 1rem; }
+    .section-divider.danger { background: #fef2f2; }
+    .section-divider.danger h3 { color: #dc2626; }
     .inline-form { display: flex; gap: 0.75rem; align-items: center; }
-    .danger-zone { background: #fef2f2; }
-    .danger-zone h3 { color: #dc2626; }
 
     .btn { padding: 0.625rem 1.25rem; border-radius: 8px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
     .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
@@ -561,11 +652,10 @@ const showForm = action === 'new' || editUserId;
     .alert.success { background: #d1fae5; color: #065f46; }
     .alert.error { background: #fee2e2; color: #991b1b; }
     .alert.warning { background: #fef3c7; color: #92400e; }
-    .alert a { color: inherit; text-decoration: underline; }
 
     .empty-state { text-align: center; padding: 4rem 2rem; color: #6b7280; }
-    .empty-state-icon { font-size: 3rem; margin-bottom: 1rem; }
-    .empty-state-title { font-size: 1.125rem; font-weight: 600; color: #374151; margin-bottom: 0.5rem; }
+    .empty-icon { font-size: 3rem; margin-bottom: 1rem; }
+    .empty-state h3 { font-size: 1.125rem; font-weight: 600; color: #374151; margin-bottom: 0.5rem; }
 
     @media (max-width: 1024px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 768px) {
@@ -573,10 +663,13 @@ const showForm = action === 'new' || editUserId;
       .form-row { grid-template-columns: 1fr; }
       .toolbar { flex-direction: column; align-items: stretch; }
       .user-card { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
-      .user-meta { flex-direction: row; width: 100%; justify-content: space-between; }
+      .user-meta { width: 100%; justify-content: space-between; }
       .user-actions { width: 100%; justify-content: flex-start; }
-      .inline-form { flex-direction: column; }
+      .waitlist-actions { flex-wrap: wrap; }
+      .inline-form { flex-direction: column; align-items: stretch; }
       .inline-form .form-input { width: 100%; }
+      .pending-alert { flex-direction: column; text-align: center; }
+      .pending-alert .btn { margin: 0.5rem 0 0; }
     }
   </style>
 </AdminLayout>
