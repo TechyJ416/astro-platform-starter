@@ -1,0 +1,668 @@
+---
+// src/pages/community/[slug].astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { supabase } from "../../lib/supabase";
+
+const { slug } = Astro.params;
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+const isApproved = profile?.status === 'active' && profile?.is_active;
+
+// Fetch community by slug
+const { data: community, error } = await supabase
+  .from('communities')
+  .select('*')
+  .eq('slug', slug)
+  .single();
+
+if (!community || error) {
+  return Astro.redirect('/communities?error=not_found');
+}
+
+// Check if user is a member (we'll need a community_members table)
+// For now, we'll simulate membership with a simple check
+let isMember = false;
+let membershipData = null;
+
+if (session?.user?.id) {
+  const { data } = await supabase
+    .from('community_members')
+    .select('*')
+    .eq('community_id', community.id)
+    .eq('user_id', session.user.id)
+    .single();
+  
+  if (data) {
+    isMember = true;
+    membershipData = data;
+  }
+}
+
+// Fetch community posts
+const { data: posts } = await supabase
+  .from('community_posts')
+  .select('*, profiles(id, full_name, avatar_url)')
+  .eq('community_id', community.id)
+  .order('created_at', { ascending: false })
+  .limit(20);
+
+// Handle actions
+let actionMessage = '';
+let actionError = '';
+
+if (Astro.request.method === 'POST' && isApproved) {
+  const formData = await Astro.request.formData();
+  const action = formData.get('action');
+
+  // Join community
+  if (action === 'join') {
+    if (community.is_private) {
+      actionError = 'This is a private community. Request access from an admin.';
+    } else {
+      const { error: joinError } = await supabase
+        .from('community_members')
+        .insert({
+          community_id: community.id,
+          user_id: session.user.id,
+          role: 'member',
+          joined_at: new Date().toISOString(),
+        });
+
+      if (joinError) {
+        if (joinError.code === '23505') {
+          actionError = 'You are already a member of this community.';
+        } else {
+          actionError = joinError.message;
+        }
+      } else {
+        // Update member count
+        await supabase
+          .from('communities')
+          .update({ member_count: (community.member_count || 0) + 1 })
+          .eq('id', community.id);
+        
+        isMember = true;
+        actionMessage = 'Welcome to the community!';
+      }
+    }
+  }
+
+  // Leave community
+  if (action === 'leave') {
+    const { error: leaveError } = await supabase
+      .from('community_members')
+      .delete()
+      .eq('community_id', community.id)
+      .eq('user_id', session.user.id);
+
+    if (leaveError) {
+      actionError = leaveError.message;
+    } else {
+      // Update member count
+      await supabase
+        .from('communities')
+        .update({ member_count: Math.max(0, (community.member_count || 1) - 1) })
+        .eq('id', community.id);
+      
+      isMember = false;
+      actionMessage = 'You have left the community.';
+    }
+  }
+
+  // Create post
+  if (action === 'post' && isMember) {
+    const content = formData.get('content') as string;
+    
+    if (!content?.trim()) {
+      actionError = 'Post content cannot be empty.';
+    } else {
+      const { error: postError } = await supabase
+        .from('community_posts')
+        .insert({
+          community_id: community.id,
+          user_id: session.user.id,
+          content: content.trim(),
+          created_at: new Date().toISOString(),
+        });
+
+      if (postError) {
+        actionError = postError.message;
+      } else {
+        actionMessage = 'Post created!';
+        // Refresh to show new post
+        return Astro.redirect(`/community/${slug}?posted=true`);
+      }
+    }
+  }
+
+  // Delete post
+  if (action === 'delete_post') {
+    const postId = formData.get('postId') as string;
+    
+    // Check ownership
+    const { data: postToDelete } = await supabase
+      .from('community_posts')
+      .select('user_id')
+      .eq('id', postId)
+      .single();
+    
+    if (postToDelete?.user_id === session.user.id || profile?.role === 'admin' || profile?.role === 'moderator') {
+      const { error: deleteError } = await supabase
+        .from('community_posts')
+        .delete()
+        .eq('id', postId);
+
+      if (deleteError) {
+        actionError = deleteError.message;
+      } else {
+        actionMessage = 'Post deleted.';
+      }
+    } else {
+      actionError = 'You can only delete your own posts.';
+    }
+  }
+}
+
+// Check for posted query param
+if (Astro.url.searchParams.get('posted')) {
+  actionMessage = 'Post created!';
+}
+
+// Refetch posts after actions
+const { data: refreshedPosts } = await supabase
+  .from('community_posts')
+  .select('*, profiles(id, full_name, avatar_url)')
+  .eq('community_id', community.id)
+  .order('created_at', { ascending: false })
+  .limit(20);
+
+const displayPosts = refreshedPosts || posts || [];
+---
+
+<Layout title={community.name}>
+  <div class="community-page">
+    <div class="community-container">
+      <!-- Breadcrumb -->
+      <nav class="breadcrumb">
+        <a href="/communities">← Back to Communities</a>
+      </nav>
+
+      {actionMessage && <div class="alert success">{actionMessage}</div>}
+      {actionError && <div class="alert error">{actionError}</div>}
+
+      <!-- Community Header -->
+      <div class="community-header">
+        <div class="community-icon">
+          {community.icon_url ? (
+            <img src={community.icon_url} alt={community.name} />
+          ) : (
+            <span>{community.is_private ? '🔒' : '💬'}</span>
+          )}
+        </div>
+        <div class="community-info">
+          <div class="community-title">
+            <h1>{community.name}</h1>
+            {community.is_private && <span class="private-badge">Private</span>}
+          </div>
+          <p class="community-desc">{community.description}</p>
+          <div class="community-meta">
+            <span class="member-count">👥 {community.member_count || 0} members</span>
+            {membershipData && (
+              <span class="member-since">
+                Member since {new Date(membershipData.joined_at).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+        </div>
+        <div class="community-actions">
+          {!session ? (
+            <a href="/signup" class="btn btn-primary">Sign Up to Join</a>
+          ) : !isApproved ? (
+            <button class="btn btn-disabled" disabled>Account Pending</button>
+          ) : isMember ? (
+            <form method="POST">
+              <input type="hidden" name="action" value="leave" />
+              <button type="submit" class="btn btn-secondary">Leave Community</button>
+            </form>
+          ) : community.is_private ? (
+            <button class="btn btn-disabled" disabled>Private Community</button>
+          ) : (
+            <form method="POST">
+              <input type="hidden" name="action" value="join" />
+              <button type="submit" class="btn btn-primary">Join Community</button>
+            </form>
+          )}
+        </div>
+      </div>
+
+      <div class="community-content">
+        <!-- Post Form (Members Only) -->
+        {isMember && (
+          <div class="post-form-card">
+            <form method="POST" class="post-form">
+              <input type="hidden" name="action" value="post" />
+              <div class="form-group">
+                <textarea 
+                  name="content" 
+                  placeholder="Share something with the community..."
+                  rows="3"
+                  required
+                ></textarea>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Post</button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Non-member notice */}
+        {session && isApproved && !isMember && !community.is_private && (
+          <div class="join-notice">
+            <p>Join this community to participate in discussions.</p>
+          </div>
+        )}
+
+        {/* Private community notice */}
+        {session && isApproved && !isMember && community.is_private && (
+          <div class="private-notice">
+            <p>🔒 This is a private community. Contact an admin for access.</p>
+          </div>
+        )}
+
+        {/* Posts Feed */}
+        <div class="posts-feed">
+          <h2>Recent Posts</h2>
+          
+          {displayPosts.length > 0 ? (
+            <div class="posts-list">
+              {displayPosts.map(post => (
+                <div class="post-card">
+                  <div class="post-header">
+                    <div class="post-author">
+                      <div class="author-avatar">
+                        {post.profiles?.avatar_url ? (
+                          <img src={post.profiles.avatar_url} alt={post.profiles.full_name || 'User'} />
+                        ) : (
+                          <span>{post.profiles?.full_name?.charAt(0) || '?'}</span>
+                        )}
+                      </div>
+                      <div class="author-info">
+                        <span class="author-name">{post.profiles?.full_name || 'Anonymous'}</span>
+                        <span class="post-date">{new Date(post.created_at).toLocaleString()}</span>
+                      </div>
+                    </div>
+                    {(post.user_id === session?.user?.id || profile?.role === 'admin' || profile?.role === 'moderator') && (
+                      <form method="POST" class="delete-form">
+                        <input type="hidden" name="action" value="delete_post" />
+                        <input type="hidden" name="postId" value={post.id} />
+                        <button type="submit" class="btn-icon" title="Delete post">🗑️</button>
+                      </form>
+                    )}
+                  </div>
+                  <div class="post-content">
+                    {post.content}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div class="empty-state">
+              <span>💬</span>
+              <p>No posts yet</p>
+              {isMember && <p class="hint">Be the first to post something!</p>}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .community-page {
+      min-height: 100vh;
+      background: #f5f6fa;
+      padding: 2rem;
+    }
+
+    .community-container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .breadcrumb {
+      margin-bottom: 1.5rem;
+    }
+
+    .breadcrumb a {
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.9375rem;
+    }
+
+    .breadcrumb a:hover {
+      color: #2563eb;
+    }
+
+    .alert {
+      padding: 1rem 1.25rem;
+      border-radius: 10px;
+      margin-bottom: 1.5rem;
+      font-size: 0.9375rem;
+    }
+
+    .alert.success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .alert.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    /* Community Header */
+    .community-header {
+      background: white;
+      border-radius: 16px;
+      padding: 2rem;
+      margin-bottom: 1.5rem;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 1.5rem;
+      align-items: start;
+    }
+
+    .community-icon {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, #dbeafe 0%, #c7d2fe 100%);
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.5rem;
+      overflow: hidden;
+    }
+
+    .community-icon img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .community-title {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .community-title h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    .private-badge {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.5rem;
+      background: #fef3c7;
+      color: #92400e;
+      border-radius: 6px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .community-desc {
+      color: #6b7280;
+      margin: 0 0 1rem;
+      line-height: 1.6;
+    }
+
+    .community-meta {
+      display: flex;
+      gap: 1.5rem;
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+
+    .member-count {
+      font-weight: 500;
+    }
+
+    .community-actions form {
+      margin: 0;
+    }
+
+    /* Post Form */
+    .post-form-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .post-form .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .post-form textarea {
+      width: 100%;
+      padding: 1rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 1rem;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .post-form textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+
+    .post-form .form-actions {
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    /* Notices */
+    .join-notice, .private-notice {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      text-align: center;
+      color: #6b7280;
+    }
+
+    .private-notice {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    /* Posts Feed */
+    .posts-feed {
+      background: white;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+
+    .posts-feed h2 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+      margin: 0;
+    }
+
+    .posts-list {
+      padding: 0;
+    }
+
+    .post-card {
+      padding: 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .post-card:last-child {
+      border-bottom: none;
+    }
+
+    .post-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+
+    .post-author {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .author-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #dbeafe, #c7d2fe);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: #2563eb;
+      overflow: hidden;
+    }
+
+    .author-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .author-name {
+      font-weight: 600;
+      color: #1a1a2e;
+      display: block;
+    }
+
+    .post-date {
+      font-size: 0.8125rem;
+      color: #9ca3af;
+    }
+
+    .post-content {
+      color: #374151;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .delete-form {
+      margin: 0;
+    }
+
+    .btn-icon {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0.25rem;
+      opacity: 0.5;
+      font-size: 1rem;
+    }
+
+    .btn-icon:hover {
+      opacity: 1;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.9375rem;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .btn-secondary:hover {
+      background: #e5e7eb;
+    }
+
+    .btn-disabled {
+      background: #e5e7eb;
+      color: #9ca3af;
+      cursor: not-allowed;
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 3rem 2rem;
+      color: #6b7280;
+    }
+
+    .empty-state span {
+      font-size: 3rem;
+      display: block;
+      margin-bottom: 1rem;
+    }
+
+    .empty-state .hint {
+      font-size: 0.875rem;
+      color: #9ca3af;
+    }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .community-header {
+        grid-template-columns: 1fr;
+        text-align: center;
+      }
+
+      .community-icon {
+        margin: 0 auto;
+      }
+
+      .community-title {
+        justify-content: center;
+      }
+
+      .community-meta {
+        justify-content: center;
+      }
+
+      .community-actions {
+        width: 100%;
+      }
+
+      .community-actions .btn {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+  </style>
+</Layout>
