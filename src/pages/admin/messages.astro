@@ -14,69 +14,85 @@ if (!isMasterKeySession && !session) {
 
 let successMessage = '';
 let errorMessage = '';
-const showForm = Astro.url.searchParams.get('action') === 'new';
+let tableExists = true;
+
+const action = Astro.url.searchParams.get('action');
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  const action = form.get('action') as string;
+  const formAction = form.get('action') as string;
 
-  if (action === 'create') {
-    const name = form.get('name') as string || 'System';
-    const email = form.get('email') as string || 'system@banity.com';
-    const subject = form.get('subject') as string;
-    const body = form.get('body') as string;
+  if (formAction === 'create') {
+    const subject = (form.get('subject') as string)?.trim();
+    const body = (form.get('body') as string)?.trim();
+    
+    if (!subject) {
+      errorMessage = 'Subject is required.';
+    } else if (!body) {
+      errorMessage = 'Message body is required.';
+    } else {
+      const name = (form.get('name') as string)?.trim() || 'System';
+      const email = (form.get('email') as string)?.trim() || 'system@banity.com';
 
-    const { error } = await supabase.from('messages').insert({
-      name,
-      email,
-      subject,
-      body,
-      is_read: false,
-    });
+      const { error } = await supabase.from('messages').insert({
+        name,
+        email,
+        subject,
+        body,
+        is_read: false,
+      });
 
-    if (error) errorMessage = error.message;
-    else {
-      successMessage = 'Message created successfully!';
-      return Astro.redirect('/admin/messages?created=true');
+      if (error) {
+        if (error.code === '42P01') {
+          errorMessage = 'Messages table not found. Please run the database migration.';
+          tableExists = false;
+        } else {
+          errorMessage = error.message;
+        }
+      } else {
+        return Astro.redirect('/admin/messages?created=true');
+      }
     }
   }
 
-  if (action === 'mark_read') {
+  if (formAction === 'mark_read' || formAction === 'mark_unread') {
     const messageId = form.get('messageId') as string;
-    const { error } = await supabase.from('messages').update({ is_read: true }).eq('id', messageId);
+    const { error } = await supabase.from('messages').update({ is_read: formAction === 'mark_read' }).eq('id', messageId);
     if (error) errorMessage = error.message;
-    else successMessage = 'Marked as read.';
+    else successMessage = formAction === 'mark_read' ? 'Marked as read.' : 'Marked as unread.';
   }
 
-  if (action === 'mark_unread') {
-    const messageId = form.get('messageId') as string;
-    const { error } = await supabase.from('messages').update({ is_read: false }).eq('id', messageId);
-    if (error) errorMessage = error.message;
-    else successMessage = 'Marked as unread.';
-  }
-
-  if (action === 'delete') {
+  if (formAction === 'delete') {
     const messageId = form.get('messageId') as string;
     const { error } = await supabase.from('messages').delete().eq('id', messageId);
     if (error) errorMessage = error.message;
     else successMessage = 'Message deleted.';
   }
 
-  if (action === 'mark_all_read') {
+  if (formAction === 'mark_all_read') {
     const { error } = await supabase.from('messages').update({ is_read: true }).eq('is_read', false);
     if (error) errorMessage = error.message;
-    else successMessage = 'All marked as read.';
+    else successMessage = 'All messages marked as read.';
   }
 }
 
 if (Astro.url.searchParams.get('created')) successMessage = 'Message created successfully!';
 
+// Load messages
 const { data: messages, error: loadError } = await supabase
   .from('messages')
   .select('*')
   .order('created_at', { ascending: false });
 
-const tableExists = !loadError || loadError.code !== '42P01';
+if (loadError) {
+  if (loadError.code === '42P01') {
+    tableExists = false;
+    errorMessage = 'Messages table not found. Please create it in your database.';
+  } else {
+    errorMessage = loadError.message;
+  }
+}
+
 const allMessages = messages || [];
 
 const filter = Astro.url.searchParams.get('filter') || 'all';
@@ -94,13 +110,15 @@ const stats = {
 };
 
 const selectedId = Astro.url.searchParams.get('id');
-const selected = selectedId ? allMessages.find(m => m.id === selectedId) : null;
+let selected = selectedId ? allMessages.find(m => m.id === selectedId) : null;
 
-// Auto-mark as read when viewing
+// Auto-mark as read when viewing (only if not already read)
 if (selected && !selected.is_read) {
   await supabase.from('messages').update({ is_read: true }).eq('id', selected.id);
-  selected.is_read = true;
+  selected = { ...selected, is_read: true };
 }
+
+const showForm = action === 'new';
 ---
 
 <AdminLayout title="Messages">
@@ -111,7 +129,22 @@ if (selected && !selected.is_read) {
     <div class="empty">
       <span>⚠️</span>
       <h3>Messages Table Not Found</h3>
-      <p>Run the SQL migration to create the messages table.</p>
+      <p>Create the messages table by running this SQL in Supabase:</p>
+      <pre class="code-block">
+CREATE TABLE messages (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT,
+  email TEXT,
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_read BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow all for service role" ON messages FOR ALL USING (true);
+      </pre>
     </div>
   ) : showForm ? (
     <div class="panel">
@@ -153,7 +186,7 @@ if (selected && !selected.is_read) {
     <>
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-icon">📬</div><div><div class="stat-value">{stats.total}</div><div class="stat-label">Total</div></div></div>
-        <div class="stat-card urgent"><div class="stat-icon">🔔</div><div><div class="stat-value">{stats.unread}</div><div class="stat-label">Unread</div></div></div>
+        <div class={`stat-card ${stats.unread > 0 ? 'urgent' : ''}`}><div class="stat-icon">🔔</div><div><div class="stat-value">{stats.unread}</div><div class="stat-label">Unread</div></div></div>
         <div class="stat-card"><div class="stat-icon">✉️</div><div><div class="stat-value">{stats.read}</div><div class="stat-label">Read</div></div></div>
       </div>
 
@@ -178,14 +211,14 @@ if (selected && !selected.is_read) {
           {filtered.length > 0 ? (
             filtered.map(m => (
               <a href={`?id=${m.id}${filter !== 'all' ? `&filter=${filter}` : ''}`} class:list={["message-item", { unread: !m.is_read, selected: selectedId === m.id }]}>
-                <div class="message-avatar">{m.name?.charAt(0) || '?'}</div>
+                <div class="message-avatar">{(m.name || m.email || '?').charAt(0).toUpperCase()}</div>
                 <div class="message-preview">
                   <div class="message-header">
-                    <span class="message-sender">{m.name || m.email?.split('@')[0]}</span>
+                    <span class="message-sender">{m.name || m.email?.split('@')[0] || 'Unknown'}</span>
                     <span class="message-time">{new Date(m.created_at).toLocaleDateString()}</span>
                   </div>
                   <div class="message-subject">{!m.is_read && <span class="dot"></span>}{m.subject || '(No subject)'}</div>
-                  <div class="message-snippet">{m.body?.substring(0, 60) || ''}{m.body?.length > 60 ? '...' : ''}</div>
+                  <div class="message-snippet">{(m.body || '').substring(0, 60)}{(m.body || '').length > 60 ? '...' : ''}</div>
                 </div>
               </a>
             ))
@@ -203,25 +236,25 @@ if (selected && !selected.is_read) {
                   <form method="POST" class="inline">
                     <input type="hidden" name="messageId" value={selected.id} />
                     <button name="action" value={selected.is_read ? 'mark_unread' : 'mark_read'} class="btn btn-sm btn-secondary">
-                      {selected.is_read ? '📩 Unread' : '✓ Read'}
+                      {selected.is_read ? '📩 Mark Unread' : '✓ Mark Read'}
                     </button>
                   </form>
-                  <form method="POST" class="inline">
+                  <form method="POST" class="inline" onsubmit="return confirm('Delete this message?');">
                     <input type="hidden" name="messageId" value={selected.id} />
-                    <button name="action" value="delete" class="btn btn-sm btn-danger" onclick="return confirm('Delete?')">🗑️</button>
+                    <button name="action" value="delete" class="btn btn-sm btn-danger">🗑️ Delete</button>
                   </form>
                 </div>
               </div>
               <div class="detail-meta">
-                <div class="sender-avatar">{selected.name?.charAt(0) || '?'}</div>
+                <div class="sender-avatar">{(selected.name || selected.email || '?').charAt(0).toUpperCase()}</div>
                 <div>
                   <div class="sender-name">{selected.name || 'Unknown'}</div>
-                  <div class="sender-email">{selected.email}</div>
+                  <div class="sender-email">{selected.email || 'No email'}</div>
                 </div>
                 <div class="detail-time">{new Date(selected.created_at).toLocaleString()}</div>
               </div>
               <div class="detail-body">{selected.body || '(No content)'}</div>
-              {selected.email && (
+              {selected.email && selected.email !== 'system@banity.com' && (
                 <div class="detail-footer">
                   <a href={`mailto:${selected.email}?subject=Re: ${selected.subject || ''}`} class="btn btn-primary">↩️ Reply via Email</a>
                 </div>
@@ -244,7 +277,7 @@ if (selected && !selected.is_read) {
     .stat-card { background: white; padding: 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 1rem; }
     .stat-card.urgent { background: linear-gradient(135deg, #fee2e2, #fecaca); border: 2px solid #f87171; }
     .stat-icon { font-size: 1.5rem; width: 44px; height: 44px; background: #f3f4f6; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-    .stat-card.urgent .stat-icon { background: #ef4444; color: white; }
+    .stat-card.urgent .stat-icon { background: #ef4444; }
     .stat-value { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
     .stat-label { font-size: 0.8125rem; color: #6b7280; }
     
@@ -256,7 +289,7 @@ if (selected && !selected.is_read) {
     .tab.active { background: #2563eb; color: white; }
     
     .inbox-layout { display: grid; grid-template-columns: 380px 1fr; gap: 1.5rem; min-height: 500px; }
-    .message-list { background: white; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+    .message-list { background: white; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; max-height: 600px; overflow-y: auto; }
     .message-item { display: flex; gap: 0.75rem; padding: 1rem; border-bottom: 1px solid #f0f0f0; text-decoration: none; color: inherit; }
     .message-item:hover { background: #f9fafb; }
     .message-item.unread { background: #fffbeb; }
@@ -267,29 +300,29 @@ if (selected && !selected.is_read) {
     .message-sender { font-weight: 600; font-size: 0.875rem; color: #1a1a2e; }
     .message-time { font-size: 0.6875rem; color: #9ca3af; }
     .message-subject { font-size: 0.8125rem; color: #374151; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
-    .dot { width: 8px; height: 8px; background: #2563eb; border-radius: 50%; }
+    .dot { width: 8px; height: 8px; background: #2563eb; border-radius: 50%; flex-shrink: 0; }
     .message-snippet { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .empty-list { text-align: center; padding: 3rem; color: #9ca3af; }
     .empty-list span { font-size: 2rem; display: block; margin-bottom: 0.5rem; }
     
     .message-detail { background: white; border-radius: 12px; display: flex; flex-direction: column; }
-    .detail-header { display: flex; justify-content: space-between; align-items: flex-start; padding: 1.25rem; border-bottom: 1px solid #e5e7eb; }
-    .detail-header h2 { font-size: 1.125rem; color: #1a1a2e; }
-    .detail-actions { display: flex; gap: 0.5rem; }
+    .detail-header { display: flex; justify-content: space-between; align-items: flex-start; padding: 1.25rem; border-bottom: 1px solid #e5e7eb; gap: 1rem; flex-wrap: wrap; }
+    .detail-header h2 { font-size: 1.125rem; color: #1a1a2e; word-break: break-word; }
+    .detail-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
     .detail-meta { display: flex; align-items: center; gap: 1rem; padding: 1rem 1.25rem; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
-    .sender-avatar { width: 44px; height: 44px; background: linear-gradient(135deg, #dbeafe, #c7d2fe); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; color: #2563eb; }
+    .sender-avatar { width: 44px; height: 44px; background: linear-gradient(135deg, #dbeafe, #c7d2fe); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; color: #2563eb; flex-shrink: 0; }
     .sender-name { font-weight: 600; color: #1a1a2e; }
     .sender-email { font-size: 0.8125rem; color: #6b7280; }
     .detail-time { margin-left: auto; font-size: 0.8125rem; color: #9ca3af; }
     .detail-body { flex: 1; padding: 1.5rem; font-size: 0.9375rem; line-height: 1.7; color: #374151; white-space: pre-wrap; overflow-y: auto; }
     .detail-footer { padding: 1rem 1.25rem; border-top: 1px solid #e5e7eb; background: #f9fafb; }
-    .no-selection { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #9ca3af; text-align: center; }
+    .no-selection { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #9ca3af; text-align: center; padding: 2rem; }
     .no-selection span { font-size: 3rem; margin-bottom: 1rem; }
     .no-selection h3 { color: #6b7280; margin-bottom: 0.5rem; }
     
     .panel { background: white; border-radius: 12px; overflow: hidden; }
     .panel-header { display: flex; justify-content: space-between; align-items: center; padding: 1.25rem; border-bottom: 1px solid #e5e7eb; }
-    .panel-header h2 { font-size: 1.125rem; color: #1a1a2e; }
+    .panel-header h2 { font-size: 1.125rem; color: #1a1a2e; margin: 0; }
     .form { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
     .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
     .form-group { display: flex; flex-direction: column; gap: 0.5rem; }
@@ -298,7 +331,7 @@ if (selected && !selected.is_read) {
     .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #2563eb; }
     .form-actions { display: flex; gap: 1rem; margin-top: 0.5rem; }
     
-    .btn { padding: 0.625rem 1.25rem; border-radius: 8px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; }
+    .btn { padding: 0.625rem 1.25rem; border-radius: 8px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
     .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
     .btn-primary { background: #2563eb; color: white; }
     .btn-secondary { background: #f3f4f6; color: #374151; }
@@ -312,17 +345,20 @@ if (selected && !selected.is_read) {
     .empty { text-align: center; padding: 4rem 2rem; background: white; border-radius: 12px; }
     .empty span { font-size: 3rem; display: block; margin-bottom: 1rem; }
     .empty h3 { color: #374151; margin-bottom: 0.5rem; }
-    .empty p { color: #6b7280; }
+    .empty p { color: #6b7280; margin-bottom: 1rem; }
+    
+    .code-block { background: #1a1a2e; color: #10b981; padding: 1rem; border-radius: 8px; text-align: left; font-size: 0.75rem; overflow-x: auto; white-space: pre; }
     
     @media (max-width: 1024px) {
       .stats-grid { grid-template-columns: repeat(3, 1fr); }
       .inbox-layout { grid-template-columns: 1fr; }
-      .message-list { max-height: 300px; overflow-y: auto; }
+      .message-list { max-height: 300px; }
     }
     @media (max-width: 768px) {
       .stats-grid { grid-template-columns: 1fr; }
       .form-row { grid-template-columns: 1fr; }
       .toolbar { flex-direction: column; align-items: stretch; }
+      .detail-header { flex-direction: column; }
     }
   </style>
 </AdminLayout>
