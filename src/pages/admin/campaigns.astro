@@ -248,6 +248,7 @@ const showForm = action === 'new' || editId;
                 {c.deadline && <span>📅 {new Date(c.deadline).toLocaleDateString()}</span>}
               </div>
               <div class="card-actions">
+                <a href={`/admin/campaigns/${c.id}/milestones`} class="btn btn-sm btn-secondary">📋 Milestones</a>
                 <a href={`?edit=${c.id}`} class="btn btn-sm btn-secondary">✏️ Edit</a>
                 {c.status !== 'active' && (
                   <form method="POST" class="inline"><input type="hidden" name="campaignId" value={c.id} /><button name="action" value="activate" class="btn btn-sm btn-success">Activate</button></form>
