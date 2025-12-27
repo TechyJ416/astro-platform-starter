@@ -5,6 +5,21 @@ export const prerender = false;
 import Layout from "../layouts/Layout.astro";
 import { supabase } from "../lib/supabase";
 
+// Get current user session
+const session = Astro.locals.session;
+const user = session?.user;
+
+// Load user profile if logged in
+let userProfile = null;
+if (user?.id) {
+  const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+  userProfile = data;
+}
+
+// Check if user account is pending
+const isPending = userProfile?.status === 'pending';
+const isApproved = userProfile?.status === 'active' && userProfile?.is_active;
+
 // Load settings
 let general = {
   siteName: 'Banity',
@@ -25,11 +40,9 @@ try {
       if (row.key === 'appearance') appearance = { ...appearance, ...row.value };
     }
   }
-} catch (e) {
-  // Use defaults
-}
+} catch (e) {}
 
-// Load announcements (messages marked as is_announcement)
+// Load announcements
 let announcements: any[] = [];
 try {
   const { data } = await supabase
@@ -39,16 +52,37 @@ try {
     .order('created_at', { ascending: false })
     .limit(5);
   if (data) announcements = data;
-} catch (e) {
-  // Table might not exist yet
+} catch (e) {}
+
+// Load active campaigns - only for approved users or public preview
+let campaigns: any[] = [];
+const showCampaigns = !user || isApproved; // Show if not logged in (public preview) or approved
+if (showCampaigns) {
+  const { data } = await supabase
+    .from('campaigns')
+    .select('id, title, slug, description, budget, payment_per_post, deadline, status')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(6);
+  if (data) campaigns = data;
 }
 
-// Get some stats
-const { count: creatorCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'creator');
+// Load communities
+let communities: any[] = [];
+const { data: communityData } = await supabase
+  .from('communities')
+  .select('id, name, slug, description')
+  .order('created_at', { ascending: false })
+  .limit(4);
+if (communityData) communities = communityData;
+
+// Stats
+const { count: creatorCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'creator').eq('status', 'active');
 const { count: campaignCount } = await supabase.from('campaigns').select('*', { count: 'exact', head: true }).eq('status', 'active');
 ---
 
 <Layout>
+  {/* Announcements Bar */}
   {announcements.length > 0 && (
     <div class="announcements-bar">
       <div class="announcements-container">
@@ -72,357 +106,604 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     </div>
   )}
 
+  {/* Pending Account Notice */}
+  {isPending && (
+    <div class="pending-notice">
+      <div class="pending-content">
+        <span class="pending-icon">⏳</span>
+        <div>
+          <h3>Your account is pending approval</h3>
+          <p>We're reviewing your application. You'll receive an email once approved. In the meantime, feel free to explore!</p>
+        </div>
+      </div>
+    </div>
+  )}
+
+  {/* Hero Section */}
   <section class="hero" style={`--primary: ${appearance.primaryColor}; --accent: ${appearance.accentColor};`}>
     <div class="hero-content">
       <h1>{general.tagline}</h1>
-      <p>{general.description}</p>
+      <p class="hero-desc">{general.description}</p>
       <div class="hero-buttons">
-        <a href="/signup" class="btn btn-primary">Get Started</a>
-        <a href="/campaigns" class="btn btn-secondary">Browse Campaigns</a>
+        {user ? (
+          isApproved ? (
+            <a href="/dashboard" class="btn btn-primary">Go to Dashboard</a>
+          ) : (
+            <span class="btn btn-disabled">Awaiting Approval</span>
+          )
+        ) : (
+          <>
+            <a href="/signup" class="btn btn-primary">Join the Waitlist</a>
+            <a href="/login" class="btn btn-secondary">Log In</a>
+          </>
+        )}
       </div>
     </div>
-  </section>
-  
-  <section class="stats">
+    
     <div class="stats-container">
       <div class="stat">
-        <div class="stat-value">{creatorCount || 0}+</div>
-        <div class="stat-label">Creators</div>
+        <span class="stat-value">{creatorCount || 0}+</span>
+        <span class="stat-label">Creators</span>
       </div>
       <div class="stat">
-        <div class="stat-value">{campaignCount || 0}</div>
-        <div class="stat-label">Active Campaigns</div>
+        <span class="stat-value">{campaignCount || 0}</span>
+        <span class="stat-label">Active Campaigns</span>
       </div>
       <div class="stat">
-        <div class="stat-value">$10k+</div>
-        <div class="stat-label">Paid Out</div>
+        <span class="stat-value">$50+</span>
+        <span class="stat-label">Avg Per Post</span>
       </div>
     </div>
   </section>
-  
-  <section class="features">
-    <div class="features-container">
-      <h2>How {general.siteName} Works</h2>
-      <div class="features-grid">
-        <div class="feature">
-          <div class="feature-icon">📢</div>
-          <h3>Find Campaigns</h3>
-          <p>Browse opportunities from top brands looking for authentic UGC content.</p>
-        </div>
-        <div class="feature">
-          <div class="feature-icon">🎬</div>
-          <h3>Create Content</h3>
-          <p>Use your creativity to produce engaging content that resonates with audiences.</p>
-        </div>
-        <div class="feature">
-          <div class="feature-icon">💰</div>
-          <h3>Get Paid</h3>
-          <p>Receive payment for approved content directly to your account.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-  
-  <section class="cta" style={`background: ${appearance.primaryColor};`}>
-    <div class="cta-container">
-      <h2>Ready to start creating?</h2>
-      <p>Join {general.siteName} today and connect with brands looking for creators like you.</p>
-      <a href="/signup" class="btn btn-white">Sign Up Free</a>
-    </div>
-  </section>
-</Layout>
 
-<style>
-  .hero {
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-    color: white;
-    padding: 6rem 2rem;
-    text-align: center;
-  }
-  
-  .hero-content {
-    max-width: 800px;
-    margin: 0 auto;
-  }
-  
-  .hero h1 {
-    font-size: 3rem;
-    margin-bottom: 1.5rem;
-    line-height: 1.2;
-  }
-  
-  .hero p {
-    font-size: 1.25rem;
-    opacity: 0.9;
-    margin-bottom: 2rem;
-  }
-  
-  .hero-buttons {
-    display: flex;
-    gap: 1rem;
-    justify-content: center;
-  }
-  
-  .btn {
-    display: inline-block;
-    padding: 1rem 2rem;
-    border-radius: 10px;
-    font-weight: 600;
-    text-decoration: none;
-    transition: all 0.2s;
-  }
-  
-  .btn-primary {
-    background: var(--primary, #2563eb);
-    color: white;
-  }
-  
-  .btn-secondary {
-    background: transparent;
-    color: white;
-    border: 2px solid rgba(255,255,255,0.3);
-  }
-  
-  .btn-secondary:hover {
-    background: rgba(255,255,255,0.1);
-  }
-  
-  .btn-white {
-    background: white;
-    color: #1a1a2e;
-  }
-  
-  .stats {
-    padding: 4rem 2rem;
-    background: white;
-  }
-  
-  .stats-container {
-    max-width: 800px;
-    margin: 0 auto;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 2rem;
-    text-align: center;
-  }
-  
-  .stat-value {
-    font-size: 2.5rem;
-    font-weight: 700;
-    color: #1a1a2e;
-  }
-  
-  .stat-label {
-    color: #6b7280;
-  }
-  
-  .features {
-    padding: 5rem 2rem;
-    background: #f8fafc;
-  }
-  
-  .features-container {
-    max-width: 1000px;
-    margin: 0 auto;
-  }
-  
-  .features h2 {
-    text-align: center;
-    font-size: 2rem;
-    margin-bottom: 3rem;
-    color: #1a1a2e;
-  }
-  
-  .features-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 2rem;
-  }
-  
-  .feature {
-    background: white;
-    padding: 2rem;
-    border-radius: 12px;
-    text-align: center;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  }
-  
-  .feature-icon {
-    font-size: 3rem;
-    margin-bottom: 1rem;
-  }
-  
-  .feature h3 {
-    margin-bottom: 0.5rem;
-    color: #1a1a2e;
-  }
-  
-  .feature p {
-    color: #6b7280;
-    font-size: 0.9375rem;
-  }
-  
-  .cta {
-    padding: 5rem 2rem;
-    text-align: center;
-    color: white;
-  }
-  
-  .cta-container {
-    max-width: 600px;
-    margin: 0 auto;
-  }
-  
-  .cta h2 {
-    font-size: 2rem;
-    margin-bottom: 1rem;
-  }
-  
-  .cta p {
-    opacity: 0.9;
-    margin-bottom: 2rem;
-  }
-  
-  @media (max-width: 768px) {
-    .hero h1 { font-size: 2rem; }
-    .hero-buttons { flex-direction: column; }
-    .stats-container { grid-template-columns: 1fr; }
-    .features-grid { grid-template-columns: 1fr; }
-  }
-  
-  /* Announcements Bar */
-  .announcements-bar {
-    background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-    color: white;
-    padding: 0.75rem 1rem;
-  }
-  
-  .announcements-container {
-    max-width: 1200px;
-    margin: 0 auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 1rem;
-    position: relative;
-  }
-  
-  .announcement {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    text-align: center;
-    flex: 1;
-    justify-content: center;
-  }
-  
-  .announcement-icon {
-    font-size: 1.25rem;
-    flex-shrink: 0;
-  }
-  
-  .announcement-content {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-  }
-  
-  .announcement-content strong {
-    font-weight: 600;
-  }
-  
-  .announcement-body {
-    opacity: 0.9;
-    font-size: 0.9375rem;
-  }
-  
-  .announcement-nav {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-shrink: 0;
-  }
-  
-  .nav-btn {
-    background: rgba(255,255,255,0.2);
-    border: none;
-    color: white;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    cursor: pointer;
-    font-size: 1.25rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.2s;
-  }
-  
-  .nav-btn:hover {
-    background: rgba(255,255,255,0.3);
-  }
-  
-  .announcement-count {
-    font-size: 0.8125rem;
-    opacity: 0.9;
-    min-width: 40px;
-    text-align: center;
-  }
-  
-  @media (max-width: 768px) {
-    .announcements-container {
+  {/* Active Campaigns Section */}
+  {showCampaigns && campaigns.length > 0 && (
+    <section class="section campaigns-section">
+      <div class="section-header">
+        <div>
+          <h2>🔥 Active Campaigns</h2>
+          <p>Join these campaigns and start earning</p>
+        </div>
+        {isApproved && <a href="/campaigns" class="btn btn-secondary">View All →</a>}
+      </div>
+      
+      <div class="campaigns-grid">
+        {campaigns.map(campaign => (
+          <div class="campaign-card">
+            <div class="campaign-header">
+              <h3>{campaign.title}</h3>
+              <span class="campaign-badge">Active</span>
+            </div>
+            {campaign.description && (
+              <p class="campaign-desc">{campaign.description.substring(0, 100)}{campaign.description.length > 100 ? '...' : ''}</p>
+            )}
+            <div class="campaign-meta">
+              {campaign.payment_per_post && (
+                <span class="meta-item">💰 ${campaign.payment_per_post}/post</span>
+              )}
+              {campaign.deadline && (
+                <span class="meta-item">📅 {new Date(campaign.deadline).toLocaleDateString()}</span>
+              )}
+            </div>
+            <div class="campaign-footer">
+              {isApproved ? (
+                <a href={`/campaigns/${campaign.slug}`} class="btn btn-primary btn-sm">Apply Now</a>
+              ) : user ? (
+                <span class="btn btn-disabled btn-sm">Account Pending</span>
+              ) : (
+                <a href="/signup" class="btn btn-primary btn-sm">Join to Apply</a>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {!user && (
+        <div class="login-prompt">
+          <p>🔐 <a href="/signup">Create an account</a> to apply for campaigns and start earning.</p>
+        </div>
+      )}
+    </section>
+  )}
+
+  {/* Communities Section */}
+  {communities.length > 0 && (
+    <section class="section communities-section">
+      <div class="section-header">
+        <div>
+          <h2>💬 Creator Communities</h2>
+          <p>Connect with fellow creators</p>
+        </div>
+        {isApproved && <a href="/communities" class="btn btn-secondary">View All →</a>}
+      </div>
+      
+      <div class="communities-grid">
+        {communities.map(community => (
+          <div class="community-card">
+            <div class="community-icon">💬</div>
+            <div class="community-info">
+              <h3>{community.name}</h3>
+              {community.description && <p>{community.description.substring(0, 80)}{community.description.length > 80 ? '...' : ''}</p>}
+            </div>
+            {isApproved ? (
+              <a href={`/community/${community.slug}`} class="btn btn-secondary btn-sm">Join</a>
+            ) : user ? (
+              <span class="btn btn-disabled btn-sm">Pending</span>
+            ) : (
+              <a href="/signup" class="btn btn-secondary btn-sm">Sign Up</a>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {!user && (
+        <div class="login-prompt">
+          <p>🔐 <a href="/signup">Sign up</a> to join communities and connect with other creators.</p>
+        </div>
+      )}
+    </section>
+  )}
+
+  {/* How It Works */}
+  <section class="section how-it-works">
+    <h2>How {general.siteName} Works</h2>
+    <div class="features-grid">
+      <div class="feature">
+        <div class="feature-icon">1</div>
+        <h3>Join the Waitlist</h3>
+        <p>Sign up and get approved to access exclusive campaigns.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">2</div>
+        <h3>Browse Campaigns</h3>
+        <p>Find brands looking for authentic content creators like you.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">3</div>
+        <h3>Create & Submit</h3>
+        <p>Create engaging UGC content and submit for review.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">4</div>
+        <h3>Get Paid</h3>
+        <p>Receive payment directly to your account upon approval.</p>
+      </div>
+    </div>
+  </section>
+
+  {/* CTA Section */}
+  {!user && (
+    <section class="cta-section" style={`background: linear-gradient(135deg, ${appearance.primaryColor}, ${appearance.accentColor});`}>
+      <h2>Ready to Start Creating?</h2>
+      <p>Join our waitlist and be among the first to access new campaigns.</p>
+      <a href="/signup" class="btn btn-white">Join the Waitlist</a>
+    </section>
+  )}
+
+  <style>
+    .hero {
+      background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+      padding: 5rem 2rem 4rem;
+      text-align: center;
+    }
+    
+    .hero-content {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+    
+    .hero h1 {
+      font-size: 3rem;
+      color: #1a1a2e;
+      margin-bottom: 1rem;
+      line-height: 1.2;
+    }
+    
+    .hero-desc {
+      font-size: 1.25rem;
+      color: #64748b;
+      margin-bottom: 2rem;
+    }
+    
+    .hero-buttons {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    
+    .btn {
+      padding: 0.875rem 2rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 1rem;
+      text-decoration: none;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      border: none;
+      cursor: pointer;
+    }
+    
+    .btn-primary { background: var(--primary, #2563eb); color: white; }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
+    .btn-secondary { background: white; color: #374151; border: 2px solid #e5e7eb; }
+    .btn-secondary:hover { border-color: #d1d5db; background: #f9fafb; }
+    .btn-white { background: white; color: #1a1a2e; }
+    .btn-white:hover { transform: translateY(-2px); }
+    .btn-disabled { background: #e5e7eb; color: #9ca3af; cursor: not-allowed; }
+    .btn-sm { padding: 0.5rem 1rem; font-size: 0.875rem; }
+    
+    .stats-container {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2rem;
+      max-width: 600px;
+      margin: 3rem auto 0;
+    }
+    
+    .stat {
+      text-align: center;
+    }
+    
+    .stat-value {
+      display: block;
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--primary, #2563eb);
+    }
+    
+    .stat-label {
+      font-size: 0.875rem;
+      color: #64748b;
+    }
+
+    /* Sections */
+    .section {
+      padding: 4rem 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 2rem;
+    }
+    
+    .section-header h2 {
+      font-size: 1.75rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+    
+    .section-header p {
+      color: #64748b;
+    }
+
+    /* Campaigns */
+    .campaigns-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+    
+    .campaign-card {
+      background: white;
+      border-radius: 16px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      display: flex;
       flex-direction: column;
+    }
+    
+    .campaign-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.75rem;
+    }
+    
+    .campaign-header h3 {
+      font-size: 1.125rem;
+      color: #1a1a2e;
+    }
+    
+    .campaign-badge {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.5rem;
+      background: #d1fae5;
+      color: #059669;
+      border-radius: 6px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    
+    .campaign-desc {
+      font-size: 0.9375rem;
+      color: #64748b;
+      margin-bottom: 1rem;
+      flex: 1;
+    }
+    
+    .campaign-meta {
+      display: flex;
+      gap: 1rem;
+      font-size: 0.8125rem;
+      color: #64748b;
+      margin-bottom: 1rem;
+    }
+    
+    .campaign-footer {
+      border-top: 1px solid #f0f0f0;
+      padding-top: 1rem;
+    }
+
+    /* Communities */
+    .communities-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1rem;
+    }
+    
+    .community-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    
+    .community-icon {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, #dbeafe, #c7d2fe);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      flex-shrink: 0;
+    }
+    
+    .community-info {
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .community-info h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+    
+    .community-info p {
+      font-size: 0.8125rem;
+      color: #64748b;
+      margin: 0;
+    }
+
+    /* Login Prompt */
+    .login-prompt {
+      margin-top: 2rem;
+      padding: 1rem;
+      background: #f8fafc;
+      border-radius: 10px;
+      text-align: center;
+    }
+    
+    .login-prompt p {
+      color: #64748b;
+      margin: 0;
+    }
+    
+    .login-prompt a {
+      color: var(--primary, #2563eb);
+      font-weight: 600;
+    }
+
+    /* How It Works */
+    .how-it-works {
+      background: #f8fafc;
+      text-align: center;
+    }
+    
+    .how-it-works h2 {
+      font-size: 1.75rem;
+      color: #1a1a2e;
+      margin-bottom: 3rem;
+    }
+    
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 2rem;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    
+    .feature {
+      text-align: center;
+    }
+    
+    .feature-icon {
+      width: 56px;
+      height: 56px;
+      background: linear-gradient(135deg, var(--primary, #2563eb), var(--accent, #059669));
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin: 0 auto 1rem;
+    }
+    
+    .feature h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+    
+    .feature p {
+      font-size: 0.875rem;
+      color: #64748b;
+    }
+
+    /* CTA Section */
+    .cta-section {
+      text-align: center;
+      padding: 4rem 2rem;
+      color: white;
+    }
+    
+    .cta-section h2 {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+    }
+    
+    .cta-section p {
+      opacity: 0.9;
+      margin-bottom: 1.5rem;
+    }
+
+    /* Pending Notice */
+    .pending-notice {
+      background: #fef3c7;
+      border-bottom: 2px solid #f59e0b;
+    }
+    
+    .pending-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    
+    .pending-icon {
+      font-size: 2rem;
+    }
+    
+    .pending-notice h3 {
+      color: #92400e;
+      font-size: 1rem;
+      margin-bottom: 0.25rem;
+    }
+    
+    .pending-notice p {
+      color: #78350f;
+      font-size: 0.875rem;
+      margin: 0;
+    }
+
+    /* Announcements Bar */
+    .announcements-bar {
+      background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+      color: white;
+      padding: 0.75rem 1rem;
+    }
+    
+    .announcements-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+    }
+    
+    .announcement {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      text-align: center;
+      flex: 1;
+      justify-content: center;
+    }
+    
+    .announcement-icon { font-size: 1.25rem; }
+    
+    .announcement-content {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
       gap: 0.5rem;
     }
     
-    .announcement-content {
-      flex-direction: column;
-      gap: 0.25rem;
+    .announcement-body { opacity: 0.9; font-size: 0.9375rem; }
+    
+    .announcement-nav { display: flex; align-items: center; gap: 0.5rem; }
+    
+    .nav-btn {
+      background: rgba(255,255,255,0.2);
+      border: none;
+      color: white;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 1.25rem;
     }
     
-    .announcement-body {
-      font-size: 0.8125rem;
-    }
-  }
-</style>
+    .nav-btn:hover { background: rgba(255,255,255,0.3); }
+    
+    .announcement-count { font-size: 0.8125rem; opacity: 0.9; }
 
-{announcements.length > 1 && (
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      const announcements = document.querySelectorAll('.announcement');
-      const currentSpan = document.querySelector('.announcement-count .current');
-      const prevBtn = document.querySelector('.nav-btn.prev');
-      const nextBtn = document.querySelector('.nav-btn.next');
-      
-      if (!announcements.length || !prevBtn || !nextBtn) return;
-      
-      let current = 0;
-      const total = announcements.length;
-      
-      function show(index: number) {
-        announcements.forEach((a, i) => {
-          (a as HTMLElement).style.display = i === index ? 'flex' : 'none';
+    /* Responsive */
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 2rem; }
+      .hero-buttons { flex-direction: column; }
+      .stats-container { grid-template-columns: 1fr; gap: 1rem; }
+      .features-grid { grid-template-columns: 1fr; }
+      .section-header { flex-direction: column; gap: 1rem; }
+      .pending-content { flex-direction: column; text-align: center; }
+      .announcements-container { flex-direction: column; gap: 0.5rem; }
+    }
+  </style>
+
+  {announcements.length > 1 && (
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const announcements = document.querySelectorAll('.announcement');
+        const currentSpan = document.querySelector('.announcement-count .current');
+        const prevBtn = document.querySelector('.nav-btn.prev');
+        const nextBtn = document.querySelector('.nav-btn.next');
+        
+        if (!announcements.length || !prevBtn || !nextBtn) return;
+        
+        let current = 0;
+        const total = announcements.length;
+        
+        function show(index: number) {
+          announcements.forEach((a, i) => {
+            (a as HTMLElement).style.display = i === index ? 'flex' : 'none';
+          });
+          if (currentSpan) currentSpan.textContent = String(index + 1);
+        }
+        
+        prevBtn.addEventListener('click', () => {
+          current = (current - 1 + total) % total;
+          show(current);
         });
-        if (currentSpan) currentSpan.textContent = String(index + 1);
-      }
-      
-      prevBtn.addEventListener('click', () => {
-        current = (current - 1 + total) % total;
-        show(current);
+        
+        nextBtn.addEventListener('click', () => {
+          current = (current + 1) % total;
+          show(current);
+        });
+        
+        setInterval(() => {
+          current = (current + 1) % total;
+          show(current);
+        }, 8000);
       });
-      
-      nextBtn.addEventListener('click', () => {
-        current = (current + 1) % total;
-        show(current);
-      });
-      
-      // Auto-rotate every 8 seconds
-      setInterval(() => {
-        current = (current + 1) % total;
-        show(current);
-      }, 8000);
-    });
-  </script>
-)}
+    </script>
+  )}
+</Layout>
