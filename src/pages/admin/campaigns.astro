@@ -71,10 +71,19 @@ if (Astro.request.method === 'POST') {
           return Astro.redirect('/admin/campaigns?updated=true');
         }
       } else {
-        const { error } = await supabase.from('campaigns').insert(campaignData);
+        const { data: newCampaign, error } = await supabase.from('campaigns').insert(campaignData).select().single();
         if (error) {
           errorMessage = error.code === '23505' ? 'A campaign with this slug already exists.' : error.message;
         } else {
+          // Create a review task for admins to review the new campaign
+          await supabase.from('posts').insert({
+            title: `Review New Campaign: ${title}`,
+            caption: `A new campaign "${title}" has been created and needs admin review.\n\nStatus: ${status}\nBudget: $${budget || 0}\nPayment per post: $${paymentPerPost || 0}\n\nPlease review the campaign details and approve or request changes.`,
+            campaign_id: newCampaign.id,
+            status: 'pending',
+            media_type: 'image',
+          });
+          
           return Astro.redirect('/admin/campaigns?created=true');
         }
       }
