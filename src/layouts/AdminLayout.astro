@@ -29,11 +29,18 @@ const { count: unreadMessages } = await supabase
   .select('*', { count: 'exact', head: true })
   .eq('is_read', false);
 
+// Count pending applications
+const { count: pendingApplications } = await supabase
+  .from('campaign_assignments')
+  .select('*', { count: 'exact', head: true })
+  .eq('status', 'invited');
+
 // Navigation items
 const navItems = [
   { href: '/admin', icon: '📊', label: 'Dashboard', exact: true },
   { href: '/admin/users', icon: '👥', label: 'Users', badge: pendingCount || 0, badgeType: 'warning' },
   { href: '/admin/campaigns', icon: '📢', label: 'Campaigns' },
+  { href: '/admin/applications', icon: '📝', label: 'Applications', badge: pendingApplications || 0, badgeType: 'warning' },
   { href: '/admin/communities', icon: '💬', label: 'Communities' },
   { href: '/admin/review', icon: '✅', label: 'Review Queue', badge: pendingReviewCount || 0, badgeType: 'danger' },
   { href: '/admin/messages', icon: '📬', label: 'Messages', badge: unreadMessages || 0, badgeType: 'info' },
