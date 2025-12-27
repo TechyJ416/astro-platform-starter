@@ -64,7 +64,7 @@ function getDaysRemaining(deadline: string) {
       <div class="campaigns-grid">
         {campaigns.map(campaign => {
           const daysRemaining = getDaysRemaining(campaign.deadline);
-          const isUrgent = daysRemaining !== null && daysRemaining <= 7 && daysRemaining >= 1;
+          const isUrgent = daysRemaining !== null && daysRemaining <= Fragment 7 && daysRemaining >= 1;
           const isExpired = daysRemaining !== null && daysRemaining < 1;
           
           return (
