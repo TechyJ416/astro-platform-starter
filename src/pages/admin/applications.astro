@@ -1,0 +1,480 @@
+---
+// src/pages/admin/applications.astro
+export const prerender = false;
+
+import AdminLayout from "../../layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+import { sendApplicationAcceptedEmail, sendApplicationRejectedEmail } from "../../lib/email";
+
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+// Create admin client
+const supabaseUrl = import.meta.env.SUPABASE_URL;
+const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_KEY;
+const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+
+const supabase = createClient(
+  supabaseUrl,
+  supabaseServiceKey || supabaseAnonKey,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+let actionMessage = '';
+let actionError = '';
+
+// Handle actions
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action') as string;
+  const applicationId = form.get('applicationId') as string;
+
+  if (action === 'accept' && applicationId) {
+    const { data: app } = await supabase
+      .from('campaign_assignments')
+      .select('*, profiles(email, full_name), campaigns(title)')
+      .eq('id', applicationId)
+      .single();
+
+    const { error } = await supabase
+      .from('campaign_assignments')
+      .update({ 
+        status: 'accepted',
+        accepted_at: new Date().toISOString()
+      })
+      .eq('id', applicationId);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = `Application from ${app?.profiles?.full_name || 'Creator'} accepted!`;
+      if (app?.profiles?.email && app?.campaigns?.title) {
+        await sendApplicationAcceptedEmail(
+          app.profiles.email,
+          app.profiles.full_name || '',
+          app.campaigns.title
+        );
+      }
+    }
+  }
+
+  if (action === 'reject' && applicationId) {
+    const { data: app } = await supabase
+      .from('campaign_assignments')
+      .select('*, profiles(email, full_name), campaigns(title)')
+      .eq('id', applicationId)
+      .single();
+
+    const { error } = await supabase
+      .from('campaign_assignments')
+      .update({ status: 'declined' })
+      .eq('id', applicationId);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = 'Application declined.';
+      if (app?.profiles?.email && app?.campaigns?.title) {
+        await sendApplicationRejectedEmail(
+          app.profiles.email,
+          app.profiles.full_name || '',
+          app.campaigns.title
+        );
+      }
+    }
+  }
+}
+
+// Fetch all applications
+const { data: applications } = await supabase
+  .from('campaign_assignments')
+  .select('*, profiles(id, email, full_name, avatar_url), campaigns(id, title, slug)')
+  .order('assigned_at', { ascending: false });
+
+// Filter
+const filter = Astro.url.searchParams.get('filter') || 'pending';
+const filteredApplications = applications?.filter(app => {
+  if (filter === 'pending') return app.status === 'invited';
+  if (filter === 'accepted') return app.status === 'accepted';
+  if (filter === 'declined') return app.status === 'declined';
+  return true;
+}) || [];
+
+// Stats
+const pendingCount = applications?.filter(a => a.status === 'invited').length || 0;
+const acceptedCount = applications?.filter(a => a.status === 'accepted').length || 0;
+const declinedCount = applications?.filter(a => a.status === 'declined').length || 0;
+
+function getStatusBadge(status: string) {
+  const badges: Record<string, { label: string; class: string }> = {
+    invited: { label: 'Pending', class: 'pending' },
+    accepted: { label: 'Accepted', class: 'success' },
+    declined: { label: 'Declined', class: 'danger' },
+  };
+  return badges[status] || { label: status, class: 'muted' };
+}
+---
+
+<AdminLayout title="All Applications">
+  {actionMessage && <div class="alert success">{actionMessage}</div>}
+  {actionError && <div class="alert error">{actionError}</div>}
+
+  <!-- Header -->
+  <div class="page-header">
+    <h1>📝 All Applications</h1>
+    <p class="subtitle">Review and manage creator applications across all campaigns</p>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-value">{applications?.length || 0}</div>
+      <div class="stat-label">Total</div>
+    </div>
+    <div class={`stat-card ${pendingCount > 0 ? 'highlight' : ''}`}>
+      <div class="stat-value">{pendingCount}</div>
+      <div class="stat-label">Pending</div>
+    </div>
+    <div class="stat-card success">
+      <div class="stat-value">{acceptedCount}</div>
+      <div class="stat-label">Accepted</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{declinedCount}</div>
+      <div class="stat-label">Declined</div>
+    </div>
+  </div>
+
+  <!-- Filter Tabs -->
+  <div class="filter-tabs">
+    <a href={`?filter=pending`} class:list={["tab", { active: filter === 'pending' }]}>
+      Pending ({pendingCount})
+    </a>
+    <a href={`?filter=accepted`} class:list={["tab", { active: filter === 'accepted' }]}>
+      Accepted ({acceptedCount})
+    </a>
+    <a href={`?filter=declined`} class:list={["tab", { active: filter === 'declined' }]}>
+      Declined ({declinedCount})
+    </a>
+    <a href={`?filter=all`} class:list={["tab", { active: filter === 'all' }]}>
+      All ({applications?.length || 0})
+    </a>
+  </div>
+
+  <!-- Applications List -->
+  <div class="panel">
+    {filteredApplications.length > 0 ? (
+      <div class="applications-list">
+        {filteredApplications.map(app => (
+          <div class="application-row">
+            <div class="applicant">
+              <div class="avatar">
+                {app.profiles?.avatar_url ? (
+                  <img src={app.profiles.avatar_url} alt={app.profiles.full_name || 'User'} />
+                ) : (
+                  <span>{app.profiles?.full_name?.charAt(0) || '?'}</span>
+                )}
+              </div>
+              <div class="applicant-info">
+                <strong>{app.profiles?.full_name || 'Unknown'}</strong>
+                <span class="email">{app.profiles?.email}</span>
+              </div>
+            </div>
+
+            <div class="campaign">
+              <a href={`/admin/campaigns/${app.campaigns?.id}/applications`} class="campaign-link">
+                {app.campaigns?.title || 'Unknown Campaign'}
+              </a>
+            </div>
+
+            <div class="date">
+              {new Date(app.assigned_at).toLocaleDateString()}
+            </div>
+
+            <div class="status">
+              <span class={`status-badge ${getStatusBadge(app.status).class}`}>
+                {getStatusBadge(app.status).label}
+              </span>
+            </div>
+
+            <div class="actions">
+              {app.status === 'invited' && (
+                <>
+                  <form method="POST" class="inline">
+                    <input type="hidden" name="applicationId" value={app.id} />
+                    <button type="submit" name="action" value="accept" class="btn btn-success btn-sm">
+                      ✓ Accept
+                    </button>
+                  </form>
+                  <form method="POST" class="inline">
+                    <input type="hidden" name="applicationId" value={app.id} />
+                    <button type="submit" name="action" value="reject" class="btn btn-danger btn-sm">
+                      ✕ Decline
+                    </button>
+                  </form>
+                </>
+              )}
+              {app.status === 'accepted' && (
+                <a href={`mailto:${app.profiles?.email}`} class="btn btn-secondary btn-sm">
+                  📧 Contact
+                </a>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    ) : (
+      <div class="empty-state">
+        <div class="empty-icon">📝</div>
+        <h3>No {filter !== 'all' ? filter : ''} applications</h3>
+        <p>Applications will appear here when creators apply to campaigns.</p>
+      </div>
+    )}
+  </div>
+
+  <style>
+    .page-header {
+      margin-bottom: 1.5rem;
+    }
+
+    .page-header h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin: 0 0 0.25rem;
+    }
+
+    .subtitle {
+      color: #6b7280;
+      margin: 0;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+      background: white;
+      padding: 1.25rem;
+      border-radius: 12px;
+      text-align: center;
+    }
+
+    .stat-card.highlight {
+      background: linear-gradient(135deg, #fef3c7, #fde68a);
+      border: 2px solid #f59e0b;
+    }
+
+    .stat-card.success {
+      background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+    }
+
+    .stat-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .stat-label {
+      font-size: 0.8125rem;
+      color: #6b7280;
+      margin-top: 0.25rem;
+    }
+
+    .filter-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      background: white;
+      padding: 0.5rem;
+      border-radius: 10px;
+    }
+
+    .tab {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #6b7280;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .tab:hover {
+      background: #f3f4f6;
+    }
+
+    .tab.active {
+      background: #2563eb;
+      color: white;
+    }
+
+    .panel {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .applications-list {
+      padding: 0;
+    }
+
+    .application-row {
+      display: grid;
+      grid-template-columns: 1.5fr 1.5fr auto auto auto;
+      gap: 1rem;
+      align-items: center;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .application-row:last-child {
+      border-bottom: none;
+    }
+
+    .applicant {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #dbeafe, #c7d2fe);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: #2563eb;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .applicant-info strong {
+      display: block;
+      color: #1a1a2e;
+      font-size: 0.9375rem;
+    }
+
+    .applicant-info .email {
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    .campaign-link {
+      color: #2563eb;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .campaign-link:hover {
+      text-decoration: underline;
+    }
+
+    .date {
+      font-size: 0.875rem;
+      color: #6b7280;
+      white-space: nowrap;
+    }
+
+    .status-badge {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+    .status-badge.success { background: #d1fae5; color: #059669; }
+    .status-badge.danger { background: #fee2e2; color: #dc2626; }
+    .status-badge.muted { background: #f3f4f6; color: #6b7280; }
+
+    .actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .inline {
+      display: inline;
+    }
+
+    .btn {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.8125rem;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .btn-sm {
+      padding: 0.375rem 0.75rem;
+    }
+
+    .btn-success { background: #059669; color: white; }
+    .btn-success:hover { background: #047857; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+    .btn-secondary:hover { background: #e5e7eb; }
+
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      color: #6b7280;
+    }
+
+    .empty-icon {
+      font-size: 3rem;
+      margin-bottom: 1rem;
+    }
+
+    .empty-state h3 {
+      font-size: 1.125rem;
+      color: #374151;
+      margin-bottom: 0.5rem;
+    }
+
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+
+    @media (max-width: 900px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .application-row {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+      }
+
+      .actions {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</AdminLayout>
