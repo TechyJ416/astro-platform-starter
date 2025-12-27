@@ -1,0 +1,653 @@
+ ---
+// src/pages/dashboard/payment-setup.astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { supabase } from "../../lib/supabase";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!session) {
+  return Astro.redirect('/login?redirect=/dashboard/payment-setup');
+}
+
+const STRIPE_SECRET_KEY = import.meta.env.STRIPE_SECRET_KEY;
+const hasStripe = !!STRIPE_SECRET_KEY;
+
+// Fetch or create payment profile
+let { data: paymentProfile } = await supabase
+  .from('creator_payment_profiles')
+  .select('*')
+  .eq('creator_id', session.user.id)
+  .single();
+
+if (!paymentProfile) {
+  // Create payment profile if doesn't exist
+  const { data: newProfile } = await supabase
+    .from('creator_payment_profiles')
+    .insert({
+      creator_id: session.user.id,
+      preferred_payout_method: 'stripe_connect',
+      minimum_payout_amount: 50.00,
+      total_earned: 0,
+      total_paid_out: 0,
+      pending_balance: 0,
+    })
+    .select()
+    .single();
+  paymentProfile = newProfile;
+}
+
+let actionMessage = '';
+let actionError = '';
+let onboardingUrl = '';
+
+// Handle actions
+if (Astro.request.method === 'POST' && hasStripe) {
+  const formData = await Astro.request.formData();
+  const action = formData.get('action');
+
+  // Start Stripe Connect onboarding
+  if (action === 'start_onboarding') {
+    try {
+      const stripe = (await import('stripe')).default;
+      const stripeClient = new stripe(STRIPE_SECRET_KEY);
+
+      // Create connected account if doesn't exist
+      if (!paymentProfile?.stripe_account_id) {
+        const account = await stripeClient.accounts.create({
+          type: 'express',
+          country: 'US', // TODO: Make dynamic
+          email: session.user.email,
+          metadata: {
+            creator_id: session.user.id,
+          },
+          capabilities: {
+            transfers: { requested: true },
+          },
+        });
+
+        await supabase
+          .from('creator_payment_profiles')
+          .update({
+            stripe_account_id: account.id,
+            stripe_account_status: 'pending',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('creator_id', session.user.id);
+
+        paymentProfile = { ...paymentProfile, stripe_account_id: account.id };
+      }
+
+      // Create account link for onboarding
+      const accountLink = await stripeClient.accountLinks.create({
+        account: paymentProfile.stripe_account_id,
+        refresh_url: `${Astro.url.origin}/dashboard/payment-setup?refresh=true`,
+        return_url: `${Astro.url.origin}/dashboard/payment-setup?success=true`,
+        type: 'account_onboarding',
+      });
+
+      onboardingUrl = accountLink.url;
+      
+    } catch (error: any) {
+      console.error('Stripe onboarding error:', error);
+      actionError = error.message || 'Failed to start onboarding';
+    }
+  }
+
+  // Update payout preferences
+  if (action === 'update_preferences') {
+    const minimumPayout = formData.get('minimumPayout') as string;
+    const paypalEmail = formData.get('paypalEmail') as string;
+    const preferredMethod = formData.get('preferredMethod') as string;
+
+    const { error } = await supabase
+      .from('creator_payment_profiles')
+      .update({
+        minimum_payout_amount: parseFloat(minimumPayout) || 50,
+        paypal_email: paypalEmail || null,
+        preferred_payout_method: preferredMethod,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('creator_id', session.user.id);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = 'Preferences updated!';
+      // Refresh data
+      const { data: refreshed } = await supabase
+        .from('creator_payment_profiles')
+        .select('*')
+        .eq('creator_id', session.user.id)
+        .single();
+      if (refreshed) paymentProfile = refreshed;
+    }
+  }
+}
+
+// Check for query params
+if (Astro.url.searchParams.get('success')) {
+  actionMessage = 'Stripe account setup complete! Your account is being verified.';
+  // Refresh payment profile
+  const { data: refreshed } = await supabase
+    .from('creator_payment_profiles')
+    .select('*')
+    .eq('creator_id', session.user.id)
+    .single();
+  if (refreshed) paymentProfile = refreshed;
+}
+
+if (Astro.url.searchParams.get('refresh')) {
+  actionError = 'Please complete the onboarding process.';
+}
+
+const isConnected = paymentProfile?.stripe_onboarding_complete;
+---
+
+<Layout title="Payment Setup">
+  <div class="payment-page">
+    <div class="payment-container">
+      <!-- Header -->
+      <div class="page-header">
+        <a href="/dashboard" class="back-link">← Back to Dashboard</a>
+        <h1>💳 Payment Setup</h1>
+        <p class="subtitle">Configure how you receive payments for your work</p>
+      </div>
+
+      {actionMessage && <div class="alert success">{actionMessage}</div>}
+      {actionError && <div class="alert error">{actionError}</div>}
+
+      {onboardingUrl && (
+        <div class="onboarding-redirect">
+          <div class="redirect-card">
+            <h2>Complete Your Stripe Setup</h2>
+            <p>You'll be redirected to Stripe to complete your account setup.</p>
+            <a href={onboardingUrl} class="btn btn-primary btn-lg">Continue to Stripe →</a>
+          </div>
+        </div>
+      )}
+
+      {!hasStripe ? (
+        <div class="alert warning">
+          <h3>⚠️ Payments Not Configured</h3>
+          <p>Stripe is not configured for this platform. Contact the administrator to enable payments.</p>
+        </div>
+      ) : (
+        <div class="payment-grid">
+          <!-- Stripe Connect Card -->
+          <div class="card stripe-card">
+            <div class="card-header">
+              <div class="stripe-logo">
+                <span>Stripe</span>
+              </div>
+              {isConnected ? (
+                <span class="status-badge connected">✓ Connected</span>
+              ) : (
+                <span class="status-badge pending">Setup Required</span>
+              )}
+            </div>
+            
+            <div class="card-body">
+              {isConnected ? (
+                <div class="connected-state">
+                  <p>Your Stripe account is connected and ready to receive payments!</p>
+                  <div class="account-info">
+                    <div class="info-row">
+                      <span class="label">Account ID</span>
+                      <span class="value">{paymentProfile?.stripe_account_id?.substring(0, 20)}...</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="label">Status</span>
+                      <span class="value">{paymentProfile?.stripe_account_status || 'Active'}</span>
+                    </div>
+                  </div>
+                  <form method="POST">
+                    <input type="hidden" name="action" value="start_onboarding" />
+                    <button type="submit" class="btn btn-secondary">Update Account Info</button>
+                  </form>
+                </div>
+              ) : (
+                <div class="setup-state">
+                  <div class="setup-benefits">
+                    <h3>Why connect Stripe?</h3>
+                    <ul>
+                      <li>✓ Fast, secure payments directly to your bank</li>
+                      <li>✓ Automatic tax forms (1099)</li>
+                      <li>✓ Track all your earnings in one place</li>
+                      <li>✓ Get paid within 2-3 business days</li>
+                    </ul>
+                  </div>
+                  <form method="POST">
+                    <input type="hidden" name="action" value="start_onboarding" />
+                    <button type="submit" class="btn btn-primary btn-lg btn-full">
+                      Connect with Stripe →
+                    </button>
+                  </form>
+                  <p class="setup-note">
+                    You'll be redirected to Stripe to securely set up your account.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <!-- Payout Preferences -->
+          <div class="card preferences-card">
+            <div class="card-header">
+              <h2>Payout Preferences</h2>
+            </div>
+            
+            <form method="POST" class="preferences-form">
+              <input type="hidden" name="action" value="update_preferences" />
+              
+              <div class="form-group">
+                <label for="preferredMethod">Preferred Payout Method</label>
+                <select id="preferredMethod" name="preferredMethod">
+                  <option value="stripe_connect" selected={paymentProfile?.preferred_payout_method === 'stripe_connect'}>
+                    Stripe (Direct Deposit)
+                  </option>
+                  <option value="paypal" selected={paymentProfile?.preferred_payout_method === 'paypal'}>
+                    PayPal
+                  </option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="minimumPayout">Minimum Payout Amount</label>
+                <div class="input-with-prefix">
+                  <span class="prefix">$</span>
+                  <input 
+                    type="number" 
+                    id="minimumPayout" 
+                    name="minimumPayout" 
+                    value={paymentProfile?.minimum_payout_amount || 50}
+                    min="10"
+                    max="1000"
+                    step="10"
+                  />
+                </div>
+                <span class="hint">Minimum balance required before automatic payout</span>
+              </div>
+
+              <div class="form-group">
+                <label for="paypalEmail">PayPal Email (Optional)</label>
+                <input 
+                  type="email" 
+                  id="paypalEmail" 
+                  name="paypalEmail" 
+                  value={paymentProfile?.paypal_email || ''}
+                  placeholder="your@email.com"
+                />
+                <span class="hint">Required if you select PayPal as payout method</span>
+              </div>
+
+              <button type="submit" class="btn btn-primary">Save Preferences</button>
+            </form>
+          </div>
+
+          <!-- Earnings Summary -->
+          <div class="card earnings-card">
+            <div class="card-header">
+              <h2>Earnings Summary</h2>
+              <a href="/dashboard/earnings" class="view-link">View Details →</a>
+            </div>
+            
+            <div class="earnings-grid">
+              <div class="earning-stat">
+                <span class="earning-value">${paymentProfile?.total_earned?.toFixed(2) || '0.00'}</span>
+                <span class="earning-label">Total Earned</span>
+              </div>
+              <div class="earning-stat">
+                <span class="earning-value">${paymentProfile?.total_paid_out?.toFixed(2) || '0.00'}</span>
+                <span class="earning-label">Paid Out</span>
+              </div>
+              <div class="earning-stat highlight">
+                <span class="earning-value">${paymentProfile?.pending_balance?.toFixed(2) || '0.00'}</span>
+                <span class="earning-label">Pending Balance</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+
+  <style>
+    .payment-page {
+      min-height: 100vh;
+      background: #f5f6fa;
+      padding: 2rem;
+    }
+
+    .payment-container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .page-header {
+      margin-bottom: 2rem;
+    }
+
+    .back-link {
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.875rem;
+      display: inline-block;
+      margin-bottom: 0.5rem;
+    }
+
+    .back-link:hover {
+      color: #2563eb;
+    }
+
+    .page-header h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin: 0 0 0.5rem;
+    }
+
+    .subtitle {
+      color: #6b7280;
+      margin: 0;
+    }
+
+    .alert {
+      padding: 1rem 1.25rem;
+      border-radius: 10px;
+      margin-bottom: 1.5rem;
+    }
+
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+    .alert.warning { background: #fef3c7; color: #92400e; }
+
+    .alert h3 {
+      margin: 0 0 0.5rem;
+    }
+
+    .alert p {
+      margin: 0;
+    }
+
+    /* Onboarding Redirect */
+    .onboarding-redirect {
+      margin-bottom: 2rem;
+    }
+
+    .redirect-card {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 2rem;
+      border-radius: 16px;
+      text-align: center;
+    }
+
+    .redirect-card h2 {
+      margin: 0 0 0.5rem;
+    }
+
+    .redirect-card p {
+      margin: 0 0 1.5rem;
+      opacity: 0.9;
+    }
+
+    .redirect-card .btn {
+      background: white;
+      color: #667eea;
+    }
+
+    /* Grid */
+    .payment-grid {
+      display: grid;
+      gap: 1.5rem;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .card-header h2 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    .card-body {
+      padding: 1.5rem;
+    }
+
+    /* Stripe Card */
+    .stripe-logo {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-weight: 700;
+    }
+
+    .status-badge {
+      font-size: 0.75rem;
+      padding: 0.375rem 0.75rem;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+
+    .status-badge.connected { background: #d1fae5; color: #059669; }
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+
+    .connected-state p {
+      color: #059669;
+      margin: 0 0 1rem;
+    }
+
+    .account-info {
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.5rem 0;
+    }
+
+    .info-row .label {
+      color: #6b7280;
+      font-size: 0.875rem;
+    }
+
+    .info-row .value {
+      font-weight: 500;
+      color: #1a1a2e;
+      font-family: monospace;
+    }
+
+    .setup-benefits {
+      margin-bottom: 1.5rem;
+    }
+
+    .setup-benefits h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0 0 0.75rem;
+    }
+
+    .setup-benefits ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .setup-benefits li {
+      padding: 0.5rem 0;
+      color: #4b5563;
+    }
+
+    .setup-note {
+      margin: 1rem 0 0;
+      font-size: 0.8125rem;
+      color: #9ca3af;
+      text-align: center;
+    }
+
+    /* Preferences Form */
+    .preferences-form {
+      padding: 1.5rem;
+    }
+
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.5rem;
+    }
+
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 1rem;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+
+    .input-with-prefix {
+      display: flex;
+      align-items: center;
+    }
+
+    .input-with-prefix .prefix {
+      padding: 0.75rem 1rem;
+      background: #f3f4f6;
+      border: 2px solid #e5e7eb;
+      border-right: none;
+      border-radius: 10px 0 0 10px;
+      color: #6b7280;
+    }
+
+    .input-with-prefix input {
+      border-radius: 0 10px 10px 0;
+    }
+
+    .hint {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      margin-top: 0.25rem;
+      display: block;
+    }
+
+    /* Earnings Card */
+    .earnings-card .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .view-link {
+      color: #2563eb;
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .earnings-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      padding: 1.5rem;
+    }
+
+    .earning-stat {
+      text-align: center;
+      padding: 1rem;
+      background: #f9fafb;
+      border-radius: 10px;
+    }
+
+    .earning-stat.highlight {
+      background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+    }
+
+    .earning-value {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .earning-label {
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.9375rem;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+
+    .btn-lg {
+      padding: 1rem 2rem;
+      font-size: 1rem;
+    }
+
+    .btn-full {
+      width: 100%;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    @media (max-width: 640px) {
+      .earnings-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</Layout>
