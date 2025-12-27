@@ -13,6 +13,12 @@ const { title, description } = Astro.props;
 // Load settings for header/footer
 const general = await getSetting('general');
 const appearance = await getSetting('appearance');
+
+// Check if user is logged in (from middleware locals)
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+const isAdmin = Astro.locals.isAdmin;
+const isModerator = Astro.locals.isModerator;
 ---
 
 <!doctype html>
@@ -41,8 +47,20 @@ const appearance = await getSetting('appearance');
         </nav>
         
         <div class="header-actions">
-          <a href="/login" class="btn btn-secondary">Log In</a>
-          <a href="/signup" class="btn btn-primary">Sign Up</a>
+          {session ? (
+            <>
+              <a href="/dashboard" class="btn btn-secondary">Dashboard</a>
+              {(isAdmin || isModerator) && (
+                <a href="/admin" class="btn btn-secondary">Admin</a>
+              )}
+              <a href="/logout" class="btn btn-primary">Log Out</a>
+            </>
+          ) : (
+            <>
+              <a href="/login" class="btn btn-secondary">Log In</a>
+              <a href="/signup" class="btn btn-primary">Sign Up</a>
+            </>
+          )}
         </div>
         
         <button class="mobile-menu-toggle" aria-label="Toggle menu">
