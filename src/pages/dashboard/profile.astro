@@ -1,0 +1,581 @@
+---
+// src/pages/dashboard/profile.astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { supabase } from "../../lib/supabase";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!session) {
+  return Astro.redirect('/login?redirect=/dashboard/profile');
+}
+
+let successMessage = '';
+let errorMessage = '';
+
+// Handle form submission
+if (Astro.request.method === 'POST') {
+  const formData = await Astro.request.formData();
+  const action = formData.get('action');
+
+  if (action === 'update_profile') {
+    const fullName = formData.get('fullName') as string;
+    const bio = formData.get('bio') as string;
+    const avatarUrl = formData.get('avatarUrl') as string;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        full_name: fullName,
+        bio: bio,
+        avatar_url: avatarUrl || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', session.user.id);
+
+    if (error) {
+      errorMessage = error.message;
+    } else {
+      successMessage = 'Profile updated successfully!';
+      // Refresh profile data
+      const { data: refreshedProfile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+      if (refreshedProfile) {
+        Object.assign(profile, refreshedProfile);
+      }
+    }
+  }
+
+  if (action === 'change_password') {
+    const currentPassword = formData.get('currentPassword') as string;
+    const newPassword = formData.get('newPassword') as string;
+    const confirmPassword = formData.get('confirmPassword') as string;
+
+    if (!currentPassword || !newPassword) {
+      errorMessage = 'Please fill in all password fields.';
+    } else if (newPassword.length < 8) {
+      errorMessage = 'New password must be at least 8 characters.';
+    } else if (newPassword !== confirmPassword) {
+      errorMessage = 'New passwords do not match.';
+    } else {
+      // Verify current password by re-authenticating
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: session.user.email!,
+        password: currentPassword,
+      });
+
+      if (signInError) {
+        errorMessage = 'Current password is incorrect.';
+      } else {
+        const { error: updateError } = await supabase.auth.updateUser({
+          password: newPassword,
+        });
+
+        if (updateError) {
+          errorMessage = updateError.message;
+        } else {
+          successMessage = 'Password changed successfully!';
+        }
+      }
+    }
+  }
+}
+
+// Fetch user's payment profile
+const { data: paymentProfile } = await supabase
+  .from('creator_payment_profiles')
+  .select('*')
+  .eq('creator_id', session.user.id)
+  .single();
+
+// Stats
+const { count: totalEarnings } = await supabase
+  .from('payments')
+  .select('amount', { count: 'exact', head: false })
+  .eq('creator_id', session.user.id)
+  .eq('status', 'completed');
+
+const { data: earningsData } = await supabase
+  .from('payments')
+  .select('amount')
+  .eq('creator_id', session.user.id)
+  .eq('status', 'completed');
+
+const totalEarned = earningsData?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+---
+
+<Layout title="My Profile">
+  <div class="profile-page">
+    <div class="profile-container">
+      <!-- Header -->
+      <div class="page-header">
+        <a href="/dashboard" class="back-link">← Back to Dashboard</a>
+        <h1>My Profile</h1>
+      </div>
+
+      {successMessage && <div class="alert success">{successMessage}</div>}
+      {errorMessage && <div class="alert error">{errorMessage}</div>}
+
+      <div class="profile-grid">
+        <!-- Profile Info Card -->
+        <div class="card profile-card">
+          <div class="card-header">
+            <h2>Profile Information</h2>
+          </div>
+          <form method="POST" class="profile-form">
+            <input type="hidden" name="action" value="update_profile" />
+            
+            <!-- Avatar Preview -->
+            <div class="avatar-section">
+              <div class="avatar-preview">
+                {profile?.avatar_url ? (
+                  <img src={profile.avatar_url} alt={profile.full_name || 'Profile'} id="avatar-img" />
+                ) : (
+                  <span id="avatar-initial">{profile?.full_name?.charAt(0) || profile?.email?.charAt(0)?.toUpperCase() || '?'}</span>
+                )}
+              </div>
+              <div class="avatar-info">
+                <p>Profile Picture</p>
+                <span class="hint">Enter an image URL below</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="avatarUrl">Avatar URL</label>
+              <input 
+                type="url" 
+                id="avatarUrl" 
+                name="avatarUrl" 
+                value={profile?.avatar_url || ''}
+                placeholder="https://example.com/avatar.jpg"
+              />
+              <span class="hint">Direct link to an image (PNG, JPG)</span>
+            </div>
+
+            <div class="form-group">
+              <label for="email">Email Address</label>
+              <input 
+                type="email" 
+                id="email" 
+                value={session.user.email}
+                disabled
+              />
+              <span class="hint">Email cannot be changed</span>
+            </div>
+
+            <div class="form-group">
+              <label for="fullName">Full Name</label>
+              <input 
+                type="text" 
+                id="fullName" 
+                name="fullName" 
+                value={profile?.full_name || ''}
+                placeholder="Your full name"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="bio">Bio</label>
+              <textarea 
+                id="bio" 
+                name="bio" 
+                rows="4"
+                placeholder="Tell us about yourself, your content style, and your audience..."
+              >{profile?.bio || ''}</textarea>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Save Changes</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Account Stats -->
+        <div class="sidebar">
+          <!-- Stats Card -->
+          <div class="card stats-card">
+            <h3>Account Stats</h3>
+            <div class="stats-list">
+              <div class="stat-item">
+                <span class="stat-label">Member Since</span>
+                <span class="stat-value">{new Date(profile?.created_at || Date.now()).toLocaleDateString()}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Account Status</span>
+                <span class={`status-badge ${profile?.status || 'active'}`}>
+                  {profile?.status || 'Active'}
+                </span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Total Earnings</span>
+                <span class="stat-value earnings">${totalEarned.toFixed(2)}</span>
+              </div>
+              {paymentProfile && (
+                <div class="stat-item">
+                  <span class="stat-label">Payout Status</span>
+                  <span class={`status-badge ${paymentProfile.stripe_onboarding_complete ? 'active' : 'pending'}`}>
+                    {paymentProfile.stripe_onboarding_complete ? 'Connected' : 'Setup Required'}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <!-- Payment Setup Card -->
+          <div class="card payment-card">
+            <h3>💳 Payment Setup</h3>
+            {paymentProfile?.stripe_onboarding_complete ? (
+              <div class="payment-connected">
+                <div class="connected-badge">✓ Stripe Connected</div>
+                <p>You're all set to receive payments!</p>
+                <a href="/dashboard/earnings" class="btn btn-secondary btn-sm">View Earnings</a>
+              </div>
+            ) : (
+              <div class="payment-setup">
+                <p>Connect your Stripe account to receive payments for your work.</p>
+                <a href="/dashboard/payment-setup" class="btn btn-primary btn-sm">Setup Payments</a>
+              </div>
+            )}
+          </div>
+
+          <!-- Security Card -->
+          <div class="card security-card">
+            <h3>🔒 Security</h3>
+            <form method="POST" class="password-form">
+              <input type="hidden" name="action" value="change_password" />
+              
+              <div class="form-group">
+                <label for="currentPassword">Current Password</label>
+                <input type="password" id="currentPassword" name="currentPassword" />
+              </div>
+              
+              <div class="form-group">
+                <label for="newPassword">New Password</label>
+                <input type="password" id="newPassword" name="newPassword" minlength="8" />
+              </div>
+              
+              <div class="form-group">
+                <label for="confirmPassword">Confirm New Password</label>
+                <input type="password" id="confirmPassword" name="confirmPassword" minlength="8" />
+              </div>
+              
+              <button type="submit" class="btn btn-secondary btn-sm">Change Password</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .profile-page {
+      min-height: 100vh;
+      background: #f5f6fa;
+      padding: 2rem;
+    }
+
+    .profile-container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .page-header {
+      margin-bottom: 2rem;
+    }
+
+    .back-link {
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.875rem;
+      display: inline-block;
+      margin-bottom: 0.5rem;
+    }
+
+    .back-link:hover {
+      color: #2563eb;
+    }
+
+    .page-header h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    .alert {
+      padding: 1rem 1.25rem;
+      border-radius: 10px;
+      margin-bottom: 1.5rem;
+      font-size: 0.9375rem;
+    }
+
+    .alert.success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .alert.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .profile-grid {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 1.5rem;
+      align-items: start;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .card-header h2 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    /* Profile Form */
+    .profile-form {
+      padding: 1.5rem;
+    }
+
+    .avatar-section {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .avatar-preview {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #dbeafe, #c7d2fe);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      font-weight: 600;
+      color: #2563eb;
+      overflow: hidden;
+    }
+
+    .avatar-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .avatar-info p {
+      font-weight: 600;
+      color: #1a1a2e;
+      margin: 0 0 0.25rem;
+    }
+
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.5rem;
+    }
+
+    .form-group input,
+    .form-group textarea {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 1rem;
+      transition: all 0.2s;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+
+    .form-group input:disabled {
+      background: #f9fafb;
+      color: #6b7280;
+      cursor: not-allowed;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .hint {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      margin-top: 0.25rem;
+      display: block;
+    }
+
+    .form-actions {
+      padding-top: 0.5rem;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .sidebar .card {
+      padding: 1.5rem;
+    }
+
+    .sidebar h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0 0 1rem;
+    }
+
+    /* Stats Card */
+    .stats-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .stat-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 8px;
+    }
+
+    .stat-label {
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    .stat-value {
+      font-weight: 600;
+      color: #1a1a2e;
+    }
+
+    .stat-value.earnings {
+      color: #059669;
+    }
+
+    .status-badge {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 6px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.active { background: #d1fae5; color: #059669; }
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+    .status-badge.suspended { background: #fee2e2; color: #dc2626; }
+
+    /* Payment Card */
+    .payment-connected {
+      text-align: center;
+    }
+
+    .connected-badge {
+      display: inline-block;
+      background: #d1fae5;
+      color: #059669;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+    }
+
+    .payment-connected p,
+    .payment-setup p {
+      color: #6b7280;
+      font-size: 0.875rem;
+      margin: 0 0 1rem;
+    }
+
+    /* Security Card */
+    .password-form .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .password-form .form-group label {
+      font-size: 0.8125rem;
+    }
+
+    .password-form .form-group input {
+      padding: 0.625rem 0.875rem;
+      font-size: 0.9375rem;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.9375rem;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+
+    .btn-sm {
+      padding: 0.5rem 1rem;
+      font-size: 0.8125rem;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .btn-secondary:hover {
+      background: #e5e7eb;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .profile-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</Layout>
