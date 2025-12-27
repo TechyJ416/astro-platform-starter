@@ -51,6 +51,18 @@ const { count: pendingPosts } = await supabase
   .select('*', { count: 'exact', head: true })
   .eq('creator_id', session.user.id)
   .eq('status', 'pending');
+
+// Fetch user's campaign applications
+const { data: applications } = await supabase
+  .from('campaign_assignments')
+  .select('*, campaigns(id, title, slug, deadline)')
+  .eq('creator_id', session.user.id)
+  .order('assigned_at', { ascending: false })
+  .limit(5);
+
+// Application stats
+const pendingApplications = applications?.filter(a => a.status === 'invited').length || 0;
+const acceptedApplications = applications?.filter(a => a.status === 'accepted').length || 0;
 ---
 
 <Layout title="Dashboard">
@@ -161,6 +173,46 @@ const { count: pendingPosts } = await supabase
               <span>📢</span>
               <p>No active campaigns</p>
               <p class="empty-hint">Check back soon for new opportunities!</p>
+            </div>
+          )}
+        </div>
+        
+        <!-- My Applications -->
+        <div class="panel applications-panel">
+          <div class="panel-header">
+            <h2>My Applications</h2>
+            <div class="application-stats">
+              {pendingApplications > 0 && <span class="stat-tag pending">{pendingApplications} pending</span>}
+              {acceptedApplications > 0 && <span class="stat-tag accepted">{acceptedApplications} accepted</span>}
+            </div>
+          </div>
+          
+          {applications && applications.length > 0 ? (
+            <div class="applications-list">
+              {applications.map(app => (
+                <div class="application-item">
+                  <div class="application-info">
+                    <div class="application-title">{app.campaigns?.title || 'Unknown Campaign'}</div>
+                    <div class="application-date">Applied {new Date(app.assigned_at).toLocaleDateString()}</div>
+                  </div>
+                  <div class="application-status">
+                    <span class={`status-badge status-${app.status}`}>
+                      {app.status === 'invited' ? 'Pending' : 
+                       app.status === 'accepted' ? 'Accepted' :
+                       app.status === 'declined' ? 'Not Selected' : app.status}
+                    </span>
+                    {app.status === 'accepted' && app.campaigns?.slug && (
+                      <a href={`/campaigns/${app.campaigns.slug}`} class="btn btn-xs btn-primary">View</a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div class="empty-state">
+              <span>📝</span>
+              <p>No applications yet</p>
+              <a href="/campaigns" class="btn btn-sm btn-primary">Browse Campaigns</a>
             </div>
           )}
         </div>
@@ -394,10 +446,71 @@ const { count: pendingPosts } = await supabase
     .status-approved { background: #d1fae5; color: #059669; }
     .status-rejected { background: #fee2e2; color: #dc2626; }
     .status-revision_requested { background: #dbeafe; color: #2563eb; }
+    .status-invited { background: #fef3c7; color: #d97706; }
+    .status-accepted { background: #d1fae5; color: #059669; }
+    .status-declined { background: #fee2e2; color: #dc2626; }
     
     .post-date {
       font-size: 0.8125rem;
       color: #9ca3af;
+    }
+    
+    /* Applications Panel */
+    .applications-panel {
+      grid-column: 1 / -1;
+    }
+    
+    .application-stats {
+      display: flex;
+      gap: 0.5rem;
+    }
+    
+    .stat-tag {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    
+    .stat-tag.pending { background: #fef3c7; color: #d97706; }
+    .stat-tag.accepted { background: #d1fae5; color: #059669; }
+    
+    .applications-list {
+      padding: 0;
+    }
+    
+    .application-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .application-item:last-child {
+      border-bottom: none;
+    }
+    
+    .application-title {
+      font-weight: 600;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+    
+    .application-date {
+      font-size: 0.8125rem;
+      color: #9ca3af;
+    }
+    
+    .application-status {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    
+    .btn-xs {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.75rem;
     }
     
     /* Campaigns List */
