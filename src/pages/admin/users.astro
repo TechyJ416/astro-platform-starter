@@ -4,6 +4,7 @@ export const prerender = false;
 
 import AdminLayout from "../../layouts/AdminLayout.astro";
 import { createClient } from "@supabase/supabase-js";
+import { sendApprovalEmail, sendDenialEmail } from "../../lib/email";
 
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
 const session = Astro.locals.session;
@@ -103,7 +104,10 @@ if (Astro.request.method === 'POST') {
       actionError = error.message;
     } else {
       actionMessage = `${user?.full_name || user?.email} has been approved and can now log in.`;
-      // TODO: Send approval email to user
+      // Send approval email to user
+      if (user?.email) {
+        await sendApprovalEmail(user.email, user.full_name || '');
+      }
     }
   }
 
@@ -121,7 +125,10 @@ if (Astro.request.method === 'POST') {
       actionError = error.message;
     } else {
       actionMessage = `${user?.full_name || user?.email}'s application has been denied.`;
-      // TODO: Send denial email to user
+      // Send denial email to user
+      if (user?.email) {
+        await sendDenialEmail(user.email, user.full_name || '');
+      }
     }
   }
 
