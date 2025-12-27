@@ -138,6 +138,10 @@ const returnTo = Astro.url.searchParams.get('returnTo') || '/dashboard';
             </div>
 
             <button type="submit" class="btn btn-primary btn-full">Log In</button>
+            
+            <div class="forgot-link">
+              <a href="/forgot-password">Forgot your password?</a>
+            </div>
           </form>
 
           <div class="card-footer">
@@ -243,6 +247,22 @@ const returnTo = Astro.url.searchParams.get('returnTo') || '/dashboard';
     .btn-secondary {
       background: #f3f4f6;
       color: #374151;
+    }
+
+    .forgot-link {
+      text-align: center;
+      margin-top: 1rem;
+    }
+
+    .forgot-link a {
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+
+    .forgot-link a:hover {
+      color: #2563eb;
+      text-decoration: underline;
     }
 
     .btn-full {
