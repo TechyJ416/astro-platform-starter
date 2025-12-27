@@ -4,6 +4,7 @@ export const prerender = false;
 
 import Layout from "../layouts/Layout.astro";
 import { supabase } from "../lib/supabase";
+import { sendWelcomeEmail } from "../lib/email";
 
 let error = '';
 let success = false;
@@ -85,6 +86,9 @@ if (Astro.request.method === 'POST') {
           is_read: false,
           is_announcement: false,
         });
+        
+        // Send welcome email to user
+        await sendWelcomeEmail(email, fullName || '');
       }
 
       success = true;
