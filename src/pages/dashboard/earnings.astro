@@ -1,0 +1,528 @@
+---
+// src/pages/dashboard/earnings.astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { supabase } from "../../lib/supabase";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!session) {
+  return Astro.redirect('/login?redirect=/dashboard/earnings');
+}
+
+// Fetch payment profile
+const { data: paymentProfile } = await supabase
+  .from('creator_payment_profiles')
+  .select('*')
+  .eq('creator_id', session.user.id)
+  .single();
+
+// Fetch payments
+const { data: payments } = await supabase
+  .from('payments')
+  .select('*, campaigns(title)')
+  .eq('creator_id', session.user.id)
+  .order('created_at', { ascending: false });
+
+// Calculate stats
+const totalEarned = payments?.reduce((sum, p) => sum + (p.status === 'completed' ? p.amount : 0), 0) || 0;
+const pendingAmount = payments?.reduce((sum, p) => sum + (p.status === 'pending' || p.status === 'processing' ? p.amount : 0), 0) || 0;
+const completedPayments = payments?.filter(p => p.status === 'completed').length || 0;
+
+// Monthly earnings for chart data
+const monthlyEarnings = payments?.reduce((acc, payment) => {
+  if (payment.status !== 'completed') return acc;
+  const month = new Date(payment.completed_at || payment.created_at).toLocaleString('default', { month: 'short', year: 'numeric' });
+  acc[month] = (acc[month] || 0) + payment.amount;
+  return acc;
+}, {} as Record<string, number>) || {};
+
+const chartLabels = Object.keys(monthlyEarnings).slice(-6);
+const chartData = chartLabels.map(label => monthlyEarnings[label]);
+
+function getStatusBadge(status: string) {
+  const badges: Record<string, { label: string; class: string }> = {
+    pending: { label: 'Pending', class: 'pending' },
+    processing: { label: 'Processing', class: 'processing' },
+    completed: { label: 'Paid', class: 'completed' },
+    failed: { label: 'Failed', class: 'failed' },
+    refunded: { label: 'Refunded', class: 'refunded' },
+    cancelled: { label: 'Cancelled', class: 'cancelled' },
+  };
+  return badges[status] || { label: status, class: 'default' };
+}
+---
+
+<Layout title="My Earnings">
+  <div class="earnings-page">
+    <div class="earnings-container">
+      <!-- Header -->
+      <div class="page-header">
+        <div class="header-content">
+          <a href="/dashboard" class="back-link">← Back to Dashboard</a>
+          <h1>💰 My Earnings</h1>
+        </div>
+        <a href="/dashboard/payment-setup" class="btn btn-secondary">
+          ⚙️ Payment Settings
+        </a>
+      </div>
+
+      <!-- Stats Cards -->
+      <div class="stats-grid">
+        <div class="stat-card highlight">
+          <div class="stat-icon">💵</div>
+          <div class="stat-content">
+            <div class="stat-value">${totalEarned.toFixed(2)}</div>
+            <div class="stat-label">Total Earned</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">⏳</div>
+          <div class="stat-content">
+            <div class="stat-value">${pendingAmount.toFixed(2)}</div>
+            <div class="stat-label">Pending</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">✅</div>
+          <div class="stat-content">
+            <div class="stat-value">{completedPayments}</div>
+            <div class="stat-label">Completed Payments</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📊</div>
+          <div class="stat-content">
+            <div class="stat-value">
+              ${payments && payments.length > 0 
+                ? (totalEarned / Math.max(completedPayments, 1)).toFixed(2)
+                : '0.00'}
+            </div>
+            <div class="stat-label">Avg. Payment</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Payment Setup Notice */}
+      {!paymentProfile?.stripe_onboarding_complete && (
+        <div class="setup-notice">
+          <div class="notice-content">
+            <div class="notice-icon">⚠️</div>
+            <div>
+              <h3>Complete Your Payment Setup</h3>
+              <p>Connect your Stripe account to receive payments.</p>
+            </div>
+          </div>
+          <a href="/dashboard/payment-setup" class="btn btn-primary">Setup Now</a>
+        </div>
+      )}
+
+      <!-- Earnings Chart -->
+      {chartLabels.length > 0 && (
+        <div class="card chart-card">
+          <div class="card-header">
+            <h2>Earnings History</h2>
+          </div>
+          <div class="chart-container">
+            <div class="chart-bars">
+              {chartLabels.map((label, i) => {
+                const maxValue = Math.max(...chartData, 1);
+                const height = (chartData[i] / maxValue) * 100;
+                return (
+                  <div class="chart-bar-wrapper">
+                    <div class="chart-value">${chartData[i].toFixed(0)}</div>
+                    <div class="chart-bar" style={`height: ${Math.max(height, 5)}%`}></div>
+                    <div class="chart-label">{label}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <!-- Payment History -->
+      <div class="card payments-card">
+        <div class="card-header">
+          <h2>Payment History</h2>
+        </div>
+        
+        {payments && payments.length > 0 ? (
+          <div class="payments-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Campaign</th>
+                  <th>Description</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map(payment => (
+                  <tr>
+                    <td class="date-col">
+                      {new Date(payment.created_at).toLocaleDateString()}
+                    </td>
+                    <td class="campaign-col">
+                      {payment.campaigns?.title || 'N/A'}
+                    </td>
+                    <td class="desc-col">
+                      {payment.description || 'Payment'}
+                    </td>
+                    <td class="amount-col">
+                      ${payment.amount.toFixed(2)}
+                    </td>
+                    <td class="status-col">
+                      <span class={`status-badge ${getStatusBadge(payment.status).class}`}>
+                        {getStatusBadge(payment.status).label}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div class="empty-state">
+            <span>💸</span>
+            <p>No payments yet</p>
+            <p class="hint">Complete campaigns to start earning!</p>
+            <a href="/campaigns" class="btn btn-primary btn-sm">Browse Campaigns</a>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .earnings-page {
+      min-height: 100vh;
+      background: #f5f6fa;
+      padding: 2rem;
+    }
+
+    .earnings-container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 2rem;
+    }
+
+    .back-link {
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.875rem;
+      display: inline-block;
+      margin-bottom: 0.5rem;
+    }
+
+    .back-link:hover {
+      color: #2563eb;
+    }
+
+    .page-header h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .stat-card.highlight {
+      background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+    }
+
+    .stat-icon {
+      font-size: 1.5rem;
+      width: 48px;
+      height: 48px;
+      background: rgba(255,255,255,0.8);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .stat-label {
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    /* Setup Notice */
+    .setup-notice {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+      border: 2px solid #f59e0b;
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .notice-content {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .notice-icon {
+      font-size: 1.5rem;
+    }
+
+    .notice-content h3 {
+      font-size: 1rem;
+      color: #92400e;
+      margin: 0 0 0.25rem;
+    }
+
+    .notice-content p {
+      font-size: 0.875rem;
+      color: #a16207;
+      margin: 0;
+    }
+
+    /* Cards */
+    .card {
+      background: white;
+      border-radius: 12px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .card-header h2 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    /* Chart */
+    .chart-container {
+      padding: 1.5rem;
+    }
+
+    .chart-bars {
+      display: flex;
+      justify-content: space-around;
+      align-items: flex-end;
+      height: 200px;
+      padding: 1rem 0;
+    }
+
+    .chart-bar-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      flex: 1;
+    }
+
+    .chart-value {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #059669;
+    }
+
+    .chart-bar {
+      width: 40px;
+      background: linear-gradient(180deg, #10b981 0%, #059669 100%);
+      border-radius: 6px 6px 0 0;
+      min-height: 10px;
+      transition: height 0.3s;
+    }
+
+    .chart-label {
+      font-size: 0.75rem;
+      color: #6b7280;
+      text-align: center;
+    }
+
+    /* Payments Table */
+    .payments-table {
+      overflow-x: auto;
+    }
+
+    .payments-table table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .payments-table th {
+      text-align: left;
+      padding: 1rem 1.5rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .payments-table td {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #f0f0f0;
+      font-size: 0.9375rem;
+    }
+
+    .payments-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .date-col {
+      color: #6b7280;
+      white-space: nowrap;
+    }
+
+    .campaign-col {
+      font-weight: 500;
+      color: #1a1a2e;
+    }
+
+    .desc-col {
+      color: #6b7280;
+    }
+
+    .amount-col {
+      font-weight: 600;
+      color: #059669;
+      white-space: nowrap;
+    }
+
+    .status-badge {
+      display: inline-block;
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+    .status-badge.processing { background: #dbeafe; color: #2563eb; }
+    .status-badge.completed { background: #d1fae5; color: #059669; }
+    .status-badge.failed { background: #fee2e2; color: #dc2626; }
+    .status-badge.refunded { background: #f3f4f6; color: #6b7280; }
+    .status-badge.cancelled { background: #f3f4f6; color: #6b7280; }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 3rem 2rem;
+      color: #6b7280;
+    }
+
+    .empty-state span {
+      font-size: 3rem;
+      display: block;
+      margin-bottom: 1rem;
+    }
+
+    .empty-state p {
+      margin: 0;
+    }
+
+    .empty-state .hint {
+      font-size: 0.875rem;
+      color: #9ca3af;
+      margin-bottom: 1rem;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.9375rem;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+
+    .btn-sm {
+      padding: 0.5rem 1rem;
+      font-size: 0.8125rem;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .page-header {
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .setup-notice {
+        flex-direction: column;
+        gap: 1rem;
+        text-align: center;
+      }
+
+      .notice-content {
+        flex-direction: column;
+      }
+
+      .chart-bar {
+        width: 30px;
+      }
+    }
+  </style>
+</Layout>
