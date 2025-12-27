@@ -20,21 +20,21 @@ const { data: campaigns } = await supabase
 // Calculate days remaining for deadline
 function getDaysRemaining(deadline: string) {
   if (!deadline) return null;
-  const days = Math.ceil((new Date(deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-  return days;
+  return Math.ceil(
+    (new Date(deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+  );
 }
 ---
 
 <Layout title="Campaigns">
   <div class="campaigns-page">
+
     <div class="page-header">
       <div class="header-content">
         <h1>Active Campaigns</h1>
         <p>Browse and apply to brand campaigns that match your style</p>
       </div>
-      {!session && (
-        <a href="/signup" class="btn btn-primary">Join to Apply</a>
-      )}
+      {!session && <a href="/signup" class="btn btn-primary">Join to Apply</a>}
     </div>
 
     {!session && (
@@ -42,11 +42,9 @@ function getDaysRemaining(deadline: string) {
         <div class="banner-icon">💡</div>
         <div class="banner-content">
           <h3>How It Works</h3>
-          <p>Create an account, get approved, and start applying to campaigns. Earn money creating authentic content for brands you love.</p>
+          <p>Create an account, get approved, and start applying to campaigns.</p>
         </div>
-        <div class="banner-actions">
-          <a href="/signup" class="btn btn-primary">Get Started</a>
-        </div>
+        <a href="/signup" class="btn btn-primary">Get Started</a>
       </div>
     )}
 
@@ -55,70 +53,59 @@ function getDaysRemaining(deadline: string) {
         <div class="banner-icon">⏳</div>
         <div class="banner-content">
           <h3>Account Pending Approval</h3>
-          <p>You can browse campaigns, but you'll need an approved account to apply. We'll notify you once your account is approved.</p>
+          <p>You can browse campaigns, but approval is required to apply.</p>
         </div>
       </div>
     )}
 
     {campaigns && campaigns.length > 0 ? (
       <div class="campaigns-grid">
-        {campaigns.map(campaign => {
+        {campaigns.map((campaign) => {
           const daysRemaining = getDaysRemaining(campaign.deadline);
-          const isUrgent =
-            daysRemaining !== null &&
-            daysRemaining <= 7 &&
-            daysRemaining >= 1;
-          const isExpired =
-            daysRemaining !== null &&
-            daysRemaining < 1;
-    
-          return (
-            <div class="campaign-card">
-              {/* render stuff */}
-            </div>
-          );
-        })}
-      </div>
-    ) : null}
+          const isUrgent = daysRemaining !== null && daysRemaining <= 7 && daysRemaining >= 1;
+          const isExpired = daysRemaining !== null && daysRemaining < 1;
 
-              
+          return (
+            <div class={`campaign-card ${isUrgent ? 'urgent' : ''} ${isExpired ? 'expired' : ''}`}>
+
               {campaign.description && (
                 <p class="campaign-desc">
-                  {campaign.description.substring(0, 150)}{campaign.description.length > 150 ? '...' : ''}
+                  {campaign.description.slice(0, 150)}
+                  {campaign.description.length > 150 && '...'}
                 </p>
               )}
-              
+
               <div class="campaign-meta">
                 {campaign.payment_per_post && (
                   <div class="meta-item payment">
-                    <span class="meta-icon">💰</span>
-                    <span class="meta-value">${campaign.payment_per_post}</span>
-                    <span class="meta-label">per post</span>
+                    <span>💰</span>
+                    <strong>${campaign.payment_per_post}</strong>
+                    <small>per post</small>
                   </div>
                 )}
-                
+
                 {campaign.budget && (
                   <div class="meta-item">
-                    <span class="meta-icon">💵</span>
-                    <span class="meta-value">${campaign.budget}</span>
-                    <span class="meta-label">budget</span>
+                    <span>💵</span>
+                    <strong>${campaign.budget}</strong>
+                    <small>budget</small>
                   </div>
                 )}
-                
+
                 {campaign.deadline && (
                   <div class={`meta-item ${isUrgent ? 'urgent' : ''} ${isExpired ? 'expired' : ''}`}>
-                    <span class="meta-icon">📅</span>
+                    <span>📅</span>
                     {isExpired ? (
-                      <span class="meta-value expired">Ended</span>
+                      <strong class="expired">Ended</strong>
                     ) : isUrgent ? (
-                      <span class="meta-value urgent">{daysRemaining} days left!</span>
+                      <strong class="urgent">{daysRemaining} days left!</strong>
                     ) : (
-                      <span class="meta-value">{new Date(campaign.deadline).toLocaleDateString()}</span>
+                      <strong>{new Date(campaign.deadline).toLocaleDateString()}</strong>
                     )}
                   </div>
                 )}
               </div>
-              
+
               <div class="campaign-footer">
                 {isApproved ? (
                   <a href={`/campaigns/${campaign.slug}`} class="btn btn-primary">
@@ -133,11 +120,12 @@ function getDaysRemaining(deadline: string) {
                     Sign Up to Apply
                   </a>
                 )}
-                
+
                 {isUrgent && !isExpired && (
                   <span class="urgency-badge">⚡ Ending Soon</span>
                 )}
               </div>
+
             </div>
           );
         })}
@@ -147,382 +135,9 @@ function getDaysRemaining(deadline: string) {
         <div class="empty-icon">📢</div>
         <h2>No Active Campaigns</h2>
         <p>Check back soon! New campaigns are added regularly.</p>
-        {!session && (
-          <a href="/signup" class="btn btn-primary">Join the Waitlist</a>
-        )}
+        {!session && <a href="/signup" class="btn btn-primary">Join the Waitlist</a>}
       </div>
     )}
 
-    {/* How it works section for logged out users */}
-    {!session && (
-      <section class="how-it-works">
-        <h2>Start Earning as a Creator</h2>
-        <div class="steps">
-          <div class="step">
-            <div class="step-number">1</div>
-            <h3>Create Account</h3>
-            <p>Sign up and join our waitlist for approval.</p>
-          </div>
-          <div class="step">
-            <div class="step-number">2</div>
-            <h3>Get Approved</h3>
-            <p>Our team reviews your application.</p>
-          </div>
-          <div class="step">
-            <div class="step-number">3</div>
-            <h3>Apply to Campaigns</h3>
-            <p>Browse and apply to campaigns that fit your style.</p>
-          </div>
-          <div class="step">
-            <div class="step-number">4</div>
-            <h3>Create & Earn</h3>
-            <p>Submit your content and get paid!</p>
-          </div>
-        </div>
-      </section>
-    )}
   </div>
-
-  <style>
-    .campaigns-page {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 2rem;
-    }
-
-    .page-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 2rem;
-    }
-
-    .header-content h1 {
-      font-size: 2rem;
-      color: #1a1a2e;
-      margin-bottom: 0.5rem;
-    }
-
-    .header-content p {
-      color: #6b7280;
-      font-size: 1.125rem;
-    }
-
-    .info-banner, .pending-banner {
-      display: flex;
-      align-items: center;
-      gap: 1.5rem;
-      padding: 1.5rem;
-      border-radius: 16px;
-      margin-bottom: 2rem;
-    }
-
-    .info-banner {
-      background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-      border: 2px solid #10b981;
-    }
-
-    .pending-banner {
-      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-      border: 2px solid #f59e0b;
-    }
-
-    .banner-icon {
-      font-size: 2.5rem;
-    }
-
-    .banner-content {
-      flex: 1;
-    }
-
-    .banner-content h3 {
-      font-size: 1.125rem;
-      color: #1a1a2e;
-      margin-bottom: 0.25rem;
-    }
-
-    .banner-content p {
-      color: #6b7280;
-      margin: 0;
-    }
-
-    .banner-actions {
-      display: flex;
-      gap: 0.75rem;
-    }
-
-    .campaigns-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-      gap: 1.5rem;
-    }
-
-    .campaign-card {
-      background: white;
-      border-radius: 16px;
-      padding: 1.5rem;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      transition: all 0.2s;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .campaign-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(0,0,0,0.1);
-    }
-
-    .campaign-card.urgent {
-      border: 2px solid #f59e0b;
-    }
-
-    .campaign-card.expired {
-      opacity: 0.7;
-    }
-
-    .campaign-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 0.75rem;
-    }
-
-    .campaign-header h2 {
-      font-size: 1.25rem;
-      color: #1a1a2e;
-    }
-
-    .status-badge {
-      font-size: 0.6875rem;
-      padding: 0.25rem 0.75rem;
-      border-radius: 999px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-
-    .status-badge.active {
-      background: #d1fae5;
-      color: #059669;
-    }
-
-    .campaign-desc {
-      color: #6b7280;
-      font-size: 0.9375rem;
-      margin-bottom: 1.25rem;
-      line-height: 1.6;
-      flex: 1;
-    }
-
-    .campaign-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1rem;
-      margin-bottom: 1.25rem;
-    }
-
-    .meta-item {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.5rem 0.75rem;
-      background: #f9fafb;
-      border-radius: 8px;
-    }
-
-    .meta-item.payment {
-      background: #d1fae5;
-    }
-
-    .meta-item.urgent {
-      background: #fef3c7;
-    }
-
-    .meta-item.expired {
-      background: #fee2e2;
-    }
-
-    .meta-icon {
-      font-size: 1rem;
-    }
-
-    .meta-value {
-      font-weight: 600;
-      color: #1a1a2e;
-    }
-
-    .meta-value.urgent {
-      color: #d97706;
-    }
-
-    .meta-value.expired {
-      color: #dc2626;
-    }
-
-    .meta-label {
-      font-size: 0.75rem;
-      color: #6b7280;
-    }
-
-    .campaign-footer {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      padding-top: 1.25rem;
-      border-top: 1px solid #f0f0f0;
-    }
-
-    .urgency-badge {
-      font-size: 0.75rem;
-      padding: 0.375rem 0.75rem;
-      background: linear-gradient(135deg, #fef3c7, #fde68a);
-      color: #92400e;
-      border-radius: 999px;
-      font-weight: 600;
-    }
-
-    .btn {
-      padding: 0.75rem 1.5rem;
-      border-radius: 10px;
-      font-weight: 600;
-      font-size: 0.9375rem;
-      text-decoration: none;
-      border: none;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .btn-primary {
-      background: #2563eb;
-      color: white;
-    }
-
-    .btn-primary:hover {
-      background: #1d4ed8;
-    }
-
-    .btn-secondary {
-      background: #f3f4f6;
-      color: #374151;
-    }
-
-    .btn-secondary:hover {
-      background: #e5e7eb;
-    }
-
-    .btn-disabled {
-      background: #e5e7eb;
-      color: #9ca3af;
-      cursor: not-allowed;
-    }
-
-    .empty-state {
-      text-align: center;
-      padding: 4rem 2rem;
-      background: white;
-      border-radius: 16px;
-    }
-
-    .empty-icon {
-      font-size: 4rem;
-      margin-bottom: 1rem;
-    }
-
-    .empty-state h2 {
-      color: #374151;
-      margin-bottom: 0.5rem;
-    }
-
-    .empty-state p {
-      color: #9ca3af;
-      margin-bottom: 1.5rem;
-    }
-
-    /* How it works */
-    .how-it-works {
-      margin-top: 4rem;
-      text-align: center;
-      padding: 3rem;
-      background: linear-gradient(135deg, #f8fafc, #e2e8f0);
-      border-radius: 20px;
-    }
-
-    .how-it-works h2 {
-      font-size: 1.75rem;
-      color: #1a1a2e;
-      margin-bottom: 2rem;
-    }
-
-    .steps {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 2rem;
-    }
-
-    .step {
-      text-align: center;
-    }
-
-    .step-number {
-      width: 48px;
-      height: 48px;
-      background: linear-gradient(135deg, #2563eb, #3b82f6);
-      color: white;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.25rem;
-      font-weight: 700;
-      margin: 0 auto 1rem;
-    }
-
-    .step h3 {
-      font-size: 1rem;
-      color: #1a1a2e;
-      margin-bottom: 0.5rem;
-    }
-
-    .step p {
-      font-size: 0.875rem;
-      color: #6b7280;
-    }
-
-    @media (max-width: 768px) {
-      .page-header {
-        flex-direction: column;
-        gap: 1rem;
-      }
-
-      .info-banner, .pending-banner {
-        flex-direction: column;
-        text-align: center;
-      }
-
-      .banner-actions {
-        width: 100%;
-      }
-
-      .banner-actions .btn {
-        width: 100%;
-        justify-content: center;
-      }
-
-      .campaigns-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .steps {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-
-    @media (max-width: 480px) {
-      .steps {
-        grid-template-columns: 1fr;
-      }
-    }
-  </style>
 </Layout>
