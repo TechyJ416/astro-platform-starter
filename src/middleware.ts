@@ -123,10 +123,43 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
   }
 
-  // Dashboard routes
+  // Dashboard routes - check for pending/denied accounts
   if (path.startsWith("/dashboard")) {
     if (!locals.session && !locals.isMasterKeySession) {
       return redirect("/login?redirect=" + encodeURIComponent(path));
+    }
+    
+    // Check if user account is pending or denied
+    if (locals.profile) {
+      if (locals.profile.status === 'pending') {
+        return redirect("/login?status=pending");
+      }
+      if (locals.profile.status === 'denied') {
+        return redirect("/login?status=denied");
+      }
+      if (!locals.profile.is_active) {
+        return redirect("/login?status=suspended");
+      }
+    }
+  }
+
+  // Campaign application routes - require approved account
+  if (path.startsWith("/campaigns/") && path.includes("/apply")) {
+    if (!locals.session) {
+      return redirect("/login?redirect=" + encodeURIComponent(path));
+    }
+    if (locals.profile?.status !== 'active' || !locals.profile?.is_active) {
+      return redirect("/login?status=pending");
+    }
+  }
+
+  // Community interaction routes - require approved account
+  if (path.startsWith("/community/") && (path.includes("/join") || path.includes("/post"))) {
+    if (!locals.session) {
+      return redirect("/login?redirect=" + encodeURIComponent(path));
+    }
+    if (locals.profile?.status !== 'active' || !locals.profile?.is_active) {
+      return redirect("/login?status=pending");
     }
   }
 
