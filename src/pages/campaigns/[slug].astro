@@ -1,0 +1,697 @@
+---
+// src/pages/campaigns/[slug].astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { supabase } from "../../lib/supabase";
+import { sendApplicationReceivedEmail } from "../../lib/email";
+
+const { slug } = Astro.params;
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+const isApproved = profile?.status === 'active' && profile?.is_active;
+
+// Fetch campaign by slug
+const { data: campaign, error } = await supabase
+  .from('campaigns')
+  .select('*')
+  .eq('slug', slug)
+  .single();
+
+if (!campaign || error) {
+  return Astro.redirect('/campaigns?error=not_found');
+}
+
+// Check if user has already applied
+let existingApplication = null;
+if (session?.user?.id) {
+  const { data } = await supabase
+    .from('campaign_assignments')
+    .select('*')
+    .eq('campaign_id', campaign.id)
+    .eq('creator_id', session.user.id)
+    .single();
+  existingApplication = data;
+}
+
+// Fetch milestones for this campaign
+const { data: milestones } = await supabase
+  .from('campaign_milestones')
+  .select('*')
+  .eq('campaign_id', campaign.id)
+  .order('order_index', { ascending: true });
+
+// Handle application submission
+let applicationSuccess = false;
+let applicationError = '';
+
+if (Astro.request.method === 'POST' && isApproved) {
+  const formData = await Astro.request.formData();
+  const action = formData.get('action');
+  
+  if (action === 'apply') {
+    const notes = formData.get('notes') as string;
+    
+    // Check if already applied
+    if (existingApplication) {
+      applicationError = 'You have already applied to this campaign.';
+    } else {
+      const { error: applyError } = await supabase
+        .from('campaign_assignments')
+        .insert({
+          campaign_id: campaign.id,
+          creator_id: session.user.id,
+          status: 'invited', // Using 'invited' as pending application status
+          notes: notes,
+          assigned_at: new Date().toISOString(),
+        });
+      
+      if (applyError) {
+        applicationError = applyError.message;
+      } else {
+        // Create notification for admins
+        await supabase.from('messages').insert({
+          name: profile?.full_name || 'Creator',
+          email: profile?.email || session.user.email,
+          subject: `New Campaign Application: ${campaign.title}`,
+          body: `A creator has applied to your campaign.\n\nCampaign: ${campaign.title}\nCreator: ${profile?.full_name || 'Unknown'}\nEmail: ${session.user.email}\n\nNotes from creator:\n${notes || 'No notes provided'}\n\nReview this application in the admin panel.`,
+          is_read: false,
+          is_announcement: false,
+        });
+        
+        // Send confirmation email to creator
+        await sendApplicationReceivedEmail(
+          session.user.email,
+          profile?.full_name || '',
+          campaign.title
+        );
+        
+        applicationSuccess = true;
+        
+        // Refresh application status
+        const { data } = await supabase
+          .from('campaign_assignments')
+          .select('*')
+          .eq('campaign_id', campaign.id)
+          .eq('creator_id', session.user.id)
+          .single();
+        existingApplication = data;
+      }
+    }
+  }
+  
+  if (action === 'withdraw' && existingApplication) {
+    const { error: withdrawError } = await supabase
+      .from('campaign_assignments')
+      .delete()
+      .eq('id', existingApplication.id);
+    
+    if (!withdrawError) {
+      existingApplication = null;
+    }
+  }
+}
+
+// Calculate campaign stats
+const totalMilestonePayment = milestones?.reduce((sum, m) => sum + (m.payment_amount || 0), 0) || 0;
+const daysRemaining = campaign.deadline 
+  ? Math.ceil((new Date(campaign.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+  : null;
+const isExpired = daysRemaining !== null && daysRemaining < 1;
+
+// Application status helpers
+function getStatusBadge(status: string) {
+  const badges: Record<string, { label: string; class: string }> = {
+    invited: { label: 'Application Pending', class: 'pending' },
+    accepted: { label: 'Accepted', class: 'success' },
+    declined: { label: 'Not Selected', class: 'danger' },
+    completed: { label: 'Completed', class: 'success' },
+    cancelled: { label: 'Cancelled', class: 'muted' },
+  };
+  return badges[status] || { label: status, class: 'muted' };
+}
+---
+
+<Layout title={campaign.title}>
+  <div class="campaign-detail">
+    <div class="campaign-container">
+      <!-- Breadcrumb -->
+      <nav class="breadcrumb">
+        <a href="/campaigns">← Back to Campaigns</a>
+      </nav>
+
+      {applicationSuccess && (
+        <div class="alert success">
+          🎉 Your application has been submitted! We'll review it and get back to you soon.
+        </div>
+      )}
+      
+      {applicationError && (
+        <div class="alert error">{applicationError}</div>
+      )}
+
+      <div class="campaign-layout">
+        <!-- Main Content -->
+        <div class="campaign-main">
+          <div class="campaign-header">
+            <div class="header-top">
+              <span class={`status-badge ${campaign.status}`}>{campaign.status}</span>
+              {isExpired && <span class="status-badge expired">Ended</span>}
+            </div>
+            <h1>{campaign.title}</h1>
+          </div>
+
+          {campaign.description && (
+            <div class="section">
+              <h2>About This Campaign</h2>
+              <div class="description">{campaign.description}</div>
+            </div>
+          )}
+
+          {campaign.requirements && (
+            <div class="section">
+              <h2>Requirements</h2>
+              <div class="requirements">{campaign.requirements}</div>
+            </div>
+          )}
+
+          {milestones && milestones.length > 0 && (
+            <div class="section">
+              <h2>Deliverables & Milestones</h2>
+              <div class="milestones-list">
+                {milestones.map((milestone, index) => (
+                  <div class="milestone-card">
+                    <div class="milestone-header">
+                      <span class="milestone-number">{index + 1}</span>
+                      <div class="milestone-info">
+                        <h3>{milestone.title}</h3>
+                        {milestone.description && <p>{milestone.description}</p>}
+                      </div>
+                    </div>
+                    <div class="milestone-meta">
+                      {milestone.payment_amount > 0 && (
+                        <span class="milestone-payment">💰 ${milestone.payment_amount}</span>
+                      )}
+                      {milestone.due_date && (
+                        <span class="milestone-due">📅 Due: {new Date(milestone.due_date).toLocaleDateString()}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="campaign-sidebar">
+          <!-- Campaign Stats Card -->
+          <div class="sidebar-card stats-card">
+            <h3>Campaign Details</h3>
+            <div class="stats-grid">
+              {campaign.payment_per_post && (
+                <div class="stat">
+                  <span class="stat-label">Payment per Post</span>
+                  <span class="stat-value">${campaign.payment_per_post}</span>
+                </div>
+              )}
+              {campaign.budget > 0 && (
+                <div class="stat">
+                  <span class="stat-label">Total Budget</span>
+                  <span class="stat-value">${campaign.budget}</span>
+                </div>
+              )}
+              {totalMilestonePayment > 0 && (
+                <div class="stat">
+                  <span class="stat-label">Milestone Earnings</span>
+                  <span class="stat-value">${totalMilestonePayment}</span>
+                </div>
+              )}
+              {campaign.deadline && (
+                <div class="stat">
+                  <span class="stat-label">Deadline</span>
+                  <span class={`stat-value ${isExpired ? 'expired' : daysRemaining <= 7 ? 'urgent' : ''}`}>
+                    {isExpired ? 'Ended' : `${daysRemaining} days left`}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <!-- Application Card -->
+          <div class="sidebar-card apply-card">
+            {!session ? (
+              <div class="apply-state">
+                <h3>Interested in this campaign?</h3>
+                <p>Create an account to apply for campaigns and start earning.</p>
+                <a href="/signup" class="btn btn-primary btn-full">Join the Waitlist</a>
+                <a href="/login" class="btn btn-secondary btn-full">Log In</a>
+              </div>
+            ) : !isApproved ? (
+              <div class="apply-state">
+                <h3>Account Pending</h3>
+                <p>Your account is still being reviewed. You'll be able to apply once approved.</p>
+                <span class="status-badge pending">⏳ Pending Approval</span>
+              </div>
+            ) : isExpired ? (
+              <div class="apply-state">
+                <h3>Campaign Ended</h3>
+                <p>This campaign is no longer accepting applications.</p>
+              </div>
+            ) : existingApplication ? (
+              <div class="apply-state">
+                <h3>Your Application</h3>
+                <div class="application-status">
+                  <span class={`status-badge ${getStatusBadge(existingApplication.status).class}`}>
+                    {getStatusBadge(existingApplication.status).label}
+                  </span>
+                  <p class="applied-date">
+                    Applied {new Date(existingApplication.assigned_at).toLocaleDateString()}
+                  </p>
+                </div>
+                
+                {existingApplication.status === 'invited' && (
+                  <form method="POST" class="withdraw-form">
+                    <input type="hidden" name="action" value="withdraw" />
+                    <button type="submit" class="btn btn-secondary btn-full">
+                      Withdraw Application
+                    </button>
+                  </form>
+                )}
+                
+                {existingApplication.status === 'accepted' && (
+                  <a href="/dashboard" class="btn btn-primary btn-full">
+                    Go to Dashboard
+                  </a>
+                )}
+              </div>
+            ) : (
+              <div class="apply-state">
+                <h3>Apply to This Campaign</h3>
+                <form method="POST" class="apply-form">
+                  <input type="hidden" name="action" value="apply" />
+                  
+                  <div class="form-group">
+                    <label for="notes">Why are you a good fit? (Optional)</label>
+                    <textarea 
+                      id="notes" 
+                      name="notes" 
+                      rows="4"
+                      placeholder="Tell us about your experience, audience, or why you're interested in this campaign..."
+                    ></textarea>
+                  </div>
+                  
+                  <button type="submit" class="btn btn-primary btn-full">
+                    Submit Application
+                  </button>
+                  
+                  <p class="apply-note">
+                    By applying, you agree to complete all deliverables if selected.
+                  </p>
+                </form>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .campaign-detail {
+      min-height: 100vh;
+      background: #f5f6fa;
+      padding: 2rem;
+    }
+
+    .campaign-container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .breadcrumb {
+      margin-bottom: 1.5rem;
+    }
+
+    .breadcrumb a {
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.9375rem;
+    }
+
+    .breadcrumb a:hover {
+      color: #2563eb;
+    }
+
+    .alert {
+      padding: 1rem 1.25rem;
+      border-radius: 10px;
+      margin-bottom: 1.5rem;
+      font-size: 0.9375rem;
+    }
+
+    .alert.success {
+      background: #d1fae5;
+      color: #065f46;
+      border: 1px solid #10b981;
+    }
+
+    .alert.error {
+      background: #fee2e2;
+      color: #991b1b;
+      border: 1px solid #ef4444;
+    }
+
+    .campaign-layout {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 2rem;
+      align-items: start;
+    }
+
+    /* Main Content */
+    .campaign-main {
+      background: white;
+      border-radius: 16px;
+      padding: 2rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+
+    .campaign-header {
+      margin-bottom: 2rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .header-top {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .campaign-header h1 {
+      font-size: 1.75rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    .status-badge {
+      display: inline-block;
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.active { background: #d1fae5; color: #059669; }
+    .status-badge.draft { background: #f3f4f6; color: #6b7280; }
+    .status-badge.paused { background: #fef3c7; color: #d97706; }
+    .status-badge.completed { background: #dbeafe; color: #2563eb; }
+    .status-badge.expired { background: #fee2e2; color: #dc2626; }
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+    .status-badge.success { background: #d1fae5; color: #059669; }
+    .status-badge.danger { background: #fee2e2; color: #dc2626; }
+    .status-badge.muted { background: #f3f4f6; color: #6b7280; }
+
+    .section {
+      margin-bottom: 2rem;
+    }
+
+    .section:last-child {
+      margin-bottom: 0;
+    }
+
+    .section h2 {
+      font-size: 1.125rem;
+      color: #1a1a2e;
+      margin-bottom: 1rem;
+    }
+
+    .description, .requirements {
+      color: #4b5563;
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+
+    /* Milestones */
+    .milestones-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .milestone-card {
+      background: #f9fafb;
+      border-radius: 12px;
+      padding: 1.25rem;
+      border: 1px solid #e5e7eb;
+    }
+
+    .milestone-header {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .milestone-number {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 0.875rem;
+      flex-shrink: 0;
+    }
+
+    .milestone-info h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0 0 0.25rem;
+    }
+
+    .milestone-info p {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin: 0;
+    }
+
+    .milestone-meta {
+      display: flex;
+      gap: 1rem;
+      margin-left: 48px;
+      font-size: 0.8125rem;
+    }
+
+    .milestone-payment {
+      color: #059669;
+      font-weight: 600;
+    }
+
+    .milestone-due {
+      color: #6b7280;
+    }
+
+    /* Sidebar */
+    .campaign-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      position: sticky;
+      top: 2rem;
+    }
+
+    .sidebar-card {
+      background: white;
+      border-radius: 16px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+
+    .sidebar-card h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0 0 1rem;
+    }
+
+    /* Stats Card */
+    .stats-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .stat {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 8px;
+    }
+
+    .stat-label {
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    .stat-value {
+      font-weight: 600;
+      color: #1a1a2e;
+    }
+
+    .stat-value.expired {
+      color: #dc2626;
+    }
+
+    .stat-value.urgent {
+      color: #d97706;
+    }
+
+    /* Apply Card */
+    .apply-state {
+      text-align: center;
+    }
+
+    .apply-state h3 {
+      text-align: left;
+    }
+
+    .apply-state p {
+      color: #6b7280;
+      font-size: 0.9375rem;
+      margin-bottom: 1rem;
+      text-align: left;
+    }
+
+    .application-status {
+      padding: 1rem;
+      background: #f9fafb;
+      border-radius: 10px;
+      margin-bottom: 1rem;
+    }
+
+    .applied-date {
+      font-size: 0.8125rem;
+      color: #9ca3af;
+      margin: 0.5rem 0 0 !important;
+    }
+
+    .apply-form {
+      text-align: left;
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: #374151;
+      margin-bottom: 0.5rem;
+    }
+
+    .form-group textarea {
+      width: 100%;
+      padding: 0.75rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 0.9375rem;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+
+    .apply-note {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      margin: 1rem 0 0;
+      text-align: center;
+    }
+
+    .withdraw-form {
+      margin-top: 1rem;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.9375rem;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .btn-secondary:hover {
+      background: #e5e7eb;
+    }
+
+    .btn-full {
+      width: 100%;
+    }
+
+    .btn + .btn {
+      margin-top: 0.75rem;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .campaign-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .campaign-sidebar {
+        position: static;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .campaign-detail {
+        padding: 1rem;
+      }
+
+      .campaign-main {
+        padding: 1.5rem;
+      }
+
+      .milestone-meta {
+        flex-direction: column;
+        gap: 0.25rem;
+        margin-left: 0;
+        margin-top: 0.5rem;
+      }
+    }
+  </style>
+</Layout>
