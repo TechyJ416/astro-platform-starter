@@ -1,0 +1,742 @@
+---
+// src/pages/dashboard/campaigns/[id].astro
+export const prerender = false;
+
+import Layout from "../../../layouts/Layout.astro";
+import { supabase } from "../../../lib/supabase";
+
+const { id } = Astro.params;
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!session) {
+  return Astro.redirect('/login?redirect=/dashboard/campaigns');
+}
+
+// Verify creator has access to this campaign
+const { data: assignment } = await supabase
+  .from('campaign_assignments')
+  .select('*')
+  .eq('campaign_id', id)
+  .eq('creator_id', session.user.id)
+  .in('status', ['accepted', 'completed'])
+  .single();
+
+if (!assignment) {
+  return Astro.redirect('/dashboard/campaigns?error=access_denied');
+}
+
+// Fetch campaign with milestones
+const { data: campaign } = await supabase
+  .from('campaigns')
+  .select('*')
+  .eq('id', id)
+  .single();
+
+if (!campaign) {
+  return Astro.redirect('/dashboard/campaigns?error=not_found');
+}
+
+// Fetch milestones
+const { data: milestones } = await supabase
+  .from('campaign_milestones')
+  .select('*')
+  .eq('campaign_id', id)
+  .order('order_index', { ascending: true });
+
+// Fetch submissions for this creator
+const { data: submissions } = await supabase
+  .from('milestone_submissions')
+  .select('*')
+  .eq('creator_id', session.user.id)
+  .in('milestone_id', milestones?.map(m => m.id) || []);
+
+// Create submission map
+const submissionMap = new Map();
+submissions?.forEach(sub => {
+  submissionMap.set(sub.milestone_id, sub);
+});
+
+// Handle form submissions
+let actionMessage = '';
+let actionError = '';
+
+if (Astro.request.method === 'POST') {
+  const formData = await Astro.request.formData();
+  const action = formData.get('action');
+
+  if (action === 'submit_milestone') {
+    const milestoneId = formData.get('milestoneId') as string;
+    const contentUrl = formData.get('contentUrl') as string;
+    const notes = formData.get('notes') as string;
+
+    if (!contentUrl) {
+      actionError = 'Please provide a content URL.';
+    } else {
+      // Check if already submitted
+      const existing = submissionMap.get(milestoneId);
+      
+      if (existing && existing.status !== 'revision_requested') {
+        actionError = 'You have already submitted this milestone.';
+      } else {
+        if (existing) {
+          // Update existing submission
+          const { error } = await supabase
+            .from('milestone_submissions')
+            .update({
+              content_url: contentUrl,
+              notes,
+              status: 'pending',
+              submitted_at: new Date().toISOString(),
+            })
+            .eq('id', existing.id);
+
+          if (error) {
+            actionError = error.message;
+          } else {
+            actionMessage = 'Revision submitted successfully!';
+          }
+        } else {
+          // Create new submission
+          const { error } = await supabase
+            .from('milestone_submissions')
+            .insert({
+              milestone_id: milestoneId,
+              creator_id: session.user.id,
+              content_url: contentUrl,
+              notes,
+              status: 'pending',
+              submitted_at: new Date().toISOString(),
+            });
+
+          if (error) {
+            actionError = error.message;
+          } else {
+            actionMessage = 'Milestone submitted successfully!';
+          }
+        }
+
+        // Refresh submissions
+        const { data: refreshed } = await supabase
+          .from('milestone_submissions')
+          .select('*')
+          .eq('creator_id', session.user.id)
+          .in('milestone_id', milestones?.map(m => m.id) || []);
+        
+        submissionMap.clear();
+        refreshed?.forEach(sub => {
+          submissionMap.set(sub.milestone_id, sub);
+        });
+      }
+    }
+  }
+}
+
+// Calculate stats
+const totalMilestones = milestones?.length || 0;
+const completedMilestones = Array.from(submissionMap.values()).filter(s => s.status === 'approved').length;
+const pendingMilestones = Array.from(submissionMap.values()).filter(s => s.status === 'pending').length;
+const totalEarnings = milestones?.reduce((sum, m) => sum + (m.payment_amount || 0), 0) || 0;
+const earnedAmount = milestones?.filter(m => submissionMap.get(m.id)?.status === 'approved')
+  .reduce((sum, m) => sum + (m.payment_amount || 0), 0) || 0;
+
+function getSubmissionStatus(milestoneId: string) {
+  const submission = submissionMap.get(milestoneId);
+  if (!submission) return { status: 'not_submitted', label: 'Not Started', class: 'not-started' };
+  
+  const statuses: Record<string, { label: string; class: string }> = {
+    pending: { label: 'Under Review', class: 'pending' },
+    approved: { label: 'Approved', class: 'approved' },
+    rejected: { label: 'Rejected', class: 'rejected' },
+    revision_requested: { label: 'Revision Needed', class: 'revision' },
+  };
+  
+  return { status: submission.status, ...statuses[submission.status] || { label: submission.status, class: 'default' } };
+}
+
+function getDaysUntil(date: string | null) {
+  if (!date) return null;
+  return Math.ceil((new Date(date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+}
+---
+
+<Layout title={campaign.title}>
+  <div class="campaign-detail-page">
+    <div class="campaign-container">
+      <!-- Breadcrumb -->
+      <nav class="breadcrumb">
+        <a href="/dashboard">Dashboard</a>
+        <span>/</span>
+        <a href="/dashboard/campaigns">My Campaigns</a>
+        <span>/</span>
+        <span>{campaign.title}</span>
+      </nav>
+
+      {actionMessage && <div class="alert success">{actionMessage}</div>}
+      {actionError && <div class="alert error">{actionError}</div>}
+
+      <!-- Header -->
+      <div class="campaign-header">
+        <div class="header-content">
+          <h1>{campaign.title}</h1>
+          <span class={`status-badge ${campaign.status}`}>{campaign.status}</span>
+        </div>
+        {campaign.description && (
+          <p class="campaign-desc">{campaign.description}</p>
+        )}
+      </div>
+
+      <!-- Progress Stats -->
+      <div class="progress-card">
+        <div class="progress-stats">
+          <div class="progress-stat">
+            <div class="stat-value">{completedMilestones}/{totalMilestones}</div>
+            <div class="stat-label">Milestones Completed</div>
+          </div>
+          <div class="progress-stat">
+            <div class="stat-value">{pendingMilestones}</div>
+            <div class="stat-label">Pending Review</div>
+          </div>
+          <div class="progress-stat highlight">
+            <div class="stat-value">${earnedAmount}</div>
+            <div class="stat-label">Earned</div>
+          </div>
+          <div class="progress-stat">
+            <div class="stat-value">${totalEarnings - earnedAmount}</div>
+            <div class="stat-label">Remaining</div>
+          </div>
+        </div>
+        <div class="progress-bar-large">
+          <div class="progress-fill" style={`width: ${totalMilestones > 0 ? (completedMilestones / totalMilestones) * 100 : 0}%`}></div>
+        </div>
+      </div>
+
+      <!-- Campaign Info -->
+      {campaign.requirements && (
+        <div class="info-card">
+          <h2>📋 Requirements</h2>
+          <div class="requirements-content">{campaign.requirements}</div>
+        </div>
+      )}
+
+      <!-- Milestones -->
+      <div class="milestones-section">
+        <h2>📌 Deliverables</h2>
+        
+        {milestones && milestones.length > 0 ? (
+          <div class="milestones-list">
+            {milestones.map((milestone, index) => {
+              const submissionStatus = getSubmissionStatus(milestone.id);
+              const submission = submissionMap.get(milestone.id);
+              const daysUntil = getDaysUntil(milestone.due_date);
+              const isOverdue = daysUntil !== null && daysUntil < 0;
+              const canSubmit = submissionStatus.status === 'not_submitted' || submissionStatus.status === 'revision_requested';
+              
+              return (
+                <div class={`milestone-card ${submissionStatus.class}`}>
+                  <div class="milestone-header">
+                    <div class="milestone-number">
+                      {submissionStatus.status === 'approved' ? '✓' : index + 1}
+                    </div>
+                    <div class="milestone-info">
+                      <h3>{milestone.title}</h3>
+                      {milestone.description && <p>{milestone.description}</p>}
+                    </div>
+                    <div class="milestone-meta">
+                      <span class={`status-badge ${submissionStatus.class}`}>
+                        {submissionStatus.label}
+                      </span>
+                      {milestone.payment_amount > 0 && (
+                        <span class="payment">${milestone.payment_amount}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {milestone.due_date && (
+                    <div class={`due-date ${isOverdue ? 'overdue' : daysUntil !== null && daysUntil <= 3 ? 'urgent' : ''}`}>
+                      📅 Due: {new Date(milestone.due_date).toLocaleDateString()}
+                      {daysUntil !== null && (
+                        <span>
+                          {isOverdue ? ` (${Math.abs(daysUntil)} days overdue)` : ` (${daysUntil} days left)`}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Show submission details if exists */}
+                  {submission && (
+                    <div class="submission-details">
+                      <div class="submission-header">
+                        <strong>Your Submission</strong>
+                        <span class="submission-date">
+                          {new Date(submission.submitted_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <a href={submission.content_url} target="_blank" class="submission-link">
+                        🔗 {submission.content_url}
+                      </a>
+                      {submission.notes && (
+                        <p class="submission-notes">{submission.notes}</p>
+                      )}
+                      {submission.admin_feedback && (
+                        <div class="admin-feedback">
+                          <strong>Feedback:</strong> {submission.admin_feedback}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Submit/Resubmit Form */}
+                  {canSubmit && (
+                    <form method="POST" class="submit-form">
+                      <input type="hidden" name="action" value="submit_milestone" />
+                      <input type="hidden" name="milestoneId" value={milestone.id} />
+                      
+                      <div class="form-row">
+                        <div class="form-group flex-grow">
+                          <label for={`contentUrl-${milestone.id}`}>Content URL *</label>
+                          <input 
+                            type="url" 
+                            id={`contentUrl-${milestone.id}`}
+                            name="contentUrl" 
+                            placeholder="https://drive.google.com/... or https://..."
+                            value={submission?.content_url || ''}
+                            required
+                          />
+                        </div>
+                      </div>
+                      
+                      <div class="form-group">
+                        <label for={`notes-${milestone.id}`}>Notes (Optional)</label>
+                        <textarea 
+                          id={`notes-${milestone.id}`}
+                          name="notes" 
+                          rows="2"
+                          placeholder="Any notes about your submission..."
+                        >{submission?.notes || ''}</textarea>
+                      </div>
+                      
+                      <button type="submit" class="btn btn-primary">
+                        {submissionStatus.status === 'revision_requested' ? '📤 Resubmit' : '📤 Submit'}
+                      </button>
+                    </form>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div class="empty-state">
+            <p>No milestones defined for this campaign yet.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .campaign-detail-page {
+      min-height: 100vh;
+      background: #f5f6fa;
+      padding: 2rem;
+    }
+
+    .campaign-container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+
+    .breadcrumb a {
+      color: #6b7280;
+      text-decoration: none;
+    }
+
+    .breadcrumb a:hover {
+      color: #2563eb;
+    }
+
+    .breadcrumb span:last-child {
+      color: #1a1a2e;
+      font-weight: 500;
+    }
+
+    .alert {
+      padding: 1rem 1.25rem;
+      border-radius: 10px;
+      margin-bottom: 1.5rem;
+    }
+
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+
+    /* Header */
+    .campaign-header {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .campaign-header h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    .campaign-desc {
+      color: #6b7280;
+      margin: 0;
+      line-height: 1.6;
+    }
+
+    .status-badge {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.active { background: #d1fae5; color: #059669; }
+    .status-badge.not-started { background: #f3f4f6; color: #6b7280; }
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+    .status-badge.approved { background: #d1fae5; color: #059669; }
+    .status-badge.rejected { background: #fee2e2; color: #dc2626; }
+    .status-badge.revision { background: #dbeafe; color: #2563eb; }
+
+    /* Progress Card */
+    .progress-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .progress-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .progress-stat {
+      text-align: center;
+      padding: 1rem;
+      background: #f9fafb;
+      border-radius: 10px;
+    }
+
+    .progress-stat.highlight {
+      background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+    }
+
+    .progress-stat .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .progress-stat .stat-label {
+      font-size: 0.75rem;
+      color: #6b7280;
+      margin-top: 0.25rem;
+    }
+
+    .progress-bar-large {
+      height: 12px;
+      background: #e5e7eb;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .progress-bar-large .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #10b981, #059669);
+      border-radius: 6px;
+      transition: width 0.3s;
+    }
+
+    /* Info Card */
+    .info-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .info-card h2 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0 0 1rem;
+    }
+
+    .requirements-content {
+      color: #4b5563;
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+
+    /* Milestones */
+    .milestones-section {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+    }
+
+    .milestones-section h2 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0 0 1.5rem;
+    }
+
+    .milestones-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .milestone-card {
+      border: 2px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 1.25rem;
+      transition: all 0.2s;
+    }
+
+    .milestone-card.approved {
+      border-color: #10b981;
+      background: #f0fdf4;
+    }
+
+    .milestone-card.pending {
+      border-color: #f59e0b;
+      background: #fffbeb;
+    }
+
+    .milestone-card.revision {
+      border-color: #3b82f6;
+      background: #eff6ff;
+    }
+
+    .milestone-header {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+    }
+
+    .milestone-number {
+      width: 36px;
+      height: 36px;
+      background: #e5e7eb;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: #6b7280;
+      flex-shrink: 0;
+    }
+
+    .milestone-card.approved .milestone-number {
+      background: #10b981;
+      color: white;
+    }
+
+    .milestone-info {
+      flex: 1;
+    }
+
+    .milestone-info h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0 0 0.25rem;
+    }
+
+    .milestone-info p {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin: 0;
+    }
+
+    .milestone-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.5rem;
+    }
+
+    .milestone-meta .payment {
+      font-weight: 700;
+      color: #059669;
+      font-size: 1.125rem;
+    }
+
+    .due-date {
+      font-size: 0.8125rem;
+      color: #6b7280;
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .due-date.urgent { color: #d97706; }
+    .due-date.overdue { color: #dc2626; font-weight: 600; }
+
+    /* Submission Details */
+    .submission-details {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: rgba(255,255,255,0.7);
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+    }
+
+    .submission-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+      font-size: 0.875rem;
+    }
+
+    .submission-date {
+      color: #9ca3af;
+      font-size: 0.75rem;
+    }
+
+    .submission-link {
+      display: block;
+      color: #2563eb;
+      text-decoration: none;
+      font-size: 0.875rem;
+      word-break: break-all;
+    }
+
+    .submission-link:hover {
+      text-decoration: underline;
+    }
+
+    .submission-notes {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin: 0.5rem 0 0;
+    }
+
+    .admin-feedback {
+      margin-top: 0.75rem;
+      padding: 0.75rem;
+      background: #fef3c7;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      color: #92400e;
+    }
+
+    /* Submit Form */
+    .submit-form {
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 1rem;
+    }
+
+    .flex-grow {
+      flex: 1;
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.375rem;
+    }
+
+    .form-group input,
+    .form-group textarea {
+      width: 100%;
+      padding: 0.625rem 0.875rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 0.9375rem;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .btn {
+      padding: 0.625rem 1.25rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.875rem;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 2rem;
+      color: #6b7280;
+    }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .progress-stats {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .milestone-header {
+        flex-wrap: wrap;
+      }
+
+      .milestone-meta {
+        width: 100%;
+        flex-direction: row;
+        justify-content: space-between;
+        margin-top: 0.75rem;
+      }
+    }
+  </style>
+</Layout>
