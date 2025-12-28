@@ -511,10 +511,11 @@ const showForm = action === 'new' || editUserId;
                         <input type="hidden" name="userId" value={user.id} />
                         <button name="action" value="deny" class="btn btn-sm btn-danger">✕ Deny</button>
                       </form>
-                      <a href={`?edit=${user.id}`} class="btn btn-sm btn-secondary">View</a>
+                      <a href={`/admin/users/${user.id}`} class="btn btn-sm btn-secondary">View</a>
                     </div>
                   ) : (
                     <>
+                      <a href={`/admin/users/${user.id}`} class="btn btn-sm btn-secondary">Details</a>
                       <a href={`?edit=${user.id}`} class="btn btn-sm btn-secondary">Edit</a>
                       <div class="dropdown">
                         <button class="btn btn-sm btn-secondary dropdown-trigger">Role ▾</button>
