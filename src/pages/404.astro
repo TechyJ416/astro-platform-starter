@@ -1,23 +1,41 @@
 ---
 // src/pages/404.astro
-import Layout from '../layouts/Layout.astro';
+import Layout from "../layouts/Layout.astro";
 ---
 
-<Layout title="Page Not Found - Banity">
+<Layout title="Page Not Found">
+  <div class="error-page">
+    <div class="error-container">
+      <div class="error-code">404</div>
+      <h1>Page Not Found</h1>
+      <p>Oops! The page you're looking for doesn't exist or has been moved.</p>
+      
+      <div class="error-actions">
+        <a href="/" class="btn btn-primary">Go Home</a>
+        <a href="/campaigns" class="btn btn-secondary">Browse Campaigns</a>
+      </div>
+      
+      <div class="error-help">
+        <p>If you think this is a mistake, please <a href="/contact">contact support</a>.</p>
+      </div>
+    </div>
+  </div>
+
   <style>
-    .error-container {
-      min-height: 60vh;
+    .error-page {
+      min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      text-align: center;
       padding: 2rem;
+      background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
     }
-    
-    .error-content {
+
+    .error-container {
+      text-align: center;
       max-width: 500px;
     }
-    
+
     .error-code {
       font-size: 8rem;
       font-weight: 800;
@@ -28,125 +46,83 @@ import Layout from '../layouts/Layout.astro';
       background-clip: text;
       margin-bottom: 1rem;
     }
-    
-    .error-title {
-      font-family: var(--font-serif, Georgia, serif);
-      font-size: 2rem;
-      font-weight: 700;
+
+    h1 {
+      font-size: 1.75rem;
       color: #1a1a2e;
-      margin-bottom: 1rem;
+      margin: 0 0 0.75rem;
     }
-    
-    .error-message {
-      font-size: 1.125rem;
-      color: #666;
+
+    p {
+      color: #6b7280;
+      font-size: 1.0625rem;
+      margin: 0 0 2rem;
       line-height: 1.6;
-      margin-bottom: 2rem;
     }
-    
+
     .error-actions {
       display: flex;
       gap: 1rem;
       justify-content: center;
-      flex-wrap: wrap;
+      margin-bottom: 2rem;
     }
-    
+
     .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.875rem 1.5rem;
-      border-radius: 8px;
+      padding: 0.875rem 1.75rem;
+      border-radius: 10px;
       font-weight: 600;
+      font-size: 1rem;
       text-decoration: none;
       transition: all 0.2s;
     }
-    
+
     .btn-primary {
       background: #2563eb;
       color: white;
     }
-    
+
     .btn-primary:hover {
       background: #1d4ed8;
-      transform: translateY(-2px);
     }
-    
+
     .btn-secondary {
-      background: #f3f4f6;
+      background: white;
       color: #374151;
-      border: 1px solid #e5e7eb;
+      border: 2px solid #e5e7eb;
     }
-    
+
     .btn-secondary:hover {
-      background: #e5e7eb;
+      border-color: #2563eb;
+      color: #2563eb;
     }
-    
-    .suggestions {
-      margin-top: 3rem;
+
+    .error-help {
       padding-top: 2rem;
       border-top: 1px solid #e5e7eb;
     }
-    
-    .suggestions-title {
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: #9ca3af;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 1rem;
+
+    .error-help p {
+      font-size: 0.9375rem;
+      margin: 0;
     }
-    
-    .suggestions-list {
-      display: flex;
-      gap: 1.5rem;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    
-    .suggestions-list a {
+
+    .error-help a {
       color: #2563eb;
       text-decoration: none;
-      font-weight: 500;
     }
-    
-    .suggestions-list a:hover {
+
+    .error-help a:hover {
       text-decoration: underline;
     }
-  </style>
 
-  <div class="error-container">
-    <div class="error-content">
-      <div class="error-code">404</div>
-      <h1 class="error-title">Page Not Found</h1>
-      <p class="error-message">
-        Oops! The page you're looking for doesn't exist or has been moved.
-      </p>
-      
-      <div class="error-actions">
-        <a href="/" class="btn btn-primary">
-          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-          </svg>
-          Back to Home
-        </a>
-        <button onclick="history.back()" class="btn btn-secondary">
-          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
-          Go Back
-        </button>
-      </div>
-      
-      <div class="suggestions">
-        <p class="suggestions-title">Popular Pages</p>
-        <div class="suggestions-list">
-          <a href="/">Home</a>
-          <a href="/clips">Clips</a>
-          <a href="/campaigns">Campaigns</a>
-          <a href="/contact">Contact</a>
-        </div>
-      </div>
-    </div>
-  </div>
+    @media (max-width: 640px) {
+      .error-code {
+        font-size: 5rem;
+      }
+
+      .error-actions {
+        flex-direction: column;
+      }
+    }
+  </style>
 </Layout>
