@@ -1,0 +1,794 @@
+---
+// src/pages/admin/submissions.astro
+export const prerender = false;
+
+import AdminLayout from "../../layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+// Create admin client
+const supabaseUrl = import.meta.env.SUPABASE_URL;
+const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_KEY;
+const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+const STRIPE_SECRET_KEY = import.meta.env.STRIPE_SECRET_KEY;
+
+const supabase = createClient(
+  supabaseUrl,
+  supabaseServiceKey || supabaseAnonKey,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+let actionMessage = '';
+let actionError = '';
+
+// Handle actions
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action') as string;
+  const submissionId = form.get('submissionId') as string;
+
+  // Fetch submission details
+  const { data: submission } = await supabase
+    .from('milestone_submissions')
+    .select(`
+      *,
+      profiles:creator_id (id, email, full_name),
+      campaign_milestones:milestone_id (id, title, payment_amount, campaign_id)
+    `)
+    .eq('id', submissionId)
+    .single();
+
+  if (action === 'approve' && submissionId) {
+    const { error } = await supabase
+      .from('milestone_submissions')
+      .update({ 
+        status: 'approved',
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq('id', submissionId);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = 'Submission approved!';
+    }
+  }
+
+  if (action === 'reject' && submissionId) {
+    const feedback = form.get('feedback') as string;
+    
+    const { error } = await supabase
+      .from('milestone_submissions')
+      .update({ 
+        status: 'rejected',
+        admin_feedback: feedback,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq('id', submissionId);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = 'Submission rejected.';
+    }
+  }
+
+  if (action === 'request_revision' && submissionId) {
+    const feedback = form.get('feedback') as string;
+    
+    const { error } = await supabase
+      .from('milestone_submissions')
+      .update({ 
+        status: 'revision_requested',
+        admin_feedback: feedback,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq('id', submissionId);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = 'Revision requested.';
+    }
+  }
+
+  if (action === 'pay' && submissionId && submission) {
+    const milestonePayment = submission.campaign_milestones?.payment_amount || 0;
+    
+    if (milestonePayment <= 0) {
+      actionError = 'No payment amount set for this milestone.';
+    } else {
+      // Create payment record
+      const { data: payment, error: paymentError } = await supabase
+        .from('payments')
+        .insert({
+          creator_id: submission.creator_id,
+          campaign_id: submission.campaign_milestones?.campaign_id,
+          amount: milestonePayment,
+          status: 'pending',
+          description: `Payment for: ${submission.campaign_milestones?.title}`,
+          created_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (paymentError) {
+        actionError = paymentError.message;
+      } else {
+        // Get creator's Stripe account
+        const { data: creatorPayment } = await supabase
+          .from('creator_payment_profiles')
+          .select('stripe_account_id, stripe_onboarding_complete')
+          .eq('creator_id', submission.creator_id)
+          .single();
+
+        if (!creatorPayment?.stripe_account_id || !creatorPayment?.stripe_onboarding_complete) {
+          // Mark payment as pending - creator needs to set up Stripe
+          await supabase
+            .from('payments')
+            .update({ status: 'pending', description: `${payment.description} (Awaiting creator Stripe setup)` })
+            .eq('id', payment.id);
+          
+          actionMessage = `Payment of $${milestonePayment} created but creator hasn't completed Stripe setup.`;
+        } else if (STRIPE_SECRET_KEY) {
+          // Initiate Stripe transfer
+          try {
+            const transferResponse = await fetch('https://api.stripe.com/v1/transfers', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${STRIPE_SECRET_KEY}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: new URLSearchParams({
+                'amount': String(Math.round(milestonePayment * 100)), // Convert to cents
+                'currency': 'usd',
+                'destination': creatorPayment.stripe_account_id,
+                'metadata[payment_id]': payment.id,
+                'metadata[creator_id]': submission.creator_id,
+              }),
+            });
+
+            const transfer = await transferResponse.json();
+
+            if (transfer.error) {
+              await supabase
+                .from('payments')
+                .update({ status: 'failed' })
+                .eq('id', payment.id);
+              actionError = transfer.error.message;
+            } else {
+              await supabase
+                .from('payments')
+                .update({ 
+                  status: 'processing',
+                  stripe_payment_intent_id: transfer.id,
+                })
+                .eq('id', payment.id);
+              
+              // Update creator's earnings
+              await supabase.rpc('increment_creator_earnings', {
+                p_creator_id: submission.creator_id,
+                p_amount: milestonePayment
+              }).catch(() => {
+                // RPC might not exist, update manually
+                supabase
+                  .from('creator_payment_profiles')
+                  .update({ 
+                    total_earned: supabase.rpc('coalesce', { val: 'total_earned', default_val: 0 }) 
+                  })
+                  .eq('creator_id', submission.creator_id);
+              });
+
+              actionMessage = `Payment of $${milestonePayment} initiated to ${submission.profiles?.full_name || 'creator'}!`;
+            }
+          } catch (err: any) {
+            await supabase
+              .from('payments')
+              .update({ status: 'failed' })
+              .eq('id', payment.id);
+            actionError = err.message || 'Failed to process payment';
+          }
+        } else {
+          // Stripe not configured - just mark as completed manually
+          await supabase
+            .from('payments')
+            .update({ status: 'completed', completed_at: new Date().toISOString() })
+            .eq('id', payment.id);
+          
+          actionMessage = `Payment of $${milestonePayment} recorded (Stripe not configured).`;
+        }
+
+        // Update submission with payment reference
+        await supabase
+          .from('milestone_submissions')
+          .update({ payment_id: payment.id })
+          .eq('id', submissionId);
+      }
+    }
+  }
+}
+
+// Fetch all submissions with details
+const { data: submissions } = await supabase
+  .from('milestone_submissions')
+  .select(`
+    *,
+    profiles:creator_id (id, email, full_name, avatar_url),
+    campaign_milestones:milestone_id (
+      id, title, payment_amount,
+      campaigns:campaign_id (id, title)
+    )
+  `)
+  .order('submitted_at', { ascending: false });
+
+// Filter by status
+const filter = Astro.url.searchParams.get('filter') || 'pending';
+const filteredSubmissions = submissions?.filter(sub => {
+  if (filter === 'pending') return sub.status === 'pending';
+  if (filter === 'approved') return sub.status === 'approved';
+  if (filter === 'rejected') return sub.status === 'rejected' || sub.status === 'revision_requested';
+  return true;
+}) || [];
+
+// Stats
+const pendingCount = submissions?.filter(s => s.status === 'pending').length || 0;
+const approvedCount = submissions?.filter(s => s.status === 'approved').length || 0;
+const totalPaid = submissions?.filter(s => s.payment_id).reduce((sum, s) => 
+  sum + (s.campaign_milestones?.payment_amount || 0), 0) || 0;
+
+function getStatusBadge(status: string) {
+  const badges: Record<string, { label: string; class: string }> = {
+    pending: { label: 'Pending Review', class: 'pending' },
+    approved: { label: 'Approved', class: 'approved' },
+    rejected: { label: 'Rejected', class: 'rejected' },
+    revision_requested: { label: 'Revision Needed', class: 'revision' },
+  };
+  return badges[status] || { label: status, class: 'default' };
+}
+---
+
+<AdminLayout title="Submissions">
+  {actionMessage && <div class="alert success">{actionMessage}</div>}
+  {actionError && <div class="alert error">{actionError}</div>}
+
+  <!-- Header -->
+  <div class="page-header">
+    <h1>📤 Milestone Submissions</h1>
+    <p class="subtitle">Review creator submissions and process payments</p>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class={`stat-card ${pendingCount > 0 ? 'highlight' : ''}`}>
+      <div class="stat-value">{pendingCount}</div>
+      <div class="stat-label">Pending Review</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{approvedCount}</div>
+      <div class="stat-label">Approved</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{submissions?.length || 0}</div>
+      <div class="stat-label">Total Submissions</div>
+    </div>
+    <div class="stat-card success">
+      <div class="stat-value">${totalPaid.toFixed(0)}</div>
+      <div class="stat-label">Total Paid</div>
+    </div>
+  </div>
+
+  <!-- Filter Tabs -->
+  <div class="filter-tabs">
+    <a href="?filter=pending" class:list={["tab", { active: filter === 'pending' }]}>
+      Pending ({pendingCount})
+    </a>
+    <a href="?filter=approved" class:list={["tab", { active: filter === 'approved' }]}>
+      Approved ({approvedCount})
+    </a>
+    <a href="?filter=rejected" class:list={["tab", { active: filter === 'rejected' }]}>
+      Rejected
+    </a>
+    <a href="?filter=all" class:list={["tab", { active: filter === 'all' }]}>
+      All ({submissions?.length || 0})
+    </a>
+  </div>
+
+  <!-- Submissions List -->
+  <div class="panel">
+    {filteredSubmissions.length > 0 ? (
+      <div class="submissions-list">
+        {filteredSubmissions.map(submission => (
+          <div class="submission-card">
+            <div class="submission-header">
+              <div class="creator-info">
+                <div class="avatar">
+                  {submission.profiles?.avatar_url ? (
+                    <img src={submission.profiles.avatar_url} alt="" />
+                  ) : (
+                    <span>{submission.profiles?.full_name?.charAt(0) || '?'}</span>
+                  )}
+                </div>
+                <div>
+                  <strong>{submission.profiles?.full_name || 'Unknown'}</strong>
+                  <span class="email">{submission.profiles?.email}</span>
+                </div>
+              </div>
+              <div class="submission-meta">
+                <span class={`status-badge ${getStatusBadge(submission.status).class}`}>
+                  {getStatusBadge(submission.status).label}
+                </span>
+                {submission.campaign_milestones?.payment_amount > 0 && (
+                  <span class="payment-amount">
+                    ${submission.campaign_milestones.payment_amount}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div class="submission-details">
+              <div class="detail-row">
+                <span class="label">Campaign:</span>
+                <span>{submission.campaign_milestones?.campaigns?.title || 'N/A'}</span>
+              </div>
+              <div class="detail-row">
+                <span class="label">Milestone:</span>
+                <span>{submission.campaign_milestones?.title || 'N/A'}</span>
+              </div>
+              <div class="detail-row">
+                <span class="label">Submitted:</span>
+                <span>{new Date(submission.submitted_at).toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div class="content-preview">
+              <a href={submission.content_url} target="_blank" class="content-link">
+                🔗 View Submission
+              </a>
+              {submission.notes && (
+                <p class="notes">{submission.notes}</p>
+              )}
+            </div>
+
+            {submission.admin_feedback && (
+              <div class="admin-feedback">
+                <strong>Your Feedback:</strong> {submission.admin_feedback}
+              </div>
+            )}
+
+            <div class="submission-actions">
+              {submission.status === 'pending' && (
+                <>
+                  <form method="POST" class="inline">
+                    <input type="hidden" name="submissionId" value={submission.id} />
+                    <button type="submit" name="action" value="approve" class="btn btn-success">
+                      ✓ Approve
+                    </button>
+                  </form>
+                  
+                  <button type="button" class="btn btn-warning" onclick={`showFeedbackModal('${submission.id}', 'request_revision')`}>
+                    ↻ Request Revision
+                  </button>
+                  
+                  <button type="button" class="btn btn-danger" onclick={`showFeedbackModal('${submission.id}', 'reject')`}>
+                    ✕ Reject
+                  </button>
+                </>
+              )}
+              
+              {submission.status === 'approved' && !submission.payment_id && submission.campaign_milestones?.payment_amount > 0 && (
+                <form method="POST" class="inline">
+                  <input type="hidden" name="submissionId" value={submission.id} />
+                  <button type="submit" name="action" value="pay" class="btn btn-primary">
+                    💰 Pay ${submission.campaign_milestones.payment_amount}
+                  </button>
+                </form>
+              )}
+              
+              {submission.payment_id && (
+                <span class="paid-badge">✓ Payment Processed</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    ) : (
+      <div class="empty-state">
+        <div class="empty-icon">📤</div>
+        <h3>No {filter !== 'all' ? filter : ''} submissions</h3>
+        <p>Submissions will appear here when creators submit their work.</p>
+      </div>
+    )}
+  </div>
+
+  <!-- Feedback Modal -->
+  <div id="feedbackModal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <h3 id="modalTitle">Provide Feedback</h3>
+      <form method="POST" id="feedbackForm">
+        <input type="hidden" name="submissionId" id="modalSubmissionId" />
+        <input type="hidden" name="action" id="modalAction" />
+        
+        <div class="form-group">
+          <label for="feedback">Feedback for Creator</label>
+          <textarea name="feedback" id="feedback" rows="4" placeholder="Explain what needs to be changed or why it was rejected..."></textarea>
+        </div>
+        
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeFeedbackModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="modalSubmitBtn">Submit</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script is:inline>
+    function showFeedbackModal(submissionId, action) {
+      document.getElementById('modalSubmissionId').value = submissionId;
+      document.getElementById('modalAction').value = action;
+      document.getElementById('modalTitle').textContent = action === 'reject' ? 'Reject Submission' : 'Request Revision';
+      document.getElementById('modalSubmitBtn').textContent = action === 'reject' ? 'Reject' : 'Request Revision';
+      document.getElementById('feedbackModal').style.display = 'flex';
+    }
+    
+    function closeFeedbackModal() {
+      document.getElementById('feedbackModal').style.display = 'none';
+    }
+    
+    // Close modal on outside click
+    document.getElementById('feedbackModal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'feedbackModal') closeFeedbackModal();
+    });
+  </script>
+
+  <style>
+    .page-header {
+      margin-bottom: 1.5rem;
+    }
+
+    .page-header h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin: 0 0 0.25rem;
+    }
+
+    .subtitle {
+      color: #6b7280;
+      margin: 0;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+      background: white;
+      padding: 1.25rem;
+      border-radius: 12px;
+      text-align: center;
+    }
+
+    .stat-card.highlight {
+      background: linear-gradient(135deg, #fef3c7, #fde68a);
+      border: 2px solid #f59e0b;
+    }
+
+    .stat-card.success {
+      background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+    }
+
+    .stat-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .stat-label {
+      font-size: 0.8125rem;
+      color: #6b7280;
+      margin-top: 0.25rem;
+    }
+
+    .filter-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      background: white;
+      padding: 0.5rem;
+      border-radius: 10px;
+    }
+
+    .tab {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #6b7280;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .tab:hover { background: #f3f4f6; }
+    .tab.active { background: #2563eb; color: white; }
+
+    .panel {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .submissions-list {
+      padding: 0;
+    }
+
+    .submission-card {
+      padding: 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .submission-card:last-child {
+      border-bottom: none;
+    }
+
+    .submission-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+
+    .creator-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #dbeafe, #c7d2fe);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: #2563eb;
+      overflow: hidden;
+    }
+
+    .avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .creator-info strong {
+      display: block;
+      color: #1a1a2e;
+    }
+
+    .creator-info .email {
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    .submission-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.5rem;
+    }
+
+    .payment-amount {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #059669;
+    }
+
+    .status-badge {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+    .status-badge.approved { background: #d1fae5; color: #059669; }
+    .status-badge.rejected { background: #fee2e2; color: #dc2626; }
+    .status-badge.revision { background: #dbeafe; color: #2563eb; }
+
+    .submission-details {
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .detail-row {
+      display: flex;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+      padding: 0.25rem 0;
+    }
+
+    .detail-row .label {
+      color: #6b7280;
+      min-width: 80px;
+    }
+
+    .content-preview {
+      margin-bottom: 1rem;
+    }
+
+    .content-link {
+      display: inline-block;
+      padding: 0.5rem 1rem;
+      background: #eff6ff;
+      color: #2563eb;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 500;
+      margin-bottom: 0.5rem;
+    }
+
+    .content-link:hover {
+      background: #dbeafe;
+    }
+
+    .notes {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin: 0.5rem 0 0;
+      font-style: italic;
+    }
+
+    .admin-feedback {
+      background: #fef3c7;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      color: #92400e;
+      margin-bottom: 1rem;
+    }
+
+    .submission-actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .inline { display: inline; }
+
+    .btn {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.8125rem;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-success { background: #059669; color: white; }
+    .btn-warning { background: #f59e0b; color: white; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+
+    .paid-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.5rem 1rem;
+      background: #d1fae5;
+      color: #059669;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.8125rem;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      color: #6b7280;
+    }
+
+    .empty-icon {
+      font-size: 3rem;
+      margin-bottom: 1rem;
+    }
+
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+
+    /* Modal */
+    .modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal-content {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      width: 100%;
+      max-width: 500px;
+      margin: 1rem;
+    }
+
+    .modal-content h3 {
+      margin: 0 0 1rem;
+      color: #1a1a2e;
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.5rem;
+    }
+
+    .form-group textarea {
+      width: 100%;
+      padding: 0.75rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 0.9375rem;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: flex-end;
+    }
+
+    @media (max-width: 768px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .submission-header {
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .submission-meta {
+        align-items: flex-start;
+        flex-direction: row;
+        justify-content: space-between;
+        width: 100%;
+      }
+    }
+  </style>
+</AdminLayout>
