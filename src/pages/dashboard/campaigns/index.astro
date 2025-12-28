@@ -1,0 +1,570 @@
+---
+// src/pages/dashboard/campaigns/index.astro
+export const prerender = false;
+
+import Layout from "../../../layouts/Layout.astro";
+import { supabase } from "../../../lib/supabase";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!session) {
+  return Astro.redirect('/login?redirect=/dashboard/campaigns');
+}
+
+// Fetch creator's campaign assignments with campaign details
+const { data: assignments } = await supabase
+  .from('campaign_assignments')
+  .select(`
+    *,
+    campaigns (
+      id, title, slug, description, status, deadline, payment_per_post, budget,
+      campaign_milestones (id, title, payment_amount, due_date, order_index)
+    )
+  `)
+  .eq('creator_id', session.user.id)
+  .order('assigned_at', { ascending: false });
+
+// Fetch milestone submissions for progress tracking
+const { data: submissions } = await supabase
+  .from('milestone_submissions')
+  .select('milestone_id, status')
+  .eq('creator_id', session.user.id);
+
+// Create a map of milestone submissions
+const submissionMap = new Map();
+submissions?.forEach(sub => {
+  submissionMap.set(sub.milestone_id, sub.status);
+});
+
+// Calculate progress for each assignment
+const assignmentsWithProgress = assignments?.map(assignment => {
+  const milestones = assignment.campaigns?.campaign_milestones || [];
+  const totalMilestones = milestones.length;
+  const completedMilestones = milestones.filter(m => 
+    submissionMap.get(m.id) === 'approved'
+  ).length;
+  const pendingMilestones = milestones.filter(m => 
+    submissionMap.get(m.id) === 'pending'
+  ).length;
+  
+  const totalEarnings = milestones.reduce((sum, m) => sum + (m.payment_amount || 0), 0);
+  const earnedAmount = milestones
+    .filter(m => submissionMap.get(m.id) === 'approved')
+    .reduce((sum, m) => sum + (m.payment_amount || 0), 0);
+
+  return {
+    ...assignment,
+    progress: {
+      total: totalMilestones,
+      completed: completedMilestones,
+      pending: pendingMilestones,
+      percentage: totalMilestones > 0 ? Math.round((completedMilestones / totalMilestones) * 100) : 0,
+      totalEarnings,
+      earnedAmount,
+    }
+  };
+}) || [];
+
+// Separate by status
+const activeAssignments = assignmentsWithProgress.filter(a => 
+  a.status === 'accepted' && a.campaigns?.status === 'active'
+);
+const pendingAssignments = assignmentsWithProgress.filter(a => a.status === 'invited');
+const completedAssignments = assignmentsWithProgress.filter(a => 
+  a.status === 'completed' || a.progress.percentage === 100
+);
+
+function getStatusBadge(status: string) {
+  const badges: Record<string, { label: string; class: string }> = {
+    invited: { label: 'Pending Review', class: 'pending' },
+    accepted: { label: 'Active', class: 'active' },
+    declined: { label: 'Not Selected', class: 'declined' },
+    completed: { label: 'Completed', class: 'completed' },
+  };
+  return badges[status] || { label: status, class: 'default' };
+}
+
+function getDaysRemaining(deadline: string | null) {
+  if (!deadline) return null;
+  const days = Math.ceil((new Date(deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  return days;
+}
+---
+
+<Layout title="My Campaigns">
+  <div class="campaigns-page">
+    <div class="campaigns-container">
+      <!-- Header -->
+      <div class="page-header">
+        <div class="header-content">
+          <a href="/dashboard" class="back-link">← Back to Dashboard</a>
+          <h1>📢 My Campaigns</h1>
+          <p class="subtitle">Track your active campaigns and deliverables</p>
+        </div>
+        <a href="/campaigns" class="btn btn-primary">Browse New Campaigns</a>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">📋</div>
+          <div class="stat-content">
+            <div class="stat-value">{activeAssignments.length}</div>
+            <div class="stat-label">Active Campaigns</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">⏳</div>
+          <div class="stat-content">
+            <div class="stat-value">{pendingAssignments.length}</div>
+            <div class="stat-label">Pending Applications</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">✅</div>
+          <div class="stat-content">
+            <div class="stat-value">{completedAssignments.length}</div>
+            <div class="stat-label">Completed</div>
+          </div>
+        </div>
+        <div class="stat-card highlight">
+          <div class="stat-icon">💰</div>
+          <div class="stat-content">
+            <div class="stat-value">
+              ${assignmentsWithProgress.reduce((sum, a) => sum + a.progress.earnedAmount, 0).toFixed(0)}
+            </div>
+            <div class="stat-label">Total Earned</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active Campaigns -->
+      {activeAssignments.length > 0 && (
+        <section class="campaigns-section">
+          <h2>🟢 Active Campaigns</h2>
+          <div class="campaigns-grid">
+            {activeAssignments.map(assignment => {
+              const campaign = assignment.campaigns;
+              const daysLeft = getDaysRemaining(campaign?.deadline);
+              return (
+                <a href={`/dashboard/campaigns/${campaign?.id}`} class="campaign-card">
+                  <div class="card-header">
+                    <h3>{campaign?.title}</h3>
+                    <span class={`status-badge ${getStatusBadge(assignment.status).class}`}>
+                      {getStatusBadge(assignment.status).label}
+                    </span>
+                  </div>
+                  
+                  {campaign?.description && (
+                    <p class="card-desc">{campaign.description.substring(0, 100)}...</p>
+                  )}
+                  
+                  <div class="progress-section">
+                    <div class="progress-header">
+                      <span>Progress</span>
+                      <span>{assignment.progress.completed}/{assignment.progress.total} milestones</span>
+                    </div>
+                    <div class="progress-bar">
+                      <div class="progress-fill" style={`width: ${assignment.progress.percentage}%`}></div>
+                    </div>
+                  </div>
+                  
+                  <div class="card-meta">
+                    {daysLeft !== null && (
+                      <span class={daysLeft <= 7 ? 'urgent' : ''}>
+                        📅 {daysLeft > 0 ? `${daysLeft} days left` : 'Overdue'}
+                      </span>
+                    )}
+                    <span class="earnings">
+                      💰 ${assignment.progress.earnedAmount}/${assignment.progress.totalEarnings}
+                    </span>
+                  </div>
+                  
+                  <div class="card-action">
+                    View Campaign →
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <!-- Pending Applications -->
+      {pendingAssignments.length > 0 && (
+        <section class="campaigns-section">
+          <h2>⏳ Pending Applications</h2>
+          <div class="campaigns-grid">
+            {pendingAssignments.map(assignment => {
+              const campaign = assignment.campaigns;
+              return (
+                <div class="campaign-card pending">
+                  <div class="card-header">
+                    <h3>{campaign?.title}</h3>
+                    <span class="status-badge pending">Pending Review</span>
+                  </div>
+                  
+                  <p class="card-desc">
+                    Applied {new Date(assignment.assigned_at).toLocaleDateString()}
+                  </p>
+                  
+                  <div class="card-meta">
+                    {campaign?.payment_per_post && (
+                      <span>💵 ${campaign.payment_per_post}/post</span>
+                    )}
+                  </div>
+                  
+                  <div class="pending-notice">
+                    Your application is being reviewed. You'll be notified once a decision is made.
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <!-- Completed Campaigns -->
+      {completedAssignments.length > 0 && (
+        <section class="campaigns-section">
+          <h2>✅ Completed Campaigns</h2>
+          <div class="campaigns-grid">
+            {completedAssignments.map(assignment => {
+              const campaign = assignment.campaigns;
+              return (
+                <a href={`/dashboard/campaigns/${campaign?.id}`} class="campaign-card completed">
+                  <div class="card-header">
+                    <h3>{campaign?.title}</h3>
+                    <span class="status-badge completed">Completed</span>
+                  </div>
+                  
+                  <div class="card-meta">
+                    <span>✓ {assignment.progress.completed} milestones completed</span>
+                    <span class="earnings">💰 ${assignment.progress.earnedAmount} earned</span>
+                  </div>
+                  
+                  <div class="card-action">
+                    View Details →
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <!-- Empty State -->
+      {assignmentsWithProgress.length === 0 && (
+        <div class="empty-state">
+          <div class="empty-icon">📢</div>
+          <h3>No Campaigns Yet</h3>
+          <p>You haven't applied to any campaigns yet. Browse available campaigns and start earning!</p>
+          <a href="/campaigns" class="btn btn-primary">Browse Campaigns</a>
+        </div>
+      )}
+    </div>
+  </div>
+
+  <style>
+    .campaigns-page {
+      min-height: 100vh;
+      background: #f5f6fa;
+      padding: 2rem;
+    }
+
+    .campaigns-container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .back-link {
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.875rem;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+
+    .back-link:hover {
+      color: #2563eb;
+    }
+
+    .page-header h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin: 0 0 0.25rem;
+    }
+
+    .subtitle {
+      color: #6b7280;
+      margin: 0;
+    }
+
+    /* Stats */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .stat-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .stat-card.highlight {
+      background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+    }
+
+    .stat-icon {
+      font-size: 1.5rem;
+      width: 48px;
+      height: 48px;
+      background: #f3f4f6;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .stat-card.highlight .stat-icon {
+      background: rgba(255,255,255,0.6);
+    }
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .stat-label {
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    /* Sections */
+    .campaigns-section {
+      margin-bottom: 2rem;
+    }
+
+    .campaigns-section h2 {
+      font-size: 1.125rem;
+      color: #1a1a2e;
+      margin-bottom: 1rem;
+    }
+
+    .campaigns-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+
+    /* Campaign Cards */
+    .campaign-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-decoration: none;
+      color: inherit;
+      transition: all 0.2s;
+      display: block;
+      border: 2px solid transparent;
+    }
+
+    .campaign-card:hover {
+      border-color: #2563eb;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+    }
+
+    .campaign-card.pending {
+      opacity: 0.8;
+    }
+
+    .campaign-card.pending:hover {
+      border-color: transparent;
+      box-shadow: none;
+    }
+
+    .campaign-card.completed {
+      background: #f9fafb;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .card-header h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    .status-badge {
+      font-size: 0.625rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 6px;
+      font-weight: 600;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .status-badge.active { background: #d1fae5; color: #059669; }
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+    .status-badge.declined { background: #fee2e2; color: #dc2626; }
+    .status-badge.completed { background: #dbeafe; color: #2563eb; }
+
+    .card-desc {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin: 0 0 1rem;
+      line-height: 1.5;
+    }
+
+    /* Progress */
+    .progress-section {
+      margin-bottom: 1rem;
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: #6b7280;
+      margin-bottom: 0.5rem;
+    }
+
+    .progress-bar {
+      height: 8px;
+      background: #e5e7eb;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #10b981, #059669);
+      border-radius: 4px;
+      transition: width 0.3s;
+    }
+
+    .card-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8125rem;
+      color: #6b7280;
+      margin-bottom: 1rem;
+    }
+
+    .card-meta .urgent {
+      color: #dc2626;
+      font-weight: 600;
+    }
+
+    .card-meta .earnings {
+      color: #059669;
+      font-weight: 600;
+    }
+
+    .card-action {
+      color: #2563eb;
+      font-weight: 600;
+      font-size: 0.875rem;
+    }
+
+    .pending-notice {
+      background: #fef3c7;
+      color: #92400e;
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-size: 0.8125rem;
+      text-align: center;
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      background: white;
+      border-radius: 12px;
+    }
+
+    .empty-icon {
+      font-size: 4rem;
+      margin-bottom: 1rem;
+    }
+
+    .empty-state h3 {
+      font-size: 1.25rem;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+
+    .empty-state p {
+      color: #6b7280;
+      margin-bottom: 1.5rem;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.9375rem;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .page-header {
+        flex-direction: column;
+      }
+
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .campaigns-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</Layout>
