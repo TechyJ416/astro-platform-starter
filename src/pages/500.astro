@@ -1,0 +1,147 @@
+---
+// src/pages/500.astro
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="Server Error">
+  <div class="error-page">
+    <div class="error-container">
+      <div class="error-icon">⚠️</div>
+      <div class="error-code">500</div>
+      <h1>Something Went Wrong</h1>
+      <p>We're experiencing technical difficulties. Our team has been notified and is working on a fix.</p>
+      
+      <div class="error-actions">
+        <button onclick="window.location.reload()" class="btn btn-primary">Try Again</button>
+        <a href="/" class="btn btn-secondary">Go Home</a>
+      </div>
+      
+      <div class="error-tips">
+        <h3>While you wait, you can try:</h3>
+        <ul>
+          <li>Refreshing the page</li>
+          <li>Clearing your browser cache</li>
+          <li>Coming back in a few minutes</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .error-page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      background: linear-gradient(135deg, #fef3c7 0%, #fee2e2 100%);
+    }
+
+    .error-container {
+      text-align: center;
+      max-width: 500px;
+      background: white;
+      padding: 3rem;
+      border-radius: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    }
+
+    .error-icon {
+      font-size: 4rem;
+      margin-bottom: 1rem;
+    }
+
+    .error-code {
+      font-size: 4rem;
+      font-weight: 800;
+      color: #dc2626;
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin: 0 0 0.75rem;
+    }
+
+    p {
+      color: #6b7280;
+      font-size: 1rem;
+      margin: 0 0 2rem;
+      line-height: 1.6;
+    }
+
+    .error-actions {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      margin-bottom: 2rem;
+    }
+
+    .btn {
+      padding: 0.875rem 1.75rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 1rem;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .btn-secondary:hover {
+      background: #e5e7eb;
+    }
+
+    .error-tips {
+      text-align: left;
+      background: #f9fafb;
+      padding: 1.5rem;
+      border-radius: 12px;
+    }
+
+    .error-tips h3 {
+      font-size: 0.9375rem;
+      color: #374151;
+      margin: 0 0 0.75rem;
+    }
+
+    .error-tips ul {
+      margin: 0;
+      padding-left: 1.25rem;
+      color: #6b7280;
+    }
+
+    .error-tips li {
+      padding: 0.25rem 0;
+    }
+
+    @media (max-width: 640px) {
+      .error-container {
+        padding: 2rem;
+      }
+
+      .error-code {
+        font-size: 3rem;
+      }
+
+      .error-actions {
+        flex-direction: column;
+      }
+    }
+  </style>
+</Layout>
