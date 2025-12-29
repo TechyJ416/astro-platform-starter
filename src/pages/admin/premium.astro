@@ -1,0 +1,748 @@
+---
+// src/pages/admin/premium.astro
+export const prerender = false;
+
+import AdminLayout from "../../layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+let actionMessage = '';
+let actionError = '';
+
+// Handle actions
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action') as string;
+  const userId = form.get('user_id') as string;
+
+  if (action === 'grant_premium') {
+    const duration = form.get('duration') as string; // '1_month', '1_year', 'lifetime'
+    let expiresAt = null;
+    
+    if (duration === '1_month') {
+      expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    } else if (duration === '1_year') {
+      expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+    }
+    // lifetime = null expires_at
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        is_premium: true,
+        premium_since: new Date().toISOString(),
+        premium_expires: expiresAt,
+        priority_support: true,
+        monthly_boosts_remaining: 1,
+        last_boost_reset: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = 'Premium granted successfully!';
+    }
+  }
+
+  if (action === 'revoke_premium') {
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        is_premium: false,
+        premium_expires: null,
+        priority_support: false,
+        monthly_boosts_remaining: 0
+      })
+      .eq('id', userId);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = 'Premium revoked';
+    }
+  }
+
+  if (action === 'add_boost') {
+    const { error } = await supabase.rpc('add_boost_to_user', { p_user_id: userId });
+    
+    // Fallback if function doesn't exist
+    if (error) {
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ monthly_boosts_remaining: 1 })
+        .eq('id', userId);
+      
+      if (updateError) {
+        actionError = updateError.message;
+      } else {
+        actionMessage = 'Boost added';
+      }
+    } else {
+      actionMessage = 'Boost added';
+    }
+  }
+
+  if (action === 'set_level') {
+    const level = parseInt(form.get('level') as string);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ creator_level: level })
+      .eq('id', userId);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = `Level set to ${level}`;
+    }
+  }
+
+  if (action === 'add_xp') {
+    const xpAmount = parseInt(form.get('xp_amount') as string);
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('creator_xp, creator_level')
+      .eq('id', userId)
+      .single();
+
+    if (profile) {
+      const newXP = (profile.creator_xp || 0) + xpAmount;
+      let newLevel = profile.creator_level || 1;
+      
+      // Calculate new level
+      if (newXP >= 5000) newLevel = 3;
+      else if (newXP >= 1000) newLevel = 2;
+      else newLevel = 1;
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({ creator_xp: newXP, creator_level: newLevel })
+        .eq('id', userId);
+
+      if (error) {
+        actionError = error.message;
+      } else {
+        actionMessage = `Added ${xpAmount} XP (Total: ${newXP}, Level: ${newLevel})`;
+      }
+    }
+  }
+}
+
+// Fetch premium members
+const { data: premiumMembers } = await supabase
+  .from('profiles')
+  .select('*')
+  .eq('is_premium', true)
+  .order('premium_since', { ascending: false });
+
+// Fetch all creators for granting premium
+const { data: allCreators } = await supabase
+  .from('profiles')
+  .select('id, email, full_name, is_premium, creator_level, creator_xp')
+  .eq('role', 'creator')
+  .eq('is_premium', false)
+  .order('created_at', { ascending: false })
+  .limit(50);
+
+// Stats
+const { count: totalPremium } = await supabase
+  .from('profiles')
+  .select('*', { count: 'exact', head: true })
+  .eq('is_premium', true);
+
+const { count: level3Count } = await supabase
+  .from('profiles')
+  .select('*', { count: 'exact', head: true })
+  .eq('creator_level', 3);
+
+const { count: level2Count } = await supabase
+  .from('profiles')
+  .select('*', { count: 'exact', head: true })
+  .eq('creator_level', 2);
+
+// Active boosts
+const { data: activeBoosts } = await supabase
+  .from('campaign_boosts')
+  .select(`
+    *,
+    user:profiles!campaign_boosts_user_id_fkey(full_name, email),
+    campaign:campaigns(title)
+  `)
+  .eq('is_active', true)
+  .gte('expires_at', new Date().toISOString());
+
+// Level config
+const { data: levelConfig } = await supabase
+  .from('level_config')
+  .select('*')
+  .order('level');
+---
+
+<AdminLayout title="Premium Management">
+  {actionMessage && <div class="alert success">{actionMessage}</div>}
+  {actionError && <div class="alert error">{actionError}</div>}
+
+  <div class="premium-admin">
+    <div class="page-header">
+      <h1>⭐ Premium Management</h1>
+      <p>Manage premium memberships, levels, and boosts</p>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card premium">
+        <span class="stat-icon">⭐</span>
+        <div class="stat-content">
+          <span class="stat-value">{totalPremium || 0}</span>
+          <span class="stat-label">Premium Members</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-icon">👑</span>
+        <div class="stat-content">
+          <span class="stat-value">{level3Count || 0}</span>
+          <span class="stat-label">Elite Creators (L3)</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-icon">⭐⭐</span>
+        <div class="stat-content">
+          <span class="stat-value">{level2Count || 0}</span>
+          <span class="stat-label">Established (L2)</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-icon">🚀</span>
+        <div class="stat-content">
+          <span class="stat-value">{activeBoosts?.length || 0}</span>
+          <span class="stat-label">Active Boosts</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="content-grid">
+      <!-- Premium Members -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2>⭐ Premium Members</h2>
+        </div>
+        <div class="panel-content">
+          {premiumMembers && premiumMembers.length > 0 ? (
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Level</th>
+                  <th>XP</th>
+                  <th>Boosts</th>
+                  <th>Expires</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {premiumMembers.map(member => (
+                  <tr>
+                    <td>
+                      <div class="user-cell">
+                        <span class="user-name">{member.full_name || member.email}</span>
+                        <span class="user-email">{member.email}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <span class={`level-badge level-${member.creator_level}`}>
+                        {member.creator_level === 3 ? '👑' : member.creator_level === 2 ? '⭐⭐' : '⭐'}
+                        Level {member.creator_level || 1}
+                      </span>
+                    </td>
+                    <td>{(member.creator_xp || 0).toLocaleString()} XP</td>
+                    <td>
+                      <span class="boost-count">{member.monthly_boosts_remaining || 0}</span>
+                    </td>
+                    <td>
+                      {member.premium_expires ? (
+                        <span class={new Date(member.premium_expires) < new Date() ? 'expired' : ''}>
+                          {new Date(member.premium_expires).toLocaleDateString()}
+                        </span>
+                      ) : (
+                        <span class="lifetime">Lifetime</span>
+                      )}
+                    </td>
+                    <td>
+                      <div class="action-buttons">
+                        <form method="POST" class="inline-form">
+                          <input type="hidden" name="action" value="add_boost" />
+                          <input type="hidden" name="user_id" value={member.id} />
+                          <button type="submit" class="btn btn-sm btn-secondary" title="Add Boost">🚀</button>
+                        </form>
+                        <form method="POST" class="inline-form">
+                          <input type="hidden" name="action" value="revoke_premium" />
+                          <input type="hidden" name="user_id" value={member.id} />
+                          <button type="submit" class="btn btn-sm btn-danger" title="Revoke Premium">✕</button>
+                        </form>
+                        <a href={`/admin/preview/${member.id}`} class="btn btn-sm btn-secondary" title="View">👁️</a>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div class="empty-state">
+              <span>⭐</span>
+              <p>No premium members yet</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <!-- Grant Premium -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2>🎁 Grant Premium</h2>
+        </div>
+        <div class="panel-content">
+          <form method="POST" class="grant-form">
+            <input type="hidden" name="action" value="grant_premium" />
+            
+            <div class="form-group">
+              <label>Select User</label>
+              <select name="user_id" required>
+                <option value="">Choose a creator...</option>
+                {allCreators?.map(creator => (
+                  <option value={creator.id}>
+                    {creator.full_name || creator.email} (Level {creator.creator_level || 1})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Duration</label>
+              <select name="duration" required>
+                <option value="1_month">1 Month</option>
+                <option value="1_year">1 Year</option>
+                <option value="lifetime">Lifetime</option>
+              </select>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Grant Premium</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Active Boosts -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2>🚀 Active Campaign Boosts</h2>
+        </div>
+        <div class="panel-content">
+          {activeBoosts && activeBoosts.length > 0 ? (
+            <div class="boost-list">
+              {activeBoosts.map(boost => (
+                <div class="boost-item">
+                  <div class="boost-info">
+                    <span class="campaign-title">{boost.campaign?.title || 'Unknown Campaign'}</span>
+                    <span class="boost-user">by {boost.user?.full_name || boost.user?.email}</span>
+                  </div>
+                  <div class="boost-meta">
+                    <span class="boost-expires">
+                      Expires: {new Date(boost.expires_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div class="empty-state">
+              <span>🚀</span>
+              <p>No active boosts</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <!-- Level Configuration -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2>📊 Level Configuration</h2>
+        </div>
+        <div class="panel-content">
+          {levelConfig && levelConfig.length > 0 ? (
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Level</th>
+                  <th>Name</th>
+                  <th>Min XP</th>
+                  <th>Base Fee</th>
+                  <th>Premium Fee</th>
+                </tr>
+              </thead>
+              <tbody>
+                {levelConfig.map(level => (
+                  <tr>
+                    <td>
+                      <span class={`level-badge level-${level.level}`}>
+                        {level.level === 3 ? '👑' : level.level === 2 ? '⭐⭐' : '⭐'}
+                      </span>
+                    </td>
+                    <td>{level.name}</td>
+                    <td>{level.min_xp.toLocaleString()} XP</td>
+                    <td><span class="fee base">{level.base_tax_rate}%</span></td>
+                    <td><span class="fee premium">{level.premium_tax_rate}%</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div class="empty-state">
+              <p>Run premium-schema.sql to set up level configuration</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <!-- Manual XP/Level Adjustment -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2>⚙️ Manual Adjustments</h2>
+        </div>
+        <div class="panel-content">
+          <form method="POST" class="adjustment-form">
+            <input type="hidden" name="action" value="add_xp" />
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label>User</label>
+                <select name="user_id" required>
+                  <option value="">Select user...</option>
+                  {[...(premiumMembers || []), ...(allCreators || [])].map(user => (
+                    <option value={user.id}>
+                      {user.full_name || user.email} ({user.creator_xp || 0} XP)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div class="form-group">
+                <label>XP to Add</label>
+                <input type="number" name="xp_amount" placeholder="100" required min="1" />
+              </div>
+              <button type="submit" class="btn btn-secondary">Add XP</button>
+            </div>
+          </form>
+
+          <hr />
+
+          <form method="POST" class="adjustment-form">
+            <input type="hidden" name="action" value="set_level" />
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label>User</label>
+                <select name="user_id" required>
+                  <option value="">Select user...</option>
+                  {[...(premiumMembers || []), ...(allCreators || [])].map(user => (
+                    <option value={user.id}>
+                      {user.full_name || user.email} (Level {user.creator_level || 1})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Set Level</label>
+                <select name="level" required>
+                  <option value="1">Level 1 - Rising Star</option>
+                  <option value="2">Level 2 - Established</option>
+                  <option value="3">Level 3 - Elite</option>
+                </select>
+              </div>
+              <button type="submit" class="btn btn-secondary">Set Level</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+
+    .premium-admin { max-width: 1400px; }
+
+    .page-header {
+      margin-bottom: 1.5rem;
+    }
+    .page-header h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+    .page-header p { color: #6b7280; }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+      background: white;
+      padding: 1.25rem;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .stat-card.premium {
+      background: linear-gradient(135deg, #fef3c7, #fde68a);
+      border: 2px solid #f59e0b;
+    }
+
+    .stat-icon { font-size: 1.5rem; }
+    .stat-value { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; display: block; }
+    .stat-label { font-size: 0.8125rem; color: #6b7280; }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.5rem;
+    }
+
+    .panel {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .panel:first-child {
+      grid-column: 1 / -1;
+    }
+
+    .panel-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .panel-header h2 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    .panel-content {
+      padding: 1.25rem;
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .data-table th,
+    .data-table td {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .data-table th {
+      font-size: 0.75rem;
+      color: #6b7280;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .user-cell {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .user-name { font-weight: 600; color: #1a1a2e; }
+    .user-email { font-size: 0.75rem; color: #9ca3af; }
+
+    .level-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .level-1 { background: #f3f4f6; color: #374151; }
+    .level-2 { background: #dbeafe; color: #1e40af; }
+    .level-3 { background: linear-gradient(135deg, #fef3c7, #fde68a); color: #92400e; }
+
+    .boost-count {
+      display: inline-block;
+      background: #dbeafe;
+      color: #1e40af;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .lifetime { color: #059669; font-weight: 600; }
+    .expired { color: #991b1b; }
+
+    .action-buttons {
+      display: flex;
+      gap: 0.375rem;
+    }
+
+    .inline-form { display: inline; }
+
+    .btn {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.8125rem;
+    }
+
+    .btn-sm { padding: 0.375rem 0.5rem; font-size: 0.75rem; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+    .btn-danger { background: #fee2e2; color: #991b1b; }
+
+    .empty-state {
+      text-align: center;
+      padding: 2rem;
+      color: #9ca3af;
+    }
+
+    .empty-state span {
+      font-size: 2rem;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+
+    .grant-form,
+    .adjustment-form {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.375rem;
+    }
+
+    .form-group label {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: #374151;
+    }
+
+    .form-group select,
+    .form-group input {
+      padding: 0.625rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 0.875rem;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-end;
+    }
+
+    .form-row .form-group {
+      flex: 1;
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid #e5e7eb;
+      margin: 1.5rem 0;
+    }
+
+    .boost-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .boost-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 8px;
+    }
+
+    .campaign-title {
+      font-weight: 600;
+      color: #1a1a2e;
+      display: block;
+    }
+
+    .boost-user {
+      font-size: 0.75rem;
+      color: #6b7280;
+    }
+
+    .boost-expires {
+      font-size: 0.75rem;
+      color: #6b7280;
+    }
+
+    .fee {
+      display: inline-block;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 0.8125rem;
+    }
+
+    .fee.base { background: #fee2e2; color: #991b1b; }
+    .fee.premium { background: #d1fae5; color: #065f46; }
+
+    @media (max-width: 1200px) {
+      .content-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .panel:first-child {
+        grid-column: 1;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .form-row {
+        flex-direction: column;
+      }
+    }
+  </style>
+</AdminLayout>
