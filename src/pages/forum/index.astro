@@ -1,0 +1,932 @@
+---
+// src/pages/forum/index.astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { supabase } from "../../lib/supabase";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+const user = session?.user;
+
+let actionMessage = '';
+let actionError = '';
+
+// Handle new topic submission
+if (Astro.request.method === 'POST' && user) {
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+
+  if (action === 'create_topic') {
+    const title = form.get('title') as string;
+    const content = form.get('content') as string;
+    const communityId = form.get('community_id') as string || '00000000-0000-0000-0000-000000000001';
+
+    if (title && content) {
+      const { data, error } = await supabase
+        .from('forum_topics')
+        .insert({
+          title,
+          content,
+          user_id: user.id,
+          community_id: communityId
+        })
+        .select()
+        .single();
+
+      if (error) {
+        actionError = error.message;
+      } else {
+        return Astro.redirect(`/forum/topic/${data.id}`);
+      }
+    } else {
+      actionError = 'Title and content are required';
+    }
+  }
+}
+
+// Fetch communities/categories
+const { data: communities } = await supabase
+  .from('communities')
+  .select('*')
+  .eq('is_public', true)
+  .order('name');
+
+// Fetch topics with pagination
+const page = parseInt(Astro.url.searchParams.get('page') || '1');
+const perPage = 20;
+const categorySlug = Astro.url.searchParams.get('category');
+
+let topicsQuery = supabase
+  .from('forum_topics')
+  .select(`
+    *,
+    author:profiles!forum_topics_user_id_fkey(id, full_name, email, avatar_url, role, is_premium, creator_level),
+    community:communities(id, name, slug, icon),
+    last_replier:profiles!forum_topics_last_reply_by_fkey(full_name, avatar_url)
+  `, { count: 'exact' })
+  .order('is_pinned', { ascending: false })
+  .order('last_reply_at', { ascending: false })
+  .range((page - 1) * perPage, page * perPage - 1);
+
+if (categorySlug) {
+  const { data: cat } = await supabase
+    .from('communities')
+    .select('id')
+    .eq('slug', categorySlug)
+    .single();
+  if (cat) {
+    topicsQuery = topicsQuery.eq('community_id', cat.id);
+  }
+}
+
+const { data: topics, count: totalTopics } = await topicsQuery;
+const totalPages = Math.ceil((totalTopics || 0) / perPage);
+
+// Fetch recent activity stats
+const { count: totalTopicCount } = await supabase
+  .from('forum_topics')
+  .select('*', { count: 'exact', head: true });
+
+const { count: totalReplyCount } = await supabase
+  .from('forum_replies')
+  .select('*', { count: 'exact', head: true });
+
+const { count: memberCount } = await supabase
+  .from('profiles')
+  .select('*', { count: 'exact', head: true })
+  .eq('status', 'active');
+
+// Get active community for filter
+const activeCategory = communities?.find(c => c.slug === categorySlug);
+
+function timeAgo(date: string) {
+  const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+  return new Date(date).toLocaleDateString();
+}
+---
+
+<Layout title="Community Forum">
+  <div class="forum-page">
+    <!-- Header -->
+    <section class="forum-header">
+      <div class="container">
+        <div class="header-content">
+          <div>
+            <h1>💬 Community Forum</h1>
+            <p>Connect with fellow creators, share tips, ask questions, and grow together.</p>
+          </div>
+          {user && (
+            <button class="btn btn-primary" onclick="document.getElementById('new-topic-modal').showModal()">
+              ✏️ New Topic
+            </button>
+          )}
+        </div>
+
+        <div class="forum-stats">
+          <div class="stat">
+            <span class="stat-value">{totalTopicCount || 0}</span>
+            <span class="stat-label">Topics</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">{totalReplyCount || 0}</span>
+            <span class="stat-label">Replies</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">{memberCount || 0}</span>
+            <span class="stat-label">Members</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {actionError && <div class="alert error container">{actionError}</div>}
+
+    <div class="forum-content container">
+      <!-- Sidebar -->
+      <aside class="forum-sidebar">
+        <div class="sidebar-section">
+          <h3>Categories</h3>
+          <nav class="category-nav">
+            <a href="/forum" class={!categorySlug ? 'active' : ''}>
+              <span class="cat-icon">🏠</span>
+              <span>All Topics</span>
+            </a>
+            {communities?.map(cat => (
+              <a 
+                href={`/forum?category=${cat.slug}`} 
+                class={categorySlug === cat.slug ? 'active' : ''}
+              >
+                <span class="cat-icon">{cat.icon || '💬'}</span>
+                <span>{cat.name}</span>
+              </a>
+            ))}
+          </nav>
+        </div>
+
+        {!user && (
+          <div class="sidebar-section cta-box">
+            <h3>Join the Discussion</h3>
+            <p>Sign in to post topics and reply to conversations.</p>
+            <a href="/login" class="btn btn-primary">Log In</a>
+            <a href="/signup" class="btn btn-secondary">Sign Up</a>
+          </div>
+        )}
+
+        <div class="sidebar-section">
+          <h3>Forum Rules</h3>
+          <ul class="rules-list">
+            <li>Be respectful and constructive</li>
+            <li>No spam or self-promotion</li>
+            <li>Stay on topic</li>
+            <li>Help others when you can</li>
+          </ul>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="forum-main">
+        {activeCategory && (
+          <div class="category-header">
+            <span class="cat-icon-large">{activeCategory.icon || '💬'}</span>
+            <div>
+              <h2>{activeCategory.name}</h2>
+              <p>{activeCategory.description}</p>
+            </div>
+          </div>
+        )}
+
+        <div class="topics-list">
+          {topics && topics.length > 0 ? (
+            topics.map(topic => (
+              <a href={`/forum/topic/${topic.id}`} class={`topic-card ${topic.is_pinned ? 'pinned' : ''} ${topic.is_announcement ? 'announcement' : ''}`}>
+                <div class="topic-avatar">
+                  {topic.author?.avatar_url ? (
+                    <img src={topic.author.avatar_url} alt="" />
+                  ) : (
+                    <span>{(topic.author?.full_name || topic.author?.email || '?').charAt(0).toUpperCase()}</span>
+                  )}
+                </div>
+                
+                <div class="topic-content">
+                  <div class="topic-meta">
+                    {topic.is_pinned && <span class="badge pinned">📌 Pinned</span>}
+                    {topic.is_announcement && <span class="badge announcement">📢 Announcement</span>}
+                    {topic.is_locked && <span class="badge locked">🔒 Locked</span>}
+                    <span class="topic-category">{topic.community?.icon} {topic.community?.name}</span>
+                  </div>
+                  
+                  <h3 class="topic-title">{topic.title}</h3>
+                  
+                  <p class="topic-preview">{topic.content.substring(0, 150)}{topic.content.length > 150 ? '...' : ''}</p>
+                  
+                  <div class="topic-footer">
+                    <span class="topic-author">
+                      {topic.author?.full_name || topic.author?.email}
+                      {topic.author?.is_premium && <span class="premium-badge">⭐</span>}
+                      {topic.author?.role === 'admin' && <span class="role-badge admin">Admin</span>}
+                      {topic.author?.role === 'moderator' && <span class="role-badge mod">Mod</span>}
+                    </span>
+                    <span class="topic-time">{timeAgo(topic.created_at)}</span>
+                  </div>
+                </div>
+                
+                <div class="topic-stats">
+                  <div class="stat-item">
+                    <span class="stat-num">{topic.reply_count || 0}</span>
+                    <span class="stat-label">Replies</span>
+                  </div>
+                  <div class="stat-item">
+                    <span class="stat-num">{topic.view_count || 0}</span>
+                    <span class="stat-label">Views</span>
+                  </div>
+                </div>
+                
+                {topic.reply_count > 0 && topic.last_replier && (
+                  <div class="topic-last-reply">
+                    <span class="last-reply-label">Latest</span>
+                    <div class="last-replier">
+                      {topic.last_replier.avatar_url ? (
+                        <img src={topic.last_replier.avatar_url} alt="" />
+                      ) : (
+                        <span>{(topic.last_replier.full_name || '?').charAt(0)}</span>
+                      )}
+                    </div>
+                    <span class="last-reply-time">{timeAgo(topic.last_reply_at)}</span>
+                  </div>
+                )}
+              </a>
+            ))
+          ) : (
+            <div class="empty-state">
+              <span>💬</span>
+              <h3>No topics yet</h3>
+              <p>Be the first to start a discussion!</p>
+              {user && (
+                <button class="btn btn-primary" onclick="document.getElementById('new-topic-modal').showModal()">
+                  Create First Topic
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div class="pagination">
+            {page > 1 && (
+              <a href={`?page=${page - 1}${categorySlug ? `&category=${categorySlug}` : ''}`} class="page-btn">
+                ← Previous
+              </a>
+            )}
+            <span class="page-info">Page {page} of {totalPages}</span>
+            {page < totalPages && (
+              <a href={`?page=${page + 1}${categorySlug ? `&category=${categorySlug}` : ''}`} class="page-btn">
+                Next →
+              </a>
+            )}
+          </div>
+        )}
+      </main>
+    </div>
+
+    <!-- New Topic Modal -->
+    <dialog id="new-topic-modal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>✏️ Create New Topic</h2>
+          <button class="close-btn" onclick="document.getElementById('new-topic-modal').close()">×</button>
+        </div>
+        <form method="POST" class="topic-form">
+          <input type="hidden" name="action" value="create_topic" />
+          
+          <div class="form-group">
+            <label for="community_id">Category</label>
+            <select name="community_id" id="community_id">
+              {communities?.map(cat => (
+                <option value={cat.id} selected={categorySlug === cat.slug}>
+                  {cat.icon} {cat.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div class="form-group">
+            <label for="title">Title</label>
+            <input 
+              type="text" 
+              name="title" 
+              id="title" 
+              placeholder="What's your topic about?" 
+              required 
+              maxlength="200"
+            />
+          </div>
+          
+          <div class="form-group">
+            <label for="content">Content</label>
+            <textarea 
+              name="content" 
+              id="content" 
+              rows="8" 
+              placeholder="Share your thoughts, questions, or ideas..."
+              required
+            ></textarea>
+          </div>
+          
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('new-topic-modal').close()">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn-primary">Post Topic</button>
+          </div>
+        </form>
+      </div>
+    </dialog>
+  </div>
+
+  <style>
+    .forum-page {
+      min-height: 100vh;
+      background: #f8fafc;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Header */
+    .forum-header {
+      background: linear-gradient(135deg, #1a1a2e, #2d2d4a);
+      padding: 3rem 0 2rem;
+      color: white;
+    }
+
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 2rem;
+    }
+
+    .forum-header h1 {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .forum-header p {
+      color: rgba(255,255,255,0.7);
+      font-size: 1.125rem;
+    }
+
+    .forum-stats {
+      display: flex;
+      gap: 2rem;
+    }
+
+    .forum-stats .stat {
+      text-align: center;
+    }
+
+    .forum-stats .stat-value {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    .forum-stats .stat-label {
+      font-size: 0.8125rem;
+      color: rgba(255,255,255,0.6);
+    }
+
+    /* Layout */
+    .forum-content {
+      display: grid;
+      grid-template-columns: 250px 1fr;
+      gap: 2rem;
+      padding: 2rem 1.5rem;
+    }
+
+    /* Sidebar */
+    .forum-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .sidebar-section {
+      background: white;
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+
+    .sidebar-section h3 {
+      font-size: 0.875rem;
+      color: #6b7280;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+    }
+
+    .category-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .category-nav a {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.625rem 0.875rem;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #4b5563;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .category-nav a:hover {
+      background: #f3f4f6;
+    }
+
+    .category-nav a.active {
+      background: #2563eb;
+      color: white;
+    }
+
+    .cat-icon {
+      font-size: 1.125rem;
+    }
+
+    .cta-box {
+      background: linear-gradient(135deg, #dbeafe, #ede9fe);
+      text-align: center;
+    }
+
+    .cta-box p {
+      color: #4b5563;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+    }
+
+    .cta-box .btn {
+      width: 100%;
+      margin-bottom: 0.5rem;
+    }
+
+    .rules-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .rules-list li {
+      padding: 0.5rem 0;
+      color: #6b7280;
+      font-size: 0.875rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .rules-list li:last-child {
+      border-bottom: none;
+    }
+
+    /* Category Header */
+    .category-header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      background: white;
+      padding: 1.5rem;
+      border-radius: 12px;
+      margin-bottom: 1.5rem;
+    }
+
+    .cat-icon-large {
+      font-size: 2.5rem;
+    }
+
+    .category-header h2 {
+      font-size: 1.25rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+
+    .category-header p {
+      color: #6b7280;
+      font-size: 0.9375rem;
+    }
+
+    /* Topics List */
+    .topics-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .topic-card {
+      display: grid;
+      grid-template-columns: 48px 1fr auto auto;
+      gap: 1rem;
+      background: white;
+      padding: 1.25rem;
+      border-radius: 12px;
+      text-decoration: none;
+      transition: all 0.2s;
+      border: 2px solid transparent;
+    }
+
+    .topic-card:hover {
+      border-color: #2563eb;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    .topic-card.pinned {
+      border-left: 4px solid #f59e0b;
+      background: linear-gradient(90deg, #fef3c7 0%, white 10%);
+    }
+
+    .topic-card.announcement {
+      border-left: 4px solid #2563eb;
+      background: linear-gradient(90deg, #dbeafe 0%, white 10%);
+    }
+
+    .topic-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: #e5e7eb;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      font-weight: 600;
+      color: #6b7280;
+    }
+
+    .topic-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .topic-content {
+      min-width: 0;
+    }
+
+    .topic-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.375rem;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      font-size: 0.6875rem;
+      padding: 0.125rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .badge.pinned {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .badge.announcement {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    .badge.locked {
+      background: #f3f4f6;
+      color: #6b7280;
+    }
+
+    .topic-category {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    .topic-title {
+      font-size: 1.0625rem;
+      color: #1a1a2e;
+      margin-bottom: 0.375rem;
+      font-weight: 600;
+    }
+
+    .topic-preview {
+      font-size: 0.875rem;
+      color: #6b7280;
+      line-height: 1.5;
+      margin-bottom: 0.5rem;
+    }
+
+    .topic-footer {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      font-size: 0.8125rem;
+    }
+
+    .topic-author {
+      color: #374151;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+    }
+
+    .premium-badge {
+      color: #f59e0b;
+    }
+
+    .role-badge {
+      padding: 0.125rem 0.375rem;
+      border-radius: 4px;
+      font-size: 0.625rem;
+      font-weight: 700;
+    }
+
+    .role-badge.admin {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .role-badge.mod {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .topic-time {
+      color: #9ca3af;
+    }
+
+    .topic-stats {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      text-align: center;
+      padding: 0 1rem;
+      border-left: 1px solid #e5e7eb;
+    }
+
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stat-num {
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .stat-item .stat-label {
+      font-size: 0.6875rem;
+      color: #9ca3af;
+    }
+
+    .topic-last-reply {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.25rem;
+      padding-left: 1rem;
+      border-left: 1px solid #e5e7eb;
+    }
+
+    .last-reply-label {
+      font-size: 0.625rem;
+      color: #9ca3af;
+      text-transform: uppercase;
+    }
+
+    .last-replier {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #e5e7eb;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      font-size: 0.75rem;
+    }
+
+    .last-replier img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .last-reply-time {
+      font-size: 0.6875rem;
+      color: #9ca3af;
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      background: white;
+      border-radius: 12px;
+    }
+
+    .empty-state span {
+      font-size: 3rem;
+      display: block;
+      margin-bottom: 1rem;
+    }
+
+    .empty-state h3 {
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+
+    .empty-state p {
+      color: #6b7280;
+      margin-bottom: 1.5rem;
+    }
+
+    /* Pagination */
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+
+    .page-btn {
+      padding: 0.5rem 1rem;
+      background: white;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #374151;
+      font-weight: 500;
+    }
+
+    .page-btn:hover {
+      background: #2563eb;
+      color: white;
+    }
+
+    .page-info {
+      color: #6b7280;
+      font-size: 0.875rem;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    /* Modal */
+    .modal {
+      padding: 0;
+      border: none;
+      border-radius: 16px;
+      max-width: 600px;
+      width: 90%;
+      box-shadow: 0 25px 50px rgba(0,0,0,0.25);
+    }
+
+    .modal::backdrop {
+      background: rgba(0,0,0,0.5);
+    }
+
+    .modal-content {
+      padding: 0;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .modal-header h2 {
+      font-size: 1.25rem;
+      color: #1a1a2e;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      color: #9ca3af;
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+    }
+
+    .topic-form {
+      padding: 1.5rem;
+    }
+
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.5rem;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 0.75rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-family: inherit;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+
+    .form-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-top: 1rem;
+    }
+
+    .alert.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .forum-content {
+        grid-template-columns: 1fr;
+      }
+
+      .forum-sidebar {
+        order: 2;
+      }
+
+      .forum-main {
+        order: 1;
+      }
+
+      .topic-card {
+        grid-template-columns: 40px 1fr;
+      }
+
+      .topic-stats,
+      .topic-last-reply {
+        display: none;
+      }
+
+      .header-content {
+        flex-direction: column;
+        gap: 1rem;
+      }
+    }
+  </style>
+</Layout>
