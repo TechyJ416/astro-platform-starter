@@ -48,6 +48,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     path === '/about' ||
     path === '/contact' ||
     path === '/creators' ||
+    path === '/premium' ||
     path === '/privacy' ||
     path === '/terms' ||
     path === '/'
