@@ -12,11 +12,14 @@ if (!isMasterKeySession && !session) {
   return Astro.redirect('/admin/login');
 }
 
+// Use service key for admin operations
 const supabase = createClient(
   import.meta.env.SUPABASE_URL,
   import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
+
+const hasServiceKey = !!import.meta.env.SUPABASE_SERVICE_KEY;
 
 let successMessage = '';
 let errorMessage = '';
@@ -27,21 +30,31 @@ if (Astro.request.method === 'POST') {
   const pageKey = form.get('page_key') as string;
   const contentJson = form.get('content') as string;
 
-  try {
-    const content = JSON.parse(contentJson);
-    
-    const { error } = await supabase
-      .from('page_content')
-      .update({ 
-        content, 
-        updated_at: new Date().toISOString(),
-      })
-      .eq('page_key', pageKey);
+  if (!hasServiceKey) {
+    errorMessage = 'SUPABASE_SERVICE_KEY not configured. Cannot save changes.';
+  } else {
+    try {
+      const content = JSON.parse(contentJson);
+      
+      const { data, error } = await supabase
+        .from('page_content')
+        .update({ 
+          content, 
+          updated_at: new Date().toISOString(),
+        })
+        .eq('page_key', pageKey)
+        .select();
 
-    if (error) throw error;
-    successMessage = `${pageKey} page content updated successfully!`;
-  } catch (e: any) {
-    errorMessage = e.message || 'Failed to save content';
+      if (error) {
+        errorMessage = `Database error: ${error.message}`;
+      } else if (!data || data.length === 0) {
+        errorMessage = `No rows updated. Page "${pageKey}" may not exist in database.`;
+      } else {
+        successMessage = `✅ ${pageKey.charAt(0).toUpperCase() + pageKey.slice(1)} page updated! Refresh the live page to see changes.`;
+      }
+    } catch (e: any) {
+      errorMessage = `Parse error: ${e.message}`;
+    }
   }
 }
 
@@ -52,7 +65,7 @@ const { data: pages, error: loadError } = await supabase
   .order('page_key');
 
 if (loadError) {
-  errorMessage = loadError.message;
+  errorMessage = `Load error: ${loadError.message}. Have you run page-content-schema.sql?`;
 }
 
 const allPages = pages || [];
@@ -143,6 +156,11 @@ function getNestedValue(obj: any, path: string): any {
 <AdminLayout title="Content Editor">
   {successMessage && <div class="alert success">{successMessage}</div>}
   {errorMessage && <div class="alert error">{errorMessage}</div>}
+  {!hasServiceKey && (
+    <div class="alert warning">
+      ⚠️ SUPABASE_SERVICE_KEY not configured. Changes cannot be saved. Add it to your environment variables.
+    </div>
+  )}
 
   <div class="content-editor">
     <div class="editor-header">
@@ -299,7 +317,10 @@ function getNestedValue(obj: any, path: string): any {
       <div class="empty-state">
         <span>📄</span>
         <h3>No Content Found</h3>
-        <p>Run the page-content-schema.sql migration to set up editable content.</p>
+        <p>The page_content table is empty or doesn't exist.</p>
+        <p style="margin-top: 1rem; font-size: 0.875rem; color: #6b7280;">
+          Run <code style="background: #f3f4f6; padding: 0.25rem 0.5rem; border-radius: 4px;">page-content-schema.sql</code> in Supabase SQL Editor to set up the content management system.
+        </p>
       </div>
     )}
   </div>
@@ -616,6 +637,11 @@ function getNestedValue(obj: any, path: string): any {
     .alert.error {
       background: #fee2e2;
       color: #991b1b;
+    }
+
+    .alert.warning {
+      background: #fef3c7;
+      color: #92400e;
     }
 
     .empty-state {
