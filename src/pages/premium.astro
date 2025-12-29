@@ -1,0 +1,993 @@
+---
+// src/pages/premium.astro
+export const prerender = false;
+
+import Layout from "../layouts/Layout.astro";
+import { supabase } from "../lib/supabase";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+// Get level config
+const { data: levels } = await supabase
+  .from('level_config')
+  .select('*')
+  .order('level');
+
+const levelConfig = levels || [
+  { level: 1, name: 'Rising Star', min_xp: 0, base_tax_rate: 25, premium_tax_rate: 10 },
+  { level: 2, name: 'Established Creator', min_xp: 1000, base_tax_rate: 20, premium_tax_rate: 10 },
+  { level: 3, name: 'Elite Creator', min_xp: 5000, base_tax_rate: 10, premium_tax_rate: 10 },
+];
+
+const isPremium = profile?.is_premium || false;
+const currentLevel = profile?.creator_level || 1;
+const currentXP = profile?.creator_xp || 0;
+---
+
+<Layout title="Premium Membership">
+  <div class="premium-page">
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero-content">
+        <span class="hero-badge">⭐ Premium</span>
+        <h1>Supercharge Your Creator Career</h1>
+        <p>Get priority support, lower fees, campaign boosts, and exclusive perks designed to maximize your earnings.</p>
+        {!session ? (
+          <div class="hero-actions">
+            <a href="/signup" class="btn btn-primary btn-lg">Join & Go Premium</a>
+            <a href="/login" class="btn btn-secondary btn-lg">Log In</a>
+          </div>
+        ) : isPremium ? (
+          <div class="premium-status">
+            <span class="status-badge active">✓ You're Premium!</span>
+            <a href="/dashboard/premium" class="btn btn-secondary">Manage Subscription</a>
+          </div>
+        ) : (
+          <div class="hero-actions">
+            <a href="/dashboard/premium" class="btn btn-primary btn-lg">Upgrade Now</a>
+          </div>
+        )}
+      </div>
+    </section>
+
+    <!-- Key Benefits -->
+    <section class="benefits">
+      <div class="container">
+        <div class="section-header">
+          <h2>Premium Benefits</h2>
+          <p>Everything you need to grow faster and earn more</p>
+        </div>
+
+        <div class="benefits-grid">
+          <div class="benefit-card featured">
+            <div class="benefit-icon">💰</div>
+            <h3>Lower Platform Fees</h3>
+            <p>Pay only <strong>10% platform fee</strong> on all campaign payouts, regardless of your level. Free creators pay up to 25%.</p>
+            <div class="benefit-detail">
+              <span class="savings">Save up to 15% on every payout</span>
+            </div>
+          </div>
+
+          <div class="benefit-card featured">
+            <div class="benefit-icon">🚀</div>
+            <h3>Monthly Campaign Boost</h3>
+            <p>Feature your campaign on the homepage for 7 days. Get <strong>2x visibility</strong> and priority placement.</p>
+            <div class="benefit-detail">
+              <span class="perk">1 free boost every month</span>
+            </div>
+          </div>
+
+          <div class="benefit-card featured">
+            <div class="benefit-icon">🎯</div>
+            <h3>Priority Support</h3>
+            <p>Get dedicated support from our team with <strong>faster response times</strong> and direct access to campaign managers.</p>
+            <div class="benefit-detail">
+              <span class="perk">Average response: 2 hours</span>
+            </div>
+          </div>
+
+          <div class="benefit-card">
+            <div class="benefit-icon">⚡</div>
+            <h3>Double XP</h3>
+            <p>Level up twice as fast with 2x XP on all completed campaigns. Reach Elite status faster.</p>
+          </div>
+
+          <div class="benefit-card">
+            <div class="benefit-icon">👑</div>
+            <h3>Premium Badge</h3>
+            <p>Stand out with a premium badge on your profile. Brands love working with premium creators.</p>
+          </div>
+
+          <div class="benefit-card">
+            <div class="benefit-icon">🔔</div>
+            <h3>Early Access</h3>
+            <p>Get notified about new campaigns 24 hours before they go public. Apply first, win more.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Level System -->
+    <section class="levels">
+      <div class="container">
+        <div class="section-header">
+          <h2>Creator Levels & Fees</h2>
+          <p>Level up by completing campaigns. Higher levels = lower fees.</p>
+        </div>
+
+        <div class="levels-comparison">
+          <div class="comparison-header">
+            <div class="col-level">Level</div>
+            <div class="col-xp">XP Required</div>
+            <div class="col-base">Free Creator Fee</div>
+            <div class="col-premium">Premium Fee</div>
+          </div>
+
+          {levelConfig.map((level, idx) => (
+            <div class={`level-row ${profile && currentLevel === level.level ? 'current' : ''}`}>
+              <div class="col-level">
+                <span class="level-badge level-{level.level}">
+                  {level.level === 1 && '⭐'}
+                  {level.level === 2 && '⭐⭐'}
+                  {level.level === 3 && '👑'}
+                </span>
+                <span class="level-name">{level.name}</span>
+                {profile && currentLevel === level.level && <span class="you-badge">You</span>}
+              </div>
+              <div class="col-xp">
+                {level.min_xp === 0 ? 'Start' : `${level.min_xp.toLocaleString()} XP`}
+              </div>
+              <div class="col-base">
+                <span class="fee base">{level.base_tax_rate}%</span>
+              </div>
+              <div class="col-premium">
+                <span class="fee premium">{level.premium_tax_rate}%</span>
+                {level.base_tax_rate > level.premium_tax_rate && (
+                  <span class="savings-tag">Save {level.base_tax_rate - level.premium_tax_rate}%</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div class="level-example">
+          <h4>💡 Example Savings</h4>
+          <p>On a $500 campaign payout:</p>
+          <div class="example-grid">
+            <div class="example-item">
+              <span class="label">Level 1 Free Creator</span>
+              <span class="fee">-$125 (25%)</span>
+              <span class="payout">= $375</span>
+            </div>
+            <div class="example-item premium">
+              <span class="label">Premium Creator</span>
+              <span class="fee">-$50 (10%)</span>
+              <span class="payout">= $450</span>
+              <span class="extra">+$75 more!</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- How XP Works -->
+    <section class="xp-section">
+      <div class="container">
+        <div class="section-header">
+          <h2>How to Level Up</h2>
+          <p>Earn XP by being active on the platform</p>
+        </div>
+
+        <div class="xp-grid">
+          <div class="xp-card">
+            <div class="xp-amount">+100 XP</div>
+            <h4>Complete a Campaign</h4>
+            <p>Content approved and paid out</p>
+            <span class="premium-bonus">Premium: +200 XP</span>
+          </div>
+          <div class="xp-card">
+            <div class="xp-amount">+25 XP</div>
+            <h4>Get Approved</h4>
+            <p>Campaign application accepted</p>
+            <span class="premium-bonus">Premium: +50 XP</span>
+          </div>
+          <div class="xp-card">
+            <div class="xp-amount">+10 XP</div>
+            <h4>Apply to Campaign</h4>
+            <p>Submit a quality application</p>
+            <span class="premium-bonus">Premium: +20 XP</span>
+          </div>
+          <div class="xp-card">
+            <div class="xp-amount">+50 XP</div>
+            <h4>Get Featured</h4>
+            <p>Your content gets featured</p>
+            <span class="premium-bonus">Premium: +100 XP</span>
+          </div>
+        </div>
+
+        {profile && (
+          <div class="your-progress">
+            <h4>Your Progress</h4>
+            <div class="progress-bar">
+              <div 
+                class="progress-fill" 
+                style={`width: ${Math.min((currentXP / (currentLevel < 3 ? levelConfig[currentLevel]?.min_xp || 5000 : 5000)) * 100, 100)}%`}
+              ></div>
+            </div>
+            <div class="progress-stats">
+              <span>{currentXP.toLocaleString()} XP</span>
+              {currentLevel < 3 ? (
+                <span>{(levelConfig[currentLevel]?.min_xp || 5000) - currentXP} XP to next level</span>
+              ) : (
+                <span>Max level reached! 🎉</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+
+    <!-- Pricing -->
+    <section class="pricing">
+      <div class="container">
+        <div class="section-header">
+          <h2>Simple Pricing</h2>
+          <p>One plan. All benefits. Cancel anytime.</p>
+        </div>
+
+        <div class="pricing-cards">
+          <div class="pricing-card free">
+            <div class="plan-header">
+              <h3>Free</h3>
+              <div class="price">
+                <span class="amount">$0</span>
+                <span class="period">/month</span>
+              </div>
+            </div>
+            <ul class="features">
+              <li>✓ Apply to campaigns</li>
+              <li>✓ Community access</li>
+              <li>✓ Basic profile</li>
+              <li>✗ Priority support</li>
+              <li>✗ Campaign boosts</li>
+              <li>✗ Double XP</li>
+              <li class="highlight">Up to 25% platform fee</li>
+            </ul>
+            {!session && (
+              <a href="/signup" class="btn btn-secondary">Get Started</a>
+            )}
+          </div>
+
+          <div class="pricing-card premium">
+            <div class="popular-badge">Most Popular</div>
+            <div class="plan-header">
+              <h3>Premium</h3>
+              <div class="price">
+                <span class="amount">$19</span>
+                <span class="period">/month</span>
+              </div>
+              <p class="yearly-note">or $190/year (save $38)</p>
+            </div>
+            <ul class="features">
+              <li>✓ Everything in Free</li>
+              <li>✓ Priority support (2hr response)</li>
+              <li>✓ 1 campaign boost/month</li>
+              <li>✓ Double XP on all activities</li>
+              <li>✓ Premium profile badge</li>
+              <li>✓ Early campaign access</li>
+              <li class="highlight">Only 10% platform fee</li>
+            </ul>
+            {!session ? (
+              <a href="/signup?plan=premium" class="btn btn-primary btn-lg">Start Free Trial</a>
+            ) : isPremium ? (
+              <span class="current-plan">Your Current Plan</span>
+            ) : (
+              <a href="/dashboard/premium" class="btn btn-primary btn-lg">Upgrade Now</a>
+            )}
+          </div>
+        </div>
+
+        <p class="guarantee">✓ 7-day free trial • ✓ Cancel anytime • ✓ Money-back guarantee</p>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="faq">
+      <div class="container">
+        <div class="section-header">
+          <h2>Frequently Asked Questions</h2>
+        </div>
+
+        <div class="faq-grid">
+          <div class="faq-item">
+            <h4>What happens to my level if I cancel Premium?</h4>
+            <p>Your XP and level stay the same! You'll just pay the standard fee rate for your level instead of the flat 10%.</p>
+          </div>
+          <div class="faq-item">
+            <h4>How does the campaign boost work?</h4>
+            <p>Once per month, you can boost any campaign you're participating in. It gets featured on the homepage for 7 days with a "Featured" badge.</p>
+          </div>
+          <div class="faq-item">
+            <h4>When do I get charged?</h4>
+            <p>After your 7-day free trial ends. You can cancel anytime before then and won't be charged.</p>
+          </div>
+          <div class="faq-item">
+            <h4>Can I switch between monthly and yearly?</h4>
+            <p>Yes! You can switch plans anytime from your dashboard. Yearly saves you 2 months.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta">
+      <div class="container">
+        <h2>Ready to Earn More?</h2>
+        <p>Join thousands of premium creators maximizing their earnings.</p>
+        {!session ? (
+          <a href="/signup?plan=premium" class="btn btn-primary btn-lg">Start Your Free Trial</a>
+        ) : !isPremium ? (
+          <a href="/dashboard/premium" class="btn btn-primary btn-lg">Upgrade to Premium</a>
+        ) : (
+          <a href="/dashboard" class="btn btn-primary btn-lg">Go to Dashboard</a>
+        )}
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .premium-page {
+      --premium-gold: #f59e0b;
+      --premium-gold-light: #fef3c7;
+    }
+
+    /* Hero */
+    .hero {
+      padding: 6rem 2rem 4rem;
+      text-align: center;
+      background: linear-gradient(135deg, #1a1a2e 0%, #2d1f4e 50%, #1a1a2e 100%);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23f59e0b' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+      opacity: 0.5;
+    }
+
+    .hero-content {
+      max-width: 700px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: white;
+      padding: 0.5rem 1.5rem;
+      border-radius: 100px;
+      font-size: 0.875rem;
+      font-weight: 700;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+    }
+
+    .hero h1 {
+      font-size: 3rem;
+      color: white;
+      margin-bottom: 1rem;
+      line-height: 1.2;
+    }
+
+    .hero p {
+      font-size: 1.25rem;
+      color: rgba(255,255,255,0.8);
+      margin-bottom: 2rem;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .premium-status {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .status-badge.active {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      padding: 0.75rem 1.5rem;
+      border-radius: 100px;
+      font-weight: 600;
+    }
+
+    .btn {
+      padding: 0.875rem 2rem;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-lg {
+      padding: 1rem 2.5rem;
+      font-size: 1.125rem;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4);
+    }
+
+    .btn-secondary {
+      background: rgba(255,255,255,0.1);
+      color: white;
+      border: 2px solid rgba(255,255,255,0.3);
+    }
+
+    /* Benefits */
+    .benefits {
+      padding: 5rem 2rem;
+      background: #f8fafc;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .section-header h2 {
+      font-size: 2rem;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+
+    .section-header p {
+      color: #6b7280;
+      font-size: 1.125rem;
+    }
+
+    .benefits-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+
+    .benefit-card {
+      background: white;
+      border-radius: 16px;
+      padding: 2rem;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      transition: all 0.3s;
+    }
+
+    .benefit-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 24px rgba(0,0,0,0.1);
+    }
+
+    .benefit-card.featured {
+      border: 2px solid var(--premium-gold);
+      background: linear-gradient(180deg, var(--premium-gold-light) 0%, white 30%);
+    }
+
+    .benefit-icon {
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .benefit-card h3 {
+      font-size: 1.125rem;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+
+    .benefit-card p {
+      color: #6b7280;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    .benefit-detail {
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .savings, .perk {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: #059669;
+    }
+
+    /* Levels */
+    .levels {
+      padding: 5rem 2rem;
+      background: white;
+    }
+
+    .levels-comparison {
+      background: #f8fafc;
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 2rem;
+    }
+
+    .comparison-header {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr;
+      gap: 1rem;
+      padding: 1rem 1.5rem;
+      background: #1a1a2e;
+      color: white;
+      font-weight: 600;
+      font-size: 0.875rem;
+    }
+
+    .level-row {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr;
+      gap: 1rem;
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+      align-items: center;
+    }
+
+    .level-row.current {
+      background: var(--premium-gold-light);
+    }
+
+    .col-level {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .level-badge {
+      font-size: 1.25rem;
+    }
+
+    .level-name {
+      font-weight: 600;
+      color: #1a1a2e;
+    }
+
+    .you-badge {
+      background: var(--premium-gold);
+      color: white;
+      padding: 0.125rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.6875rem;
+      font-weight: 700;
+    }
+
+    .col-xp {
+      color: #6b7280;
+    }
+
+    .fee {
+      display: inline-block;
+      padding: 0.375rem 0.75rem;
+      border-radius: 6px;
+      font-weight: 700;
+    }
+
+    .fee.base {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .fee.premium {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .col-premium {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .savings-tag {
+      background: #059669;
+      color: white;
+      padding: 0.125rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+    }
+
+    .level-example {
+      background: #f8fafc;
+      border-radius: 12px;
+      padding: 1.5rem;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .level-example h4 {
+      margin-bottom: 0.5rem;
+      color: #1a1a2e;
+    }
+
+    .level-example > p {
+      color: #6b7280;
+      margin-bottom: 1rem;
+    }
+
+    .example-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    .example-item {
+      background: white;
+      padding: 1rem;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .example-item.premium {
+      background: linear-gradient(135deg, var(--premium-gold-light), #fef9c3);
+      border: 2px solid var(--premium-gold);
+    }
+
+    .example-item .label {
+      display: block;
+      font-size: 0.75rem;
+      color: #6b7280;
+      margin-bottom: 0.5rem;
+    }
+
+    .example-item .fee {
+      display: block;
+      color: #991b1b;
+      font-size: 0.875rem;
+    }
+
+    .example-item .payout {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .example-item .extra {
+      display: block;
+      color: #059669;
+      font-weight: 600;
+      font-size: 0.875rem;
+      margin-top: 0.25rem;
+    }
+
+    /* XP Section */
+    .xp-section {
+      padding: 5rem 2rem;
+      background: #f8fafc;
+    }
+
+    .xp-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.5rem;
+    }
+
+    .xp-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .xp-amount {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--premium-gold);
+      margin-bottom: 0.5rem;
+    }
+
+    .xp-card h4 {
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+
+    .xp-card p {
+      color: #6b7280;
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .premium-bonus {
+      font-size: 0.75rem;
+      color: #059669;
+      font-weight: 600;
+    }
+
+    .your-progress {
+      max-width: 500px;
+      margin: 2rem auto 0;
+      background: white;
+      padding: 1.5rem;
+      border-radius: 12px;
+    }
+
+    .your-progress h4 {
+      margin-bottom: 1rem;
+      color: #1a1a2e;
+    }
+
+    .progress-bar {
+      height: 12px;
+      background: #e5e7eb;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--premium-gold), #fbbf24);
+      border-radius: 6px;
+      transition: width 0.5s;
+    }
+
+    .progress-stats {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 0.5rem;
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+
+    /* Pricing */
+    .pricing {
+      padding: 5rem 2rem;
+      background: linear-gradient(135deg, #1a1a2e, #2d1f4e);
+    }
+
+    .pricing .section-header h2,
+    .pricing .section-header p {
+      color: white;
+    }
+
+    .pricing .section-header p {
+      opacity: 0.8;
+    }
+
+    .pricing-cards {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 2rem;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .pricing-card {
+      background: white;
+      border-radius: 16px;
+      padding: 2rem;
+      position: relative;
+    }
+
+    .pricing-card.premium {
+      border: 3px solid var(--premium-gold);
+      transform: scale(1.05);
+    }
+
+    .popular-badge {
+      position: absolute;
+      top: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: white;
+      padding: 0.375rem 1rem;
+      border-radius: 100px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
+    .plan-header {
+      text-align: center;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+      margin-bottom: 1.5rem;
+    }
+
+    .plan-header h3 {
+      font-size: 1.25rem;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+
+    .price {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 0.25rem;
+    }
+
+    .price .amount {
+      font-size: 3rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .price .period {
+      color: #6b7280;
+    }
+
+    .yearly-note {
+      font-size: 0.8125rem;
+      color: #059669;
+      margin-top: 0.5rem;
+    }
+
+    .pricing-card .features {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 1.5rem;
+    }
+
+    .pricing-card .features li {
+      padding: 0.5rem 0;
+      color: #4b5563;
+      font-size: 0.9375rem;
+    }
+
+    .pricing-card .features li.highlight {
+      font-weight: 600;
+      color: #1a1a2e;
+      margin-top: 0.5rem;
+    }
+
+    .pricing-card .btn {
+      width: 100%;
+      text-align: center;
+    }
+
+    .current-plan {
+      display: block;
+      text-align: center;
+      color: #059669;
+      font-weight: 600;
+      padding: 1rem;
+    }
+
+    .guarantee {
+      text-align: center;
+      color: rgba(255,255,255,0.7);
+      margin-top: 2rem;
+      font-size: 0.875rem;
+    }
+
+    /* FAQ */
+    .faq {
+      padding: 5rem 2rem;
+      background: white;
+    }
+
+    .faq-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .faq-item h4 {
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+
+    .faq-item p {
+      color: #6b7280;
+      line-height: 1.6;
+    }
+
+    /* CTA */
+    .cta {
+      padding: 5rem 2rem;
+      background: linear-gradient(135deg, var(--premium-gold-light), #fef9c3);
+      text-align: center;
+    }
+
+    .cta h2 {
+      font-size: 2rem;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+
+    .cta p {
+      color: #6b7280;
+      margin-bottom: 2rem;
+    }
+
+    .cta .btn-primary {
+      background: #1a1a2e;
+    }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .benefits-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .xp-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 768px) {
+      .hero h1 {
+        font-size: 2rem;
+      }
+
+      .benefits-grid,
+      .xp-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .comparison-header,
+      .level-row {
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+      }
+
+      .comparison-header .col-level,
+      .comparison-header .col-xp {
+        display: none;
+      }
+
+      .col-level {
+        grid-column: 1 / -1;
+      }
+
+      .pricing-cards {
+        grid-template-columns: 1fr;
+      }
+
+      .pricing-card.premium {
+        transform: none;
+      }
+
+      .faq-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .example-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</Layout>
