@@ -1,0 +1,655 @@
+---
+// src/pages/admin/content.astro
+export const prerender = false;
+
+import AdminLayout from "../../layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+let successMessage = '';
+let errorMessage = '';
+
+// Handle form submission
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const pageKey = form.get('page_key') as string;
+  const contentJson = form.get('content') as string;
+
+  try {
+    const content = JSON.parse(contentJson);
+    
+    const { error } = await supabase
+      .from('page_content')
+      .update({ 
+        content, 
+        updated_at: new Date().toISOString(),
+      })
+      .eq('page_key', pageKey);
+
+    if (error) throw error;
+    successMessage = `${pageKey} page content updated successfully!`;
+  } catch (e: any) {
+    errorMessage = e.message || 'Failed to save content';
+  }
+}
+
+// Fetch all page content
+const { data: pages, error: loadError } = await supabase
+  .from('page_content')
+  .select('*')
+  .order('page_key');
+
+if (loadError) {
+  errorMessage = loadError.message;
+}
+
+const allPages = pages || [];
+const activeTab = Astro.url.searchParams.get('page') || allPages[0]?.page_key || 'home';
+const activePage = allPages.find(p => p.page_key === activeTab);
+
+// Define editable fields for each page type
+const pageSchemas: Record<string, any> = {
+  home: {
+    sections: [
+      { key: 'hero', title: 'Hero Section', fields: [
+        { name: 'badge', label: 'Badge Text', type: 'text' },
+        { name: 'title', label: 'Title', type: 'text' },
+        { name: 'subtitle', label: 'Subtitle', type: 'textarea' },
+        { name: 'cta_primary.text', label: 'Primary Button Text', type: 'text' },
+        { name: 'cta_primary.link', label: 'Primary Button Link', type: 'text' },
+        { name: 'cta_secondary.text', label: 'Secondary Button Text', type: 'text' },
+        { name: 'cta_secondary.link', label: 'Secondary Button Link', type: 'text' },
+      ]},
+      { key: 'stats', title: 'Statistics', fields: [
+        { name: 'creators', label: 'Creators Count', type: 'text' },
+        { name: 'campaigns', label: 'Campaigns Count', type: 'text' },
+        { name: 'paid_out', label: 'Amount Paid Out', type: 'text' },
+      ]},
+      { key: 'cta_section', title: 'CTA Section', fields: [
+        { name: 'title', label: 'Title', type: 'text' },
+        { name: 'subtitle', label: 'Subtitle', type: 'text' },
+        { name: 'button_text', label: 'Button Text', type: 'text' },
+        { name: 'button_link', label: 'Button Link', type: 'text' },
+      ]},
+    ]
+  },
+  about: {
+    sections: [
+      { key: 'hero', title: 'Hero Section', fields: [
+        { name: 'badge', label: 'Badge Text', type: 'text' },
+        { name: 'title', label: 'Title', type: 'text' },
+        { name: 'subtitle', label: 'Subtitle', type: 'textarea' },
+      ]},
+      { key: 'mission', title: 'Mission Section', fields: [
+        { name: 'title', label: 'Title', type: 'text' },
+        { name: 'content', label: 'Content', type: 'textarea' },
+      ]},
+    ]
+  },
+  creators: {
+    sections: [
+      { key: 'hero', title: 'Hero Section', fields: [
+        { name: 'badge', label: 'Badge Text', type: 'text' },
+        { name: 'title', label: 'Title', type: 'text' },
+        { name: 'subtitle', label: 'Subtitle', type: 'textarea' },
+      ]},
+    ]
+  },
+  contact: {
+    sections: [
+      { key: 'hero', title: 'Hero Section', fields: [
+        { name: 'badge', label: 'Badge Text', type: 'text' },
+        { name: 'title', label: 'Title', type: 'text' },
+        { name: 'subtitle', label: 'Subtitle', type: 'textarea' },
+      ]},
+      { key: 'info', title: 'Contact Information', fields: [
+        { name: 'email', label: 'General Email', type: 'text' },
+        { name: 'support_email', label: 'Support Email', type: 'text' },
+        { name: 'partnerships_email', label: 'Partnerships Email', type: 'text' },
+      ]},
+    ]
+  },
+  legal: {
+    sections: [
+      { key: '', title: 'Legal Information', fields: [
+        { name: 'last_updated', label: 'Last Updated Date', type: 'text' },
+        { name: 'company_name', label: 'Company Name', type: 'text' },
+        { name: 'privacy_email', label: 'Privacy Email', type: 'text' },
+        { name: 'legal_email', label: 'Legal Email', type: 'text' },
+      ]},
+    ]
+  },
+};
+
+// Helper to get nested value
+function getNestedValue(obj: any, path: string): any {
+  if (!path) return obj;
+  return path.split('.').reduce((o, k) => o?.[k], obj);
+}
+---
+
+<AdminLayout title="Content Editor">
+  {successMessage && <div class="alert success">{successMessage}</div>}
+  {errorMessage && <div class="alert error">{errorMessage}</div>}
+
+  <div class="content-editor">
+    <div class="editor-header">
+      <div>
+        <h1>📝 Content Editor</h1>
+        <p class="subtitle">Edit website content without touching code</p>
+      </div>
+    </div>
+
+    <!-- Page Tabs -->
+    <div class="page-tabs">
+      {allPages.map(page => (
+        <a 
+          href={`?page=${page.page_key}`} 
+          class={`tab ${page.page_key === activeTab ? 'active' : ''}`}
+        >
+          {page.page_key === 'home' && '🏠'}
+          {page.page_key === 'about' && 'ℹ️'}
+          {page.page_key === 'creators' && '🎨'}
+          {page.page_key === 'contact' && '📧'}
+          {page.page_key === 'legal' && '📜'}
+          {page.page_key.charAt(0).toUpperCase() + page.page_key.slice(1)}
+        </a>
+      ))}
+    </div>
+
+    {activePage ? (
+      <div class="editor-content">
+        <form method="POST" id="content-form">
+          <input type="hidden" name="page_key" value={activePage.page_key} />
+          <input type="hidden" name="content" id="content-json" value={JSON.stringify(activePage.content)} />
+
+          <!-- Visual Editor -->
+          <div class="visual-editor">
+            {pageSchemas[activePage.page_key]?.sections?.map((section: any) => (
+              <div class="section-card">
+                <h3>{section.title}</h3>
+                <div class="fields-grid">
+                  {section.fields.map((field: any) => {
+                    const fullPath = section.key ? `${section.key}.${field.name}` : field.name;
+                    const value = getNestedValue(activePage.content, fullPath) || '';
+                    return (
+                      <div class={`field-group ${field.type === 'textarea' ? 'full-width' : ''}`}>
+                        <label for={fullPath}>{field.label}</label>
+                        {field.type === 'textarea' ? (
+                          <textarea 
+                            id={fullPath}
+                            data-path={fullPath}
+                            class="content-field"
+                            rows="3"
+                          >{value}</textarea>
+                        ) : (
+                          <input 
+                            type="text" 
+                            id={fullPath}
+                            data-path={fullPath}
+                            class="content-field"
+                            value={value}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            {/* Array editors for features, values, etc. */}
+            {activePage.content.features && (
+              <div class="section-card">
+                <h3>Features ({activePage.content.features.length})</h3>
+                <div class="array-items" data-array-path="features">
+                  {activePage.content.features.map((item: any, idx: number) => (
+                    <div class="array-item" data-index={idx}>
+                      <div class="item-header">
+                        <span class="item-icon">{item.icon}</span>
+                        <input type="text" class="content-field" data-path={`features.${idx}.icon`} value={item.icon} placeholder="Icon" style="width:60px" />
+                      </div>
+                      <input type="text" class="content-field" data-path={`features.${idx}.title`} value={item.title} placeholder="Title" />
+                      <textarea class="content-field" data-path={`features.${idx}.description`} rows="2" placeholder="Description">{item.description}</textarea>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activePage.content.values && (
+              <div class="section-card">
+                <h3>Values ({activePage.content.values.length})</h3>
+                <div class="array-items" data-array-path="values">
+                  {activePage.content.values.map((item: any, idx: number) => (
+                    <div class="array-item" data-index={idx}>
+                      <div class="item-header">
+                        <span class="item-icon">{item.icon}</span>
+                        <input type="text" class="content-field" data-path={`values.${idx}.icon`} value={item.icon} placeholder="Icon" style="width:60px" />
+                      </div>
+                      <input type="text" class="content-field" data-path={`values.${idx}.title`} value={item.title} placeholder="Title" />
+                      <textarea class="content-field" data-path={`values.${idx}.description`} rows="2" placeholder="Description">{item.description}</textarea>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activePage.content.faq && (
+              <div class="section-card">
+                <h3>FAQ ({activePage.content.faq.length})</h3>
+                <div class="array-items" data-array-path="faq">
+                  {activePage.content.faq.map((item: any, idx: number) => (
+                    <div class="array-item" data-index={idx}>
+                      <input type="text" class="content-field" data-path={`faq.${idx}.q`} value={item.q} placeholder="Question" />
+                      <textarea class="content-field" data-path={`faq.${idx}.a`} rows="2" placeholder="Answer">{item.a}</textarea>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activePage.content.how_it_works && (
+              <div class="section-card">
+                <h3>How It Works ({activePage.content.how_it_works.length} steps)</h3>
+                <div class="array-items steps" data-array-path="how_it_works">
+                  {activePage.content.how_it_works.map((item: any, idx: number) => (
+                    <div class="array-item step-item" data-index={idx}>
+                      <div class="step-number">{item.step}</div>
+                      <input type="text" class="content-field" data-path={`how_it_works.${idx}.title`} value={item.title} placeholder="Title" />
+                      <input type="text" class="content-field" data-path={`how_it_works.${idx}.description`} value={item.description} placeholder="Description" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <!-- JSON Editor Toggle -->
+          <details class="json-editor">
+            <summary>🔧 Advanced: Edit Raw JSON</summary>
+            <textarea id="raw-json" rows="20">{JSON.stringify(activePage.content, null, 2)}</textarea>
+            <button type="button" class="btn btn-secondary" id="apply-json">Apply JSON</button>
+          </details>
+
+          <div class="editor-actions">
+            <button type="submit" class="btn btn-primary">💾 Save Changes</button>
+            <a href={`/${activePage.page_key === 'home' ? '' : activePage.page_key}`} target="_blank" class="btn btn-secondary">
+              👁️ Preview Page
+            </a>
+            <span class="last-updated">
+              Last updated: {new Date(activePage.updated_at).toLocaleString()}
+            </span>
+          </div>
+        </form>
+      </div>
+    ) : (
+      <div class="empty-state">
+        <span>📄</span>
+        <h3>No Content Found</h3>
+        <p>Run the page-content-schema.sql migration to set up editable content.</p>
+      </div>
+    )}
+  </div>
+
+  <script is:inline>
+    // Build content object from form fields
+    function buildContentObject() {
+      const jsonInput = document.getElementById('content-json');
+      let content = JSON.parse(jsonInput.value);
+      
+      document.querySelectorAll('.content-field').forEach(field => {
+        const path = field.getAttribute('data-path');
+        if (path) {
+          setNestedValue(content, path, field.value);
+        }
+      });
+      
+      return content;
+    }
+    
+    function setNestedValue(obj, path, value) {
+      const keys = path.split('.');
+      let current = obj;
+      
+      for (let i = 0; i < keys.length - 1; i++) {
+        const key = isNaN(keys[i]) ? keys[i] : parseInt(keys[i]);
+        if (!current[key]) {
+          current[key] = isNaN(keys[i + 1]) ? {} : [];
+        }
+        current = current[key];
+      }
+      
+      const lastKey = isNaN(keys[keys.length - 1]) ? keys[keys.length - 1] : parseInt(keys[keys.length - 1]);
+      current[lastKey] = value;
+    }
+    
+    // Update hidden JSON field before submit
+    document.getElementById('content-form')?.addEventListener('submit', function(e) {
+      const content = buildContentObject();
+      document.getElementById('content-json').value = JSON.stringify(content);
+    });
+    
+    // Apply raw JSON
+    document.getElementById('apply-json')?.addEventListener('click', function() {
+      try {
+        const json = document.getElementById('raw-json').value;
+        const content = JSON.parse(json);
+        document.getElementById('content-json').value = JSON.stringify(content);
+        location.reload();
+      } catch (e) {
+        alert('Invalid JSON: ' + e.message);
+      }
+    });
+    
+    // Sync visual editor to raw JSON
+    document.querySelectorAll('.content-field').forEach(field => {
+      field.addEventListener('input', function() {
+        const content = buildContentObject();
+        document.getElementById('raw-json').value = JSON.stringify(content, null, 2);
+      });
+    });
+  </script>
+
+  <style>
+    .content-editor {
+      max-width: 1000px;
+    }
+
+    .editor-header {
+      margin-bottom: 1.5rem;
+    }
+
+    .editor-header h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+
+    .subtitle {
+      color: #6b7280;
+      font-size: 0.9375rem;
+    }
+
+    .page-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+      background: white;
+      padding: 0.5rem;
+      border-radius: 12px;
+      flex-wrap: wrap;
+    }
+
+    .tab {
+      padding: 0.625rem 1.25rem;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #6b7280;
+      font-weight: 500;
+      font-size: 0.9375rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+
+    .tab:hover {
+      background: #f3f4f6;
+      color: #1a1a2e;
+    }
+
+    .tab.active {
+      background: #2563eb;
+      color: white;
+    }
+
+    .editor-content {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+    }
+
+    .visual-editor {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .section-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+
+    .section-card h3 {
+      font-size: 1rem;
+      color: #374151;
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .fields-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1rem;
+    }
+
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.375rem;
+    }
+
+    .field-group.full-width {
+      grid-column: 1 / -1;
+    }
+
+    .field-group label {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: #4b5563;
+    }
+
+    .field-group input,
+    .field-group textarea {
+      padding: 0.625rem 0.875rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 0.9375rem;
+      transition: border-color 0.2s;
+    }
+
+    .field-group input:focus,
+    .field-group textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+
+    .array-items {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1rem;
+    }
+
+    .array-items.steps {
+      grid-template-columns: 1fr;
+    }
+
+    .array-item {
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .item-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .item-icon {
+      font-size: 1.5rem;
+    }
+
+    .step-item {
+      flex-direction: row;
+      align-items: center;
+    }
+
+    .step-number {
+      width: 36px;
+      height: 36px;
+      background: #2563eb;
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .step-item input {
+      flex: 1;
+    }
+
+    .json-editor {
+      margin-top: 1.5rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 1rem;
+    }
+
+    .json-editor summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: #6b7280;
+    }
+
+    .json-editor textarea {
+      width: 100%;
+      margin-top: 1rem;
+      font-family: monospace;
+      font-size: 0.8125rem;
+      padding: 1rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      background: #1a1a2e;
+      color: #10b981;
+    }
+
+    .json-editor .btn {
+      margin-top: 0.75rem;
+    }
+
+    .editor-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 1.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid #e5e7eb;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.9375rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .last-updated {
+      margin-left: auto;
+      font-size: 0.8125rem;
+      color: #9ca3af;
+    }
+
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+
+    .alert.success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .alert.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      background: white;
+      border-radius: 12px;
+    }
+
+    .empty-state span {
+      font-size: 3rem;
+      display: block;
+      margin-bottom: 1rem;
+    }
+
+    @media (max-width: 768px) {
+      .fields-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .step-item {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .editor-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .last-updated {
+        margin-left: 0;
+        text-align: center;
+      }
+    }
+  </style>
+</AdminLayout>
