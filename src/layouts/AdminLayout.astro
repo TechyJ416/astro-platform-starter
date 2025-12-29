@@ -52,6 +52,27 @@ const { count: pendingSubmissions } = await supabase
   .select('*', { count: 'exact', head: true })
   .eq('status', 'pending');
 
+// Count premium support tickets
+let premiumTickets = 0;
+try {
+  const { count } = await supabase
+    .from('support_tickets')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'open')
+    .eq('is_premium_ticket', true);
+  premiumTickets = count || 0;
+} catch (e) { /* table may not exist */ }
+
+// Count total premium members
+let premiumCount = 0;
+try {
+  const { count } = await supabase
+    .from('profiles')
+    .select('*', { count: 'exact', head: true })
+    .eq('is_premium', true);
+  premiumCount = count || 0;
+} catch (e) { /* column may not exist */ }
+
 // Navigation items
 const navItems = [
   { href: '/admin', icon: '📊', label: 'Dashboard', exact: true },
@@ -62,6 +83,8 @@ const navItems = [
   { href: '/admin/communities', icon: '💬', label: 'Communities' },
   { href: '/admin/review', icon: '✅', label: 'Review Queue', badge: pendingReviewCount || 0, badgeType: 'danger' },
   { href: '/admin/messages', icon: '📬', label: 'Messages', badge: unreadMessages || 0, badgeType: 'info' },
+  { href: '/admin/support', icon: '🎫', label: 'Support', badge: premiumTickets, badgeType: 'premium' },
+  { href: '/admin/premium', icon: '⭐', label: 'Premium', badge: premiumCount, badgeType: 'premium' },
 ];
 
 const settingsItems = [
@@ -381,6 +404,7 @@ function isActive(href: string, exact = false) {
     .nav-badge.danger { background: #ef4444; color: white; }
     .nav-badge.info { background: #3b82f6; color: white; }
     .nav-badge.success { background: #10b981; color: white; }
+    .nav-badge.premium { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
 
     .sidebar-footer {
       padding: 1rem 0;
