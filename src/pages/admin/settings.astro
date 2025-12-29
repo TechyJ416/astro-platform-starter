@@ -3,7 +3,7 @@
 export const prerender = false;
 
 import AdminLayout from "../../layouts/AdminLayout.astro";
-import { supabase } from "../../lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 
 // Auth check
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
@@ -12,6 +12,20 @@ const session = Astro.locals.session;
 if (!isMasterKeySession && !session) {
   return Astro.redirect('/admin/login');
 }
+
+// Create admin client with service role
+const supabaseUrl = import.meta.env.SUPABASE_URL;
+const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_KEY;
+const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+
+// Check if service key is available
+const hasServiceKey = !!supabaseServiceKey;
+
+const supabase = createClient(
+  supabaseUrl,
+  supabaseServiceKey || supabaseAnonKey,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
 
 // Defaults
 const defaults = {
@@ -41,8 +55,16 @@ const defaults = {
 let successMessage = '';
 let errorMessage = '';
 
+// Warn if service key is missing
+if (!hasServiceKey) {
+  errorMessage = 'Warning: SUPABASE_SERVICE_KEY not set. Settings may not save correctly due to RLS policies.';
+}
+
 // Handle POST
 if (Astro.request.method === 'POST') {
+  // Clear warning on POST attempt
+  errorMessage = '';
+  
   const form = await Astro.request.formData();
   const action = form.get('action') as string;
 
@@ -61,7 +83,7 @@ if (Astro.request.method === 'POST') {
       .from('site_settings')
       .upsert({ key: 'general', value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
 
-    if (error) errorMessage = error.message;
+    if (error) errorMessage = `${error.message}. ${!hasServiceKey ? 'Hint: SUPABASE_SERVICE_KEY is not set - add it to your .env file.' : 'Try running fix-site-settings-complete.sql in Supabase.'}`;
     else successMessage = 'General settings saved!';
   }
 
