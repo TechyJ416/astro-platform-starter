@@ -44,6 +44,12 @@ export const onRequest = defineMiddleware(async (context, next) => {
     path === '/logout' ||
     path === '/maintenance' ||
     path === '/unauthorized' ||
+    path === '/legal' ||
+    path === '/about' ||
+    path === '/contact' ||
+    path === '/creators' ||
+    path === '/privacy' ||
+    path === '/terms' ||
     path === '/'
   ) {
     locals.session = null;
