@@ -1,0 +1,912 @@
+---
+// src/pages/forum/topic/[id].astro
+export const prerender = false;
+
+import Layout from "../../../layouts/Layout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const { id } = Astro.params;
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+const user = session?.user;
+
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+let actionMessage = '';
+let actionError = '';
+
+// Handle actions
+if (Astro.request.method === 'POST' && user) {
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+
+  if (action === 'reply') {
+    const content = form.get('content') as string;
+    const parentReplyId = form.get('parent_reply_id') as string || null;
+
+    if (content) {
+      const { error } = await supabase
+        .from('forum_replies')
+        .insert({
+          topic_id: id,
+          user_id: user.id,
+          content,
+          parent_reply_id: parentReplyId || null
+        });
+
+      if (error) {
+        actionError = error.message;
+      } else {
+        actionMessage = 'Reply posted!';
+      }
+    }
+  }
+
+  if (action === 'like_topic') {
+    const { data: existing } = await supabase
+      .from('forum_likes')
+      .select('id')
+      .eq('topic_id', id)
+      .eq('user_id', user.id)
+      .single();
+
+    if (existing) {
+      await supabase.from('forum_likes').delete().eq('id', existing.id);
+    } else {
+      await supabase.from('forum_likes').insert({ topic_id: id, user_id: user.id });
+    }
+  }
+
+  if (action === 'like_reply') {
+    const replyId = form.get('reply_id') as string;
+    const { data: existing } = await supabase
+      .from('forum_likes')
+      .select('id')
+      .eq('reply_id', replyId)
+      .eq('user_id', user.id)
+      .single();
+
+    if (existing) {
+      await supabase.from('forum_likes').delete().eq('id', existing.id);
+    } else {
+      await supabase.from('forum_likes').insert({ reply_id: replyId, user_id: user.id });
+    }
+  }
+
+  if (action === 'delete_topic' && (profile?.role === 'admin' || profile?.role === 'moderator')) {
+    await supabase.from('forum_topics').delete().eq('id', id);
+    return Astro.redirect('/forum');
+  }
+
+  if (action === 'delete_reply') {
+    const replyId = form.get('reply_id') as string;
+    await supabase.from('forum_replies').delete().eq('id', replyId);
+    actionMessage = 'Reply deleted';
+  }
+
+  if (action === 'toggle_pin' && (profile?.role === 'admin' || profile?.role === 'moderator')) {
+    const { data: topic } = await supabase.from('forum_topics').select('is_pinned').eq('id', id).single();
+    await supabase.from('forum_topics').update({ is_pinned: !topic?.is_pinned }).eq('id', id);
+  }
+
+  if (action === 'toggle_lock' && (profile?.role === 'admin' || profile?.role === 'moderator')) {
+    const { data: topic } = await supabase.from('forum_topics').select('is_locked').eq('id', id).single();
+    await supabase.from('forum_topics').update({ is_locked: !topic?.is_locked }).eq('id', id);
+  }
+}
+
+// Increment view count
+await supabase.rpc('increment_topic_views', { p_topic_id: id }).catch(() => {
+  // Function might not exist yet
+  supabase.from('forum_topics').update({ view_count: supabase.raw('view_count + 1') }).eq('id', id);
+});
+
+// Fetch topic
+const { data: topic, error: topicError } = await supabase
+  .from('forum_topics')
+  .select(`
+    *,
+    author:profiles!forum_topics_user_id_fkey(id, full_name, email, avatar_url, role, is_premium, creator_level, created_at),
+    community:communities(id, name, slug, icon)
+  `)
+  .eq('id', id)
+  .single();
+
+if (topicError || !topic) {
+  return Astro.redirect('/forum');
+}
+
+// Fetch replies
+const { data: replies } = await supabase
+  .from('forum_replies')
+  .select(`
+    *,
+    author:profiles!forum_replies_user_id_fkey(id, full_name, email, avatar_url, role, is_premium, creator_level)
+  `)
+  .eq('topic_id', id)
+  .order('created_at', { ascending: true });
+
+// Fetch likes
+const { count: topicLikes } = await supabase
+  .from('forum_likes')
+  .select('*', { count: 'exact', head: true })
+  .eq('topic_id', id);
+
+const { data: userTopicLike } = user ? await supabase
+  .from('forum_likes')
+  .select('id')
+  .eq('topic_id', id)
+  .eq('user_id', user.id)
+  .single() : { data: null };
+
+// Get reply likes
+const replyLikeCounts: Record<string, number> = {};
+const userReplyLikes: Record<string, boolean> = {};
+
+if (replies) {
+  for (const reply of replies) {
+    const { count } = await supabase
+      .from('forum_likes')
+      .select('*', { count: 'exact', head: true })
+      .eq('reply_id', reply.id);
+    replyLikeCounts[reply.id] = count || 0;
+
+    if (user) {
+      const { data: liked } = await supabase
+        .from('forum_likes')
+        .select('id')
+        .eq('reply_id', reply.id)
+        .eq('user_id', user.id)
+        .single();
+      userReplyLikes[reply.id] = !!liked;
+    }
+  }
+}
+
+const isAdmin = profile?.role === 'admin' || profile?.role === 'moderator';
+const isAuthor = user?.id === topic.author?.id;
+
+function timeAgo(date: string) {
+  const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+  return new Date(date).toLocaleDateString();
+}
+
+function formatDate(date: string) {
+  return new Date(date).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+---
+
+<Layout title={topic.title}>
+  <div class="topic-page">
+    <!-- Breadcrumb -->
+    <div class="breadcrumb container">
+      <a href="/forum">💬 Forum</a>
+      <span>/</span>
+      <a href={`/forum?category=${topic.community?.slug}`}>{topic.community?.icon} {topic.community?.name}</a>
+      <span>/</span>
+      <span class="current">{topic.title.substring(0, 50)}{topic.title.length > 50 ? '...' : ''}</span>
+    </div>
+
+    {actionMessage && <div class="alert success container">{actionMessage}</div>}
+    {actionError && <div class="alert error container">{actionError}</div>}
+
+    <div class="topic-container container">
+      <!-- Topic -->
+      <article class="topic-main">
+        <div class="topic-header">
+          <div class="topic-badges">
+            {topic.is_pinned && <span class="badge pinned">📌 Pinned</span>}
+            {topic.is_announcement && <span class="badge announcement">📢 Announcement</span>}
+            {topic.is_locked && <span class="badge locked">🔒 Locked</span>}
+          </div>
+          <h1>{topic.title}</h1>
+          <div class="topic-meta">
+            <span>Posted {formatDate(topic.created_at)}</span>
+            <span>•</span>
+            <span>{topic.view_count || 0} views</span>
+            <span>•</span>
+            <span>{topic.reply_count || 0} replies</span>
+          </div>
+        </div>
+
+        <div class="post-card original">
+          <aside class="post-author">
+            <div class="author-avatar">
+              {topic.author?.avatar_url ? (
+                <img src={topic.author.avatar_url} alt="" />
+              ) : (
+                <span>{(topic.author?.full_name || topic.author?.email || '?').charAt(0).toUpperCase()}</span>
+              )}
+            </div>
+            <div class="author-name">
+              {topic.author?.full_name || topic.author?.email}
+              {topic.author?.is_premium && <span class="premium-badge">⭐</span>}
+            </div>
+            <div class="author-badges">
+              {topic.author?.role === 'admin' && <span class="role-badge admin">Admin</span>}
+              {topic.author?.role === 'moderator' && <span class="role-badge mod">Moderator</span>}
+              {topic.author?.role === 'creator' && (
+                <span class="level-badge">Level {topic.author.creator_level || 1}</span>
+              )}
+            </div>
+            <div class="author-joined">
+              Joined {new Date(topic.author?.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+            </div>
+          </aside>
+
+          <div class="post-content">
+            <div class="post-body">
+              {topic.content.split('\n').map(para => para && <p>{para}</p>)}
+            </div>
+
+            <div class="post-footer">
+              <div class="post-actions">
+                {user && (
+                  <form method="POST" class="inline-form">
+                    <input type="hidden" name="action" value="like_topic" />
+                    <button type="submit" class={`action-btn ${userTopicLike ? 'liked' : ''}`}>
+                      {userTopicLike ? '❤️' : '🤍'} {topicLikes || 0}
+                    </button>
+                  </form>
+                )}
+                {!user && <span class="like-count">❤️ {topicLikes || 0}</span>}
+              </div>
+
+              {(isAdmin || isAuthor) && (
+                <div class="mod-actions">
+                  {isAdmin && (
+                    <>
+                      <form method="POST" class="inline-form">
+                        <input type="hidden" name="action" value="toggle_pin" />
+                        <button type="submit" class="mod-btn">{topic.is_pinned ? '📌 Unpin' : '📌 Pin'}</button>
+                      </form>
+                      <form method="POST" class="inline-form">
+                        <input type="hidden" name="action" value="toggle_lock" />
+                        <button type="submit" class="mod-btn">{topic.is_locked ? '🔓 Unlock' : '🔒 Lock'}</button>
+                      </form>
+                    </>
+                  )}
+                  <form method="POST" class="inline-form" onsubmit="return confirm('Delete this topic?')">
+                    <input type="hidden" name="action" value="delete_topic" />
+                    <button type="submit" class="mod-btn delete">🗑️ Delete</button>
+                  </form>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <!-- Replies -->
+        {replies && replies.length > 0 && (
+          <div class="replies-section">
+            <h3>{replies.length} {replies.length === 1 ? 'Reply' : 'Replies'}</h3>
+
+            {replies.map((reply, idx) => (
+              <div class="post-card reply" id={`reply-${reply.id}`}>
+                <aside class="post-author">
+                  <div class="author-avatar">
+                    {reply.author?.avatar_url ? (
+                      <img src={reply.author.avatar_url} alt="" />
+                    ) : (
+                      <span>{(reply.author?.full_name || reply.author?.email || '?').charAt(0).toUpperCase()}</span>
+                    )}
+                  </div>
+                  <div class="author-name">
+                    {reply.author?.full_name || reply.author?.email}
+                    {reply.author?.is_premium && <span class="premium-badge">⭐</span>}
+                  </div>
+                  <div class="author-badges">
+                    {reply.author?.role === 'admin' && <span class="role-badge admin">Admin</span>}
+                    {reply.author?.role === 'moderator' && <span class="role-badge mod">Moderator</span>}
+                  </div>
+                </aside>
+
+                <div class="post-content">
+                  <div class="reply-header">
+                    <span class="reply-number">#{idx + 1}</span>
+                    <span class="reply-time">{timeAgo(reply.created_at)}</span>
+                    {reply.is_solution && <span class="solution-badge">✅ Solution</span>}
+                  </div>
+
+                  <div class="post-body">
+                    {reply.content.split('\n').map(para => para && <p>{para}</p>)}
+                  </div>
+
+                  <div class="post-footer">
+                    <div class="post-actions">
+                      {user && (
+                        <form method="POST" class="inline-form">
+                          <input type="hidden" name="action" value="like_reply" />
+                          <input type="hidden" name="reply_id" value={reply.id} />
+                          <button type="submit" class={`action-btn ${userReplyLikes[reply.id] ? 'liked' : ''}`}>
+                            {userReplyLikes[reply.id] ? '❤️' : '🤍'} {replyLikeCounts[reply.id] || 0}
+                          </button>
+                        </form>
+                      )}
+                      {!user && <span class="like-count">❤️ {replyLikeCounts[reply.id] || 0}</span>}
+                    </div>
+
+                    {(isAdmin || user?.id === reply.author?.id) && (
+                      <form method="POST" class="inline-form" onsubmit="return confirm('Delete this reply?')">
+                        <input type="hidden" name="action" value="delete_reply" />
+                        <input type="hidden" name="reply_id" value={reply.id} />
+                        <button type="submit" class="mod-btn delete">🗑️</button>
+                      </form>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <!-- Reply Form -->
+        {user && !topic.is_locked ? (
+          <div class="reply-form-section">
+            <h3>Post a Reply</h3>
+            <form method="POST" class="reply-form">
+              <input type="hidden" name="action" value="reply" />
+              <textarea 
+                name="content" 
+                rows="5" 
+                placeholder="Share your thoughts..."
+                required
+              ></textarea>
+              <button type="submit" class="btn btn-primary">Post Reply</button>
+            </form>
+          </div>
+        ) : topic.is_locked ? (
+          <div class="locked-notice">
+            <span>🔒</span>
+            <p>This topic is locked. New replies are not allowed.</p>
+          </div>
+        ) : (
+          <div class="login-notice">
+            <p>Please <a href="/login">log in</a> to reply to this topic.</p>
+          </div>
+        )}
+      </article>
+
+      <!-- Sidebar -->
+      <aside class="topic-sidebar">
+        <div class="sidebar-card">
+          <h4>Topic Info</h4>
+          <dl class="info-list">
+            <dt>Category</dt>
+            <dd>
+              <a href={`/forum?category=${topic.community?.slug}`}>
+                {topic.community?.icon} {topic.community?.name}
+              </a>
+            </dd>
+            <dt>Created</dt>
+            <dd>{formatDate(topic.created_at)}</dd>
+            <dt>Views</dt>
+            <dd>{topic.view_count || 0}</dd>
+            <dt>Replies</dt>
+            <dd>{topic.reply_count || 0}</dd>
+            <dt>Likes</dt>
+            <dd>{topicLikes || 0}</dd>
+          </dl>
+        </div>
+
+        <div class="sidebar-card">
+          <h4>About the Author</h4>
+          <div class="author-card">
+            <div class="author-avatar large">
+              {topic.author?.avatar_url ? (
+                <img src={topic.author.avatar_url} alt="" />
+              ) : (
+                <span>{(topic.author?.full_name || '?').charAt(0)}</span>
+              )}
+            </div>
+            <div class="author-info">
+              <span class="author-name">{topic.author?.full_name || topic.author?.email}</span>
+              {topic.author?.is_premium && <span class="premium-badge">⭐ Premium</span>}
+              <span class="author-role">
+                {topic.author?.role === 'admin' ? 'Administrator' : 
+                 topic.author?.role === 'moderator' ? 'Moderator' : 'Creator'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <a href="/forum" class="btn btn-secondary full-width">← Back to Forum</a>
+      </aside>
+    </div>
+  </div>
+
+  <style>
+    .topic-page {
+      min-height: 100vh;
+      background: #f8fafc;
+      padding-bottom: 4rem;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Breadcrumb */
+    .breadcrumb {
+      padding: 1rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+
+    .breadcrumb a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+
+    .breadcrumb a:hover {
+      text-decoration: underline;
+    }
+
+    .breadcrumb .current {
+      color: #374151;
+    }
+
+    /* Layout */
+    .topic-container {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 2rem;
+      padding-top: 1rem;
+    }
+
+    /* Topic Header */
+    .topic-header {
+      margin-bottom: 1.5rem;
+    }
+
+    .topic-badges {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .badge {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 100px;
+      font-weight: 600;
+    }
+
+    .badge.pinned { background: #fef3c7; color: #92400e; }
+    .badge.announcement { background: #dbeafe; color: #1e40af; }
+    .badge.locked { background: #f3f4f6; color: #6b7280; }
+
+    .topic-header h1 {
+      font-size: 1.75rem;
+      color: #1a1a2e;
+      margin-bottom: 0.75rem;
+      line-height: 1.3;
+    }
+
+    .topic-meta {
+      display: flex;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+
+    /* Post Cards */
+    .post-card {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 1rem;
+    }
+
+    .post-card.original {
+      border: 2px solid #e5e7eb;
+    }
+
+    .post-card.reply {
+      border: 1px solid #e5e7eb;
+    }
+
+    .post-author {
+      background: #f9fafb;
+      padding: 1.5rem;
+      text-align: center;
+      border-right: 1px solid #e5e7eb;
+    }
+
+    .author-avatar {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: #e5e7eb;
+      margin: 0 auto 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #6b7280;
+      overflow: hidden;
+    }
+
+    .author-avatar.large {
+      width: 80px;
+      height: 80px;
+    }
+
+    .author-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .author-name {
+      font-weight: 600;
+      color: #1a1a2e;
+      font-size: 0.9375rem;
+      margin-bottom: 0.375rem;
+    }
+
+    .premium-badge {
+      color: #f59e0b;
+    }
+
+    .author-badges {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .role-badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+    }
+
+    .role-badge.admin { background: #fef3c7; color: #92400e; }
+    .role-badge.mod { background: #d1fae5; color: #065f46; }
+
+    .level-badge {
+      font-size: 0.6875rem;
+      color: #6b7280;
+    }
+
+    .author-joined {
+      font-size: 0.6875rem;
+      color: #9ca3af;
+    }
+
+    .post-content {
+      padding: 1.5rem;
+    }
+
+    .reply-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .reply-number {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      font-weight: 600;
+    }
+
+    .reply-time {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    .solution-badge {
+      background: #d1fae5;
+      color: #065f46;
+      padding: 0.125rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+    }
+
+    .post-body {
+      color: #374151;
+      line-height: 1.7;
+    }
+
+    .post-body p {
+      margin-bottom: 1rem;
+    }
+
+    .post-body p:last-child {
+      margin-bottom: 0;
+    }
+
+    .post-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 1.5rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .post-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .inline-form {
+      display: inline;
+    }
+
+    .action-btn {
+      background: #f3f4f6;
+      border: none;
+      padding: 0.375rem 0.75rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      transition: all 0.2s;
+    }
+
+    .action-btn:hover {
+      background: #e5e7eb;
+    }
+
+    .action-btn.liked {
+      background: #fee2e2;
+    }
+
+    .like-count {
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+
+    .mod-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .mod-btn {
+      background: none;
+      border: 1px solid #e5e7eb;
+      padding: 0.375rem 0.75rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.75rem;
+      color: #6b7280;
+    }
+
+    .mod-btn:hover {
+      background: #f3f4f6;
+    }
+
+    .mod-btn.delete {
+      color: #991b1b;
+      border-color: #fee2e2;
+    }
+
+    .mod-btn.delete:hover {
+      background: #fee2e2;
+    }
+
+    /* Replies Section */
+    .replies-section {
+      margin-top: 2rem;
+    }
+
+    .replies-section h3 {
+      font-size: 1.125rem;
+      color: #374151;
+      margin-bottom: 1rem;
+    }
+
+    /* Reply Form */
+    .reply-form-section {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-top: 2rem;
+    }
+
+    .reply-form-section h3 {
+      font-size: 1.125rem;
+      color: #1a1a2e;
+      margin-bottom: 1rem;
+    }
+
+    .reply-form textarea {
+      width: 100%;
+      padding: 1rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 1rem;
+      resize: vertical;
+      margin-bottom: 1rem;
+    }
+
+    .reply-form textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+
+    .locked-notice,
+    .login-notice {
+      background: #f9fafb;
+      border-radius: 12px;
+      padding: 2rem;
+      text-align: center;
+      margin-top: 2rem;
+    }
+
+    .locked-notice span {
+      font-size: 2rem;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+
+    .login-notice a {
+      color: #2563eb;
+    }
+
+    /* Sidebar */
+    .topic-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .sidebar-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+
+    .sidebar-card h4 {
+      font-size: 0.875rem;
+      color: #6b7280;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+    }
+
+    .info-list {
+      display: grid;
+      grid-template-columns: 80px 1fr;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+    }
+
+    .info-list dt {
+      color: #6b7280;
+    }
+
+    .info-list dd {
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    .info-list a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+
+    .author-card {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .author-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .author-role {
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      text-align: center;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .full-width {
+      display: block;
+      width: 100%;
+    }
+
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .topic-container {
+        grid-template-columns: 1fr;
+      }
+
+      .topic-sidebar {
+        order: -1;
+        flex-direction: row;
+        flex-wrap: wrap;
+      }
+
+      .sidebar-card {
+        flex: 1;
+        min-width: 200px;
+      }
+
+      .post-card {
+        grid-template-columns: 1fr;
+      }
+
+      .post-author {
+        flex-direction: row;
+        text-align: left;
+        padding: 1rem;
+        border-right: none;
+        border-bottom: 1px solid #e5e7eb;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+      }
+
+      .author-avatar {
+        width: 48px;
+        height: 48px;
+        margin: 0;
+      }
+
+      .author-badges {
+        flex-direction: row;
+      }
+    }
+  </style>
+</Layout>
