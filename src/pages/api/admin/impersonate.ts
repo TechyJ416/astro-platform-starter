@@ -2,15 +2,9 @@
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 
-// Helper to encode/decode cookie value
-function encodeCookieValue(obj: object): string {
-  return Buffer.from(JSON.stringify(obj)).toString('base64');
-}
-
 export const POST: APIRoute = async ({ request, cookies, locals }) => {
   // Check admin access
   const isMasterKeySession = locals.isMasterKeySession || false;
-  const session = locals.session;
   const profile = locals.profile;
   
   const isAdmin = isMasterKeySession || profile?.role === 'admin';
@@ -47,15 +41,8 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
         });
       }
 
-      // Set impersonation cookie with base64 encoded value
-      const cookieValue = encodeCookieValue({
-        id: targetUser.id,
-        email: targetUser.email,
-        full_name: targetUser.full_name,
-        role: targetUser.role,
-      });
-      
-      cookies.set('impersonate_user', cookieValue, {
+      // Set impersonation cookie - just store the user ID (UUID is safe for cookies)
+      cookies.set('impersonate_user_id', targetUser.id, {
         path: '/',
         httpOnly: true,
         secure: import.meta.env.PROD,
@@ -74,6 +61,8 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
 
     } else if (action === 'stop') {
       // Clear impersonation cookie
+      cookies.delete('impersonate_user_id', { path: '/' });
+      // Also clear old cookie format if exists
       cookies.delete('impersonate_user', { path: '/' });
 
       return new Response(JSON.stringify({ 
