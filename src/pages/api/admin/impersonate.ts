@@ -2,6 +2,11 @@
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 
+// Helper to encode/decode cookie value
+function encodeCookieValue(obj: object): string {
+  return Buffer.from(JSON.stringify(obj)).toString('base64');
+}
+
 export const POST: APIRoute = async ({ request, cookies, locals }) => {
   // Check admin access
   const isMasterKeySession = locals.isMasterKeySession || false;
@@ -42,13 +47,15 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
         });
       }
 
-      // Set impersonation cookie
-      cookies.set('impersonate_user', JSON.stringify({
+      // Set impersonation cookie with base64 encoded value
+      const cookieValue = encodeCookieValue({
         id: targetUser.id,
         email: targetUser.email,
         full_name: targetUser.full_name,
         role: targetUser.role,
-      }), {
+      });
+      
+      cookies.set('impersonate_user', cookieValue, {
         path: '/',
         httpOnly: true,
         secure: import.meta.env.PROD,
