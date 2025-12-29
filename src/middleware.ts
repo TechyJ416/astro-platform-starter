@@ -118,31 +118,36 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // ============================================================
   // STEP 4: CHECK IMPERSONATION (Admin feature)
   // ============================================================
-  const impersonateCookie = cookies.get("impersonate_user")?.value;
+  // Look for new format (just ID) or old format (JSON)
+  const impersonateUserId = cookies.get("impersonate_user_id")?.value;
+  const oldImpersonateCookie = cookies.get("impersonate_user")?.value;
   
-  if (impersonateCookie && (locals.isAdmin || locals.isMasterKeySession)) {
+  // Clear old format cookie if it exists
+  if (oldImpersonateCookie) {
+    cookies.delete("impersonate_user", { path: "/" });
+  }
+  
+  if (impersonateUserId && (locals.isAdmin || locals.isMasterKeySession)) {
     try {
-      // Try to decode base64 cookie value
-      let impersonatedUser;
-      try {
-        const decodedValue = Buffer.from(impersonateCookie, 'base64').toString('utf-8');
-        impersonatedUser = JSON.parse(decodedValue);
-      } catch (decodeError) {
-        // If base64 decode fails, try direct JSON parse (old format)
-        try {
-          impersonatedUser = JSON.parse(impersonateCookie);
-        } catch {
-          // Invalid cookie, clear it
-          cookies.delete("impersonate_user", { path: "/" });
-          console.error("Invalid impersonate_user cookie, cleared");
-          return next();
-        }
-      }
+      // Fetch the impersonated user's profile
+      const { data: impersonatedProfile } = await supabase
+        .from("profiles")
+        .select("id, email, full_name, role")
+        .eq("id", impersonateUserId)
+        .single();
       
-      if (!impersonatedUser || !impersonatedUser.id) {
-        cookies.delete("impersonate_user", { path: "/" });
+      if (!impersonatedProfile) {
+        // Invalid user ID, clear the cookie
+        cookies.delete("impersonate_user_id", { path: "/" });
         return next();
       }
+      
+      const impersonatedUser = {
+        id: impersonatedProfile.id,
+        email: impersonatedProfile.email,
+        full_name: impersonatedProfile.full_name,
+        role: impersonatedProfile.role,
+      };
       
       // Only apply impersonation on non-admin pages
       if (!path.startsWith("/admin") && !path.startsWith("/api/admin")) {
@@ -178,8 +183,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
         locals.impersonatedUser = impersonatedUser;
       }
     } catch (e) {
-      // Invalid cookie, clear it
-      cookies.delete("impersonate_user", { path: "/" });
+      // Error fetching user, clear cookie
+      cookies.delete("impersonate_user_id", { path: "/" });
+      console.error("Impersonation error:", e);
     }
   }
 
