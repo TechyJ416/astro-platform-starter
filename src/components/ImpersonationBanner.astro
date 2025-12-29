@@ -1,0 +1,139 @@
+---
+// src/components/ImpersonationBanner.astro
+// Shows a banner when admin is viewing as another user
+
+interface Props {
+  user: {
+    id: string;
+    email: string;
+    full_name?: string;
+    role?: string;
+  };
+}
+
+const { user } = Astro.props;
+---
+
+<div class="impersonation-banner" id="impersonation-banner">
+  <div class="banner-content">
+    <span class="banner-icon">👁️</span>
+    <span class="banner-text">
+      Viewing as <strong>{user.full_name || user.email}</strong>
+      {user.role && <span class="role-badge">{user.role}</span>}
+    </span>
+  </div>
+  <div class="banner-actions">
+    <a href="/admin/users/{user.id}" class="btn-link">View in Admin</a>
+    <button id="stop-impersonation" class="btn-stop">
+      ✕ Exit View Mode
+    </button>
+  </div>
+</div>
+
+<script>
+  document.getElementById('stop-impersonation')?.addEventListener('click', async () => {
+    try {
+      const response = await fetch('/api/admin/impersonate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'stop' }),
+      });
+      
+      if (response.ok) {
+        window.location.href = '/admin/users';
+      } else {
+        alert('Failed to exit view mode');
+      }
+    } catch (err) {
+      alert('Error: ' + (err as Error).message);
+    }
+  });
+</script>
+
+<style>
+  .impersonation-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #7c3aed, #6d28d9);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 9999;
+    box-shadow: 0 2px 10px rgba(124, 58, 237, 0.3);
+    font-size: 0.9375rem;
+  }
+
+  .banner-content {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .banner-icon {
+    font-size: 1.25rem;
+  }
+
+  .banner-text strong {
+    font-weight: 600;
+  }
+
+  .role-badge {
+    background: rgba(255,255,255,0.2);
+    padding: 0.125rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
+    text-transform: uppercase;
+  }
+
+  .banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .btn-link {
+    color: rgba(255,255,255,0.9);
+    text-decoration: none;
+    font-size: 0.875rem;
+  }
+
+  .btn-link:hover {
+    color: white;
+    text-decoration: underline;
+  }
+
+  .btn-stop {
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+
+  .btn-stop:hover {
+    background: rgba(255,255,255,0.25);
+  }
+
+  @media (max-width: 640px) {
+    .impersonation-banner {
+      flex-direction: column;
+      gap: 0.75rem;
+      text-align: center;
+      padding: 1rem;
+    }
+
+    .banner-actions {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+</style>
