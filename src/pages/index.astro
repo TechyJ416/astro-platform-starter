@@ -4,6 +4,10 @@ export const prerender = false;
 
 import Layout from "../layouts/Layout.astro";
 import { supabase } from "../lib/supabase";
+import { getPageContent } from "../lib/content";
+
+// Load editable page content
+const content = await getPageContent('home');
 
 // Get current user session
 const session = Astro.locals.session;
@@ -122,8 +126,9 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
   {/* Hero Section */}
   <section class="hero" style={`--primary: ${appearance.primaryColor}; --accent: ${appearance.accentColor};`}>
     <div class="hero-content">
-      <h1>{general.tagline}</h1>
-      <p class="hero-desc">{general.description}</p>
+      {content.hero?.badge && <span class="hero-badge">{content.hero.badge}</span>}
+      <h1>{content.hero?.title || general.tagline}</h1>
+      <p class="hero-desc">{content.hero?.subtitle || general.description}</p>
       <div class="hero-buttons">
         {user ? (
           isApproved ? (
@@ -133,8 +138,12 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
           )
         ) : (
           <>
-            <a href="/signup" class="btn btn-primary">Join the Waitlist</a>
-            <a href="/login" class="btn btn-secondary">Log In</a>
+            <a href={content.hero?.cta_primary?.link || "/signup"} class="btn btn-primary">
+              {content.hero?.cta_primary?.text || "Join as Creator"}
+            </a>
+            <a href={content.hero?.cta_secondary?.link || "/campaigns"} class="btn btn-secondary">
+              {content.hero?.cta_secondary?.text || "Browse Campaigns"}
+            </a>
           </>
         )}
       </div>
@@ -142,16 +151,16 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     
     <div class="stats-container">
       <div class="stat">
-        <span class="stat-value">{creatorCount || 0}+</span>
+        <span class="stat-value">{content.stats?.creators || `${creatorCount || 0}+`}</span>
         <span class="stat-label">Creators</span>
       </div>
       <div class="stat">
-        <span class="stat-value">{campaignCount || 0}</span>
+        <span class="stat-value">{content.stats?.campaigns || campaignCount || 0}</span>
         <span class="stat-label">Active Campaigns</span>
       </div>
       <div class="stat">
-        <span class="stat-value">$50+</span>
-        <span class="stat-label">Avg Per Post</span>
+        <span class="stat-value">{content.stats?.paid_out || "$50k+"}</span>
+        <span class="stat-label">Paid Out</span>
       </div>
     </div>
   </section>
@@ -290,6 +299,17 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     .hero-content {
       max-width: 700px;
       margin: 0 auto;
+    }
+
+    .hero-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: white;
+      padding: 0.5rem 1.25rem;
+      border-radius: 100px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
     }
     
     .hero h1 {
