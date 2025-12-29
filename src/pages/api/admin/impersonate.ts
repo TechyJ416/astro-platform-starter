@@ -2,7 +2,28 @@
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 
-export const POST: APIRoute = async ({ request, cookies, locals }) => {
+// Helper to parse cookies from raw header
+function parseCookies(cookieHeader: string): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  if (!cookieHeader) return cookies;
+  
+  try {
+    const pairs = cookieHeader.split(';');
+    for (const pair of pairs) {
+      const idx = pair.indexOf('=');
+      if (idx > 0) {
+        const name = pair.substring(0, idx).trim();
+        const value = pair.substring(idx + 1).trim();
+        if (name && value && !/^[{"\[]/.test(value)) {
+          cookies[name] = value;
+        }
+      }
+    }
+  } catch (e) { /* ignore */ }
+  return cookies;
+}
+
+export const POST: APIRoute = async ({ request, locals }) => {
   // Check admin access
   const isMasterKeySession = locals.isMasterKeySession || false;
   const profile = locals.profile;
@@ -21,7 +42,6 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
     const { action, userId } = body;
 
     if (action === 'start' && userId) {
-      // Verify user exists
       const supabase = createClient(
         import.meta.env.SUPABASE_URL,
         import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
@@ -41,7 +61,7 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
         });
       }
 
-      // Set cookie using native Set-Cookie header
+      // Set cookie using native Set-Cookie header (UUID only, no special chars)
       const isProduction = import.meta.env.PROD;
       const cookieValue = `impersonate_id=${targetUser.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600${isProduction ? '; Secure' : ''}`;
 
@@ -58,24 +78,19 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
       });
 
     } else if (action === 'stop') {
-      // Clear cookie by setting expired date
-      const clearCookies = [
-        'impersonate_id=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',
-        'impersonate_user_id=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',
-        'impersonate_user=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',
-      ];
+      // Clear all possible impersonation cookies
+      const headers = new Headers();
+      headers.set('Content-Type', 'application/json');
+      headers.append('Set-Cookie', 'impersonate_id=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+      headers.append('Set-Cookie', 'impersonate_user_id=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+      headers.append('Set-Cookie', 'impersonate_user=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
 
       return new Response(JSON.stringify({ 
         success: true, 
         message: 'Impersonation ended'
       }), {
         status: 200,
-        headers: [
-          ['Content-Type', 'application/json'],
-          ['Set-Cookie', clearCookies[0]],
-          ['Set-Cookie', clearCookies[1]],
-          ['Set-Cookie', clearCookies[2]],
-        ]
+        headers
       });
 
     } else {
