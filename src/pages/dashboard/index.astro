@@ -222,6 +222,13 @@ const acceptedApplications = applications?.filter(a => a.status === 'accepted').
       <div class="quick-actions">
         <h3>Quick Actions</h3>
         <div class="actions-grid">
+          <a href="/dashboard/campaigns" class="action-card highlight">
+            <span>📋</span>
+            <div>
+              <strong>My Campaigns</strong>
+              <p>View accepted campaigns & submit work</p>
+            </div>
+          </a>
           <a href="/dashboard/profile" class="action-card">
             <span>👤</span>
             <div>
@@ -241,13 +248,6 @@ const acceptedApplications = applications?.filter(a => a.status === 'accepted').
             <div>
               <strong>View Earnings</strong>
               <p>Track your payments</p>
-            </div>
-          </a>
-          <a href="/dashboard/settings" class="action-card">
-            <span>⚙️</span>
-            <div>
-              <strong>Settings</strong>
-              <p>Manage your account</p>
             </div>
           </a>
         </div>
@@ -629,6 +629,16 @@ const acceptedApplications = applications?.filter(a => a.status === 'accepted').
       font-size: 0.8125rem;
       color: #6b7280;
       margin: 0;
+    }
+
+    .action-card.highlight {
+      background: linear-gradient(135deg, #dbeafe 0%, #c7d2fe 100%);
+      border: 2px solid #2563eb;
+    }
+
+    .action-card.highlight span {
+      background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+      color: white;
     }
     
     @media (max-width: 1024px) {
