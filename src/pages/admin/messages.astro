@@ -3,12 +3,6 @@
 export const prerender = false;
 
 import AdminLayout from "../../layouts/AdminLayout.astro";
-import { supabase } from "../../lib/supabase";
-xa---
-// src/pages/admin/messages.astro
-export const prerender = false;
-
-import AdminLayout from "../../layouts/AdminLayout.astro";
 import { createClient } from "@supabase/supabase-js";
 
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
@@ -42,6 +36,7 @@ if (!hasServiceKey) {
 }
 
 const action = Astro.url.searchParams.get('action');
+let shouldRedirect = '';
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
@@ -77,7 +72,7 @@ if (Astro.request.method === 'POST') {
           errorMessage = error.message;
         }
       } else {
-        return Astro.redirect('/admin/messages?created=true');
+        shouldRedirect = '/admin/messages?created=true';
       }
     }
   }
@@ -107,8 +102,7 @@ if (Astro.request.method === 'POST') {
         errorMessage = `Delete failed: ${error.message}`;
       }
     } else {
-      // Redirect to remove the id from URL after deletion
-      return Astro.redirect('/admin/messages?deleted=true');
+      shouldRedirect = '/admin/messages?deleted=true';
     }
   }
 
@@ -117,6 +111,11 @@ if (Astro.request.method === 'POST') {
     if (error) errorMessage = error.message;
     else successMessage = 'All messages marked as read.';
   }
+}
+
+// Handle redirects after POST processing
+if (shouldRedirect) {
+  return Astro.redirect(shouldRedirect);
 }
 
 if (Astro.url.searchParams.get('created')) successMessage = 'Message created successfully!';
@@ -450,405 +449,4 @@ CREATE POLICY "Allow all for service role" ON messages FOR ALL USING (true);
       });
     });
   </script>
-</AdminLayout>
-const isMasterKeySession = Astro.locals.isMasterKeySession || false;
-const session = Astro.locals.session;
-
-if (!isMasterKeySession && !session) {
-  return Astro.redirect('/admin/login');
-}
-
-let successMessage = '';
-let errorMessage = '';
-let tableExists = true;
-
-const action = Astro.url.searchParams.get('action');
-
-if (Astro.request.method === 'POST') {
-  const form = await Astro.request.formData();
-  const formAction = form.get('action') as string;
-
-  if (formAction === 'create') {
-    const subject = (form.get('subject') as string)?.trim();
-    const body = (form.get('body') as string)?.trim();
-    
-    if (!subject) {
-      errorMessage = 'Subject is required.';
-    } else if (!body) {
-      errorMessage = 'Message body is required.';
-    } else {
-      const name = (form.get('name') as string)?.trim() || 'System';
-      const email = (form.get('email') as string)?.trim() || 'system@banity.com';
-      const isAnnouncement = form.get('is_announcement') === 'on';
-
-      const { error } = await supabase.from('messages').insert({
-        name,
-        email,
-        subject,
-        body,
-        is_read: false,
-        is_announcement: isAnnouncement,
-      });
-
-      if (error) {
-        if (error.code === '42P01') {
-          errorMessage = 'Messages table not found. Please run the database migration.';
-          tableExists = false;
-        } else {
-          errorMessage = error.message;
-        }
-      } else {
-        return Astro.redirect('/admin/messages?created=true');
-      }
-    }
-  }
-
-  if (formAction === 'toggle_announcement') {
-    const messageId = form.get('messageId') as string;
-    const currentState = form.get('currentState') === 'true';
-    const { error } = await supabase.from('messages').update({ is_announcement: !currentState }).eq('id', messageId);
-    if (error) errorMessage = error.message;
-    else successMessage = !currentState ? 'Message now visible on homepage.' : 'Message removed from homepage.';
-  }
-
-  if (formAction === 'mark_read' || formAction === 'mark_unread') {
-    const messageId = form.get('messageId') as string;
-    const { error } = await supabase.from('messages').update({ is_read: formAction === 'mark_read' }).eq('id', messageId);
-    if (error) errorMessage = error.message;
-    else successMessage = formAction === 'mark_read' ? 'Marked as read.' : 'Marked as unread.';
-  }
-
-  if (formAction === 'delete') {
-    const messageId = form.get('messageId') as string;
-    const { error } = await supabase.from('messages').delete().eq('id', messageId);
-    if (error) errorMessage = error.message;
-    else successMessage = 'Message deleted.';
-  }
-
-  if (formAction === 'mark_all_read') {
-    const { error } = await supabase.from('messages').update({ is_read: true }).eq('is_read', false);
-    if (error) errorMessage = error.message;
-    else successMessage = 'All messages marked as read.';
-  }
-}
-
-if (Astro.url.searchParams.get('created')) successMessage = 'Message created successfully!';
-
-// Load messages
-const { data: messages, error: loadError } = await supabase
-  .from('messages')
-  .select('*')
-  .order('created_at', { ascending: false });
-
-if (loadError) {
-  if (loadError.code === '42P01') {
-    tableExists = false;
-    errorMessage = 'Messages table not found. Please create it in your database.';
-  } else {
-    errorMessage = loadError.message;
-  }
-}
-
-const allMessages = messages || [];
-
-const filter = Astro.url.searchParams.get('filter') || 'all';
-const filtered = allMessages.filter(m => {
-  if (filter === 'all') return true;
-  if (filter === 'unread') return !m.is_read;
-  if (filter === 'read') return m.is_read;
-  if (filter === 'announcements') return m.is_announcement;
-  return true;
-});
-
-const stats = {
-  total: allMessages.length,
-  unread: allMessages.filter(m => !m.is_read).length,
-  read: allMessages.filter(m => m.is_read).length,
-  announcements: allMessages.filter(m => m.is_announcement).length,
-};
-
-const selectedId = Astro.url.searchParams.get('id');
-let selected = selectedId ? allMessages.find(m => m.id === selectedId) : null;
-
-// Auto-mark as read when viewing (only if not already read)
-if (selected && !selected.is_read) {
-  await supabase.from('messages').update({ is_read: true }).eq('id', selected.id);
-  selected = { ...selected, is_read: true };
-}
-
-const showForm = action === 'new';
----
-
-<AdminLayout title="Messages">
-  {successMessage && <div class="alert success">{successMessage}</div>}
-  {errorMessage && <div class="alert error">{errorMessage}</div>}
-
-  {!tableExists ? (
-    <div class="empty">
-      <span>⚠️</span>
-      <h3>Messages Table Not Found</h3>
-      <p>Create the messages table by running this SQL in Supabase:</p>
-      <pre class="code-block">
-CREATE TABLE messages (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  name TEXT,
-  email TEXT,
-  subject TEXT NOT NULL,
-  body TEXT NOT NULL,
-  is_read BOOLEAN DEFAULT false,
-  is_announcement BOOLEAN DEFAULT false,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
-ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Allow all for service role" ON messages FOR ALL USING (true);
-
--- If table already exists, just add the column:
--- ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_announcement BOOLEAN DEFAULT false;
-      </pre>
-    </div>
-  ) : showForm ? (
-    <div class="panel">
-      <div class="panel-header">
-        <h2>Create New Message / Announcement</h2>
-        <a href="/admin/messages" class="btn btn-secondary">← Back</a>
-      </div>
-      <form method="POST" class="form">
-        <input type="hidden" name="action" value="create" />
-        
-        <div class="form-row">
-          <div class="form-group">
-            <label>From Name</label>
-            <input type="text" name="name" value="System" placeholder="System" />
-          </div>
-          <div class="form-group">
-            <label>From Email</label>
-            <input type="email" name="email" value="system@banity.com" placeholder="system@banity.com" />
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label>Subject *</label>
-          <input type="text" name="subject" required placeholder="Important Announcement" />
-        </div>
-
-        <div class="form-group">
-          <label>Message Body *</label>
-          <textarea name="body" rows="6" required placeholder="Write your message here..."></textarea>
-        </div>
-
-        <div class="form-group">
-          <label class="toggle-label">
-            <input type="checkbox" name="is_announcement" />
-            <span class="toggle-text">📢 Show on Homepage</span>
-            <span class="toggle-hint">When enabled, this message will be displayed as an announcement banner on the public homepage.</span>
-          </label>
-        </div>
-
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Create Message</button>
-          <a href="/admin/messages" class="btn btn-secondary">Cancel</a>
-        </div>
-      </form>
-    </div>
-  ) : (
-    <>
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-icon">📬</div><div><div class="stat-value">{stats.total}</div><div class="stat-label">Total</div></div></div>
-        <div class={`stat-card ${stats.unread > 0 ? 'urgent' : ''}`}><div class="stat-icon">🔔</div><div><div class="stat-value">{stats.unread}</div><div class="stat-label">Unread</div></div></div>
-        <div class="stat-card"><div class="stat-icon">✉️</div><div><div class="stat-value">{stats.read}</div><div class="stat-label">Read</div></div></div>
-        <div class="stat-card announcement"><div class="stat-icon">📢</div><div><div class="stat-value">{stats.announcements}</div><div class="stat-label">On Homepage</div></div></div>
-      </div>
-
-      <div class="toolbar">
-        <div class="tabs">
-          <a href="?filter=all" class:list={["tab", { active: filter === 'all' }]}>All ({stats.total})</a>
-          <a href="?filter=unread" class:list={["tab", { active: filter === 'unread' }]}>Unread ({stats.unread})</a>
-          <a href="?filter=announcements" class:list={["tab", { active: filter === 'announcements' }]}>📢 Homepage ({stats.announcements})</a>
-          <a href="?filter=read" class:list={["tab", { active: filter === 'read' }]}>Read</a>
-        </div>
-        <div class="toolbar-actions">
-          {stats.unread > 0 && (
-            <form method="POST" class="inline">
-              <button name="action" value="mark_all_read" class="btn btn-secondary btn-sm">✓ Mark All Read</button>
-            </form>
-          )}
-          <a href="?action=new" class="btn btn-primary">+ New Message</a>
-        </div>
-      </div>
-
-      <div class="inbox-layout">
-        <div class="message-list">
-          {filtered.length > 0 ? (
-            filtered.map(m => (
-              <a href={`?id=${m.id}${filter !== 'all' ? `&filter=${filter}` : ''}`} class:list={["message-item", { unread: !m.is_read, selected: selectedId === m.id }]}>
-                <div class="message-avatar">{(m.name || m.email || '?').charAt(0).toUpperCase()}</div>
-                <div class="message-preview">
-                  <div class="message-header">
-                    <span class="message-sender">{m.name || m.email?.split('@')[0] || 'Unknown'}</span>
-                    <span class="message-time">{new Date(m.created_at).toLocaleDateString()}</span>
-                  </div>
-                  <div class="message-subject">{!m.is_read && <span class="dot"></span>}{m.is_announcement && <span class="announcement-badge">📢</span>}{m.subject || '(No subject)'}</div>
-                  <div class="message-snippet">{(m.body || '').substring(0, 60)}{(m.body || '').length > 60 ? '...' : ''}</div>
-                </div>
-              </a>
-            ))
-          ) : (
-            <div class="empty-list"><span>📭</span><p>No messages</p></div>
-          )}
-        </div>
-
-        <div class="message-detail">
-          {selected ? (
-            <>
-              <div class="detail-header">
-                <h2>{selected.is_announcement && <span class="announcement-badge-large">📢</span>}{selected.subject || '(No subject)'}</h2>
-                <div class="detail-actions">
-                  <form method="POST" class="inline">
-                    <input type="hidden" name="messageId" value={selected.id} />
-                    <input type="hidden" name="currentState" value={String(selected.is_announcement)} />
-                    <button name="action" value="toggle_announcement" class={`btn btn-sm ${selected.is_announcement ? 'btn-warning' : 'btn-secondary'}`}>
-                      {selected.is_announcement ? '📢 Remove from Homepage' : '📢 Show on Homepage'}
-                    </button>
-                  </form>
-                  <form method="POST" class="inline">
-                    <input type="hidden" name="messageId" value={selected.id} />
-                    <button name="action" value={selected.is_read ? 'mark_unread' : 'mark_read'} class="btn btn-sm btn-secondary">
-                      {selected.is_read ? '📩 Mark Unread' : '✓ Mark Read'}
-                    </button>
-                  </form>
-                  <form method="POST" class="inline" onsubmit="return confirm('Delete this message?');">
-                    <input type="hidden" name="messageId" value={selected.id} />
-                    <button name="action" value="delete" class="btn btn-sm btn-danger">🗑️ Delete</button>
-                  </form>
-                </div>
-              </div>
-              <div class="detail-meta">
-                <div class="sender-avatar">{(selected.name || selected.email || '?').charAt(0).toUpperCase()}</div>
-                <div>
-                  <div class="sender-name">{selected.name || 'Unknown'}</div>
-                  <div class="sender-email">{selected.email || 'No email'}</div>
-                </div>
-                <div class="detail-time">{new Date(selected.created_at).toLocaleString()}</div>
-              </div>
-              <div class="detail-body">{selected.body || '(No content)'}</div>
-              {selected.email && selected.email !== 'system@banity.com' && (
-                <div class="detail-footer">
-                  <a href={`mailto:${selected.email}?subject=Re: ${selected.subject || ''}`} class="btn btn-primary">↩️ Reply via Email</a>
-                </div>
-              )}
-            </>
-          ) : (
-            <div class="no-selection">
-              <span>📬</span>
-              <h3>Select a message</h3>
-              <p>Choose from the list to view details</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </>
-  )}
-
-  <style>
-    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
-    .stat-card { background: white; padding: 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 1rem; }
-    .stat-card.urgent { background: linear-gradient(135deg, #fee2e2, #fecaca); border: 2px solid #f87171; }
-    .stat-card.announcement { background: linear-gradient(135deg, #dbeafe, #bfdbfe); border: 2px solid #3b82f6; }
-    .stat-icon { font-size: 1.5rem; width: 44px; height: 44px; background: #f3f4f6; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-    .stat-card.urgent .stat-icon { background: #ef4444; }
-    .stat-card.announcement .stat-icon { background: #3b82f6; }
-    .stat-value { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
-    .stat-label { font-size: 0.8125rem; color: #6b7280; }
-    
-    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; background: white; padding: 1rem; border-radius: 12px; flex-wrap: wrap; gap: 1rem; }
-    .toolbar-actions { display: flex; gap: 0.5rem; }
-    .tabs { display: flex; gap: 0.5rem; }
-    .tab { padding: 0.5rem 1rem; border-radius: 8px; text-decoration: none; color: #6b7280; font-weight: 500; font-size: 0.875rem; }
-    .tab:hover { background: #f3f4f6; }
-    .tab.active { background: #2563eb; color: white; }
-    
-    .inbox-layout { display: grid; grid-template-columns: 380px 1fr; gap: 1.5rem; min-height: 500px; }
-    .message-list { background: white; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; max-height: 600px; overflow-y: auto; }
-    .message-item { display: flex; gap: 0.75rem; padding: 1rem; border-bottom: 1px solid #f0f0f0; text-decoration: none; color: inherit; }
-    .message-item:hover { background: #f9fafb; }
-    .message-item.unread { background: #fffbeb; }
-    .message-item.selected { background: #dbeafe; border-left: 3px solid #2563eb; }
-    .message-avatar { width: 40px; height: 40px; background: linear-gradient(135deg, #dbeafe, #c7d2fe); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; color: #2563eb; flex-shrink: 0; }
-    .message-preview { flex: 1; min-width: 0; }
-    .message-header { display: flex; justify-content: space-between; margin-bottom: 0.25rem; }
-    .message-sender { font-weight: 600; font-size: 0.875rem; color: #1a1a2e; }
-    .message-time { font-size: 0.6875rem; color: #9ca3af; }
-    .message-subject { font-size: 0.8125rem; color: #374151; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
-    .dot { width: 8px; height: 8px; background: #2563eb; border-radius: 50%; flex-shrink: 0; }
-    .announcement-badge { font-size: 0.75rem; flex-shrink: 0; }
-    .announcement-badge-large { font-size: 1rem; margin-right: 0.5rem; }
-    .message-snippet { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .empty-list { text-align: center; padding: 3rem; color: #9ca3af; }
-    .empty-list span { font-size: 2rem; display: block; margin-bottom: 0.5rem; }
-    
-    .message-detail { background: white; border-radius: 12px; display: flex; flex-direction: column; }
-    .detail-header { display: flex; justify-content: space-between; align-items: flex-start; padding: 1.25rem; border-bottom: 1px solid #e5e7eb; gap: 1rem; flex-wrap: wrap; }
-    .detail-header h2 { font-size: 1.125rem; color: #1a1a2e; word-break: break-word; }
-    .detail-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
-    .detail-meta { display: flex; align-items: center; gap: 1rem; padding: 1rem 1.25rem; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
-    .sender-avatar { width: 44px; height: 44px; background: linear-gradient(135deg, #dbeafe, #c7d2fe); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; color: #2563eb; flex-shrink: 0; }
-    .sender-name { font-weight: 600; color: #1a1a2e; }
-    .sender-email { font-size: 0.8125rem; color: #6b7280; }
-    .detail-time { margin-left: auto; font-size: 0.8125rem; color: #9ca3af; }
-    .detail-body { flex: 1; padding: 1.5rem; font-size: 0.9375rem; line-height: 1.7; color: #374151; white-space: pre-wrap; overflow-y: auto; }
-    .detail-footer { padding: 1rem 1.25rem; border-top: 1px solid #e5e7eb; background: #f9fafb; }
-    .no-selection { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #9ca3af; text-align: center; padding: 2rem; }
-    .no-selection span { font-size: 3rem; margin-bottom: 1rem; }
-    .no-selection h3 { color: #6b7280; margin-bottom: 0.5rem; }
-    
-    .panel { background: white; border-radius: 12px; overflow: hidden; }
-    .panel-header { display: flex; justify-content: space-between; align-items: center; padding: 1.25rem; border-bottom: 1px solid #e5e7eb; }
-    .panel-header h2 { font-size: 1.125rem; color: #1a1a2e; margin: 0; }
-    .form { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-    .form-group { display: flex; flex-direction: column; gap: 0.5rem; }
-    .form-group label { font-weight: 600; font-size: 0.875rem; color: #374151; }
-    .form-group input, .form-group textarea { padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 1rem; }
-    .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #2563eb; }
-    .form-group .toggle-label { display: flex; flex-direction: column; gap: 0.25rem; cursor: pointer; background: #f9fafb; padding: 1rem; border-radius: 8px; border: 2px solid #e5e7eb; }
-    .form-group .toggle-label:has(input:checked) { background: #dbeafe; border-color: #3b82f6; }
-    .form-group .toggle-label input { width: auto; margin-right: 0.5rem; }
-    .form-group .toggle-text { display: flex; align-items: center; font-weight: 600; }
-    .form-group .toggle-hint { font-size: 0.75rem; color: #6b7280; font-weight: 400; margin-left: 1.5rem; }
-    .form-actions { display: flex; gap: 1rem; margin-top: 0.5rem; }
-    
-    .btn { padding: 0.625rem 1.25rem; border-radius: 8px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
-    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
-    .btn-primary { background: #2563eb; color: white; }
-    .btn-secondary { background: #f3f4f6; color: #374151; }
-    .btn-warning { background: #f59e0b; color: white; }
-    .btn-danger { background: #dc2626; color: white; }
-    .inline { display: inline; }
-    
-    .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
-    .alert.success { background: #d1fae5; color: #065f46; }
-    .alert.error { background: #fee2e2; color: #991b1b; }
-    
-    .empty { text-align: center; padding: 4rem 2rem; background: white; border-radius: 12px; }
-    .empty span { font-size: 3rem; display: block; margin-bottom: 1rem; }
-    .empty h3 { color: #374151; margin-bottom: 0.5rem; }
-    .empty p { color: #6b7280; margin-bottom: 1rem; }
-    
-    .code-block { background: #1a1a2e; color: #10b981; padding: 1rem; border-radius: 8px; text-align: left; font-size: 0.75rem; overflow-x: auto; white-space: pre; }
-    
-    @media (max-width: 1024px) {
-      .stats-grid { grid-template-columns: repeat(2, 1fr); }
-      .inbox-layout { grid-template-columns: 1fr; }
-      .message-list { max-height: 300px; }
-    }
-    @media (max-width: 768px) {
-      .stats-grid { grid-template-columns: 1fr; }
-      .form-row { grid-template-columns: 1fr; }
-      .toolbar { flex-direction: column; align-items: stretch; }
-      .detail-header { flex-direction: column; }
-      .detail-actions { flex-wrap: wrap; }
-    }
-  </style>
 </AdminLayout>
