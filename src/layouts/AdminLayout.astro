@@ -69,6 +69,10 @@ const settingsItems = [
   { href: '/admin/settings/payments', icon: '💳', label: 'Payments' },
 ];
 
+// Check impersonation state
+const isImpersonating = Astro.locals?.isImpersonating || false;
+const impersonatedUser = Astro.locals?.impersonatedUser;
+
 function isActive(href: string, exact = false) {
   if (exact) return currentPath === href;
   return currentPath.startsWith(href);
@@ -86,7 +90,17 @@ function isActive(href: string, exact = false) {
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </head>
 <body>
-  <div class="admin-layout">
+  {isImpersonating && impersonatedUser && (
+    <div class="impersonation-banner">
+      <span>👁️ Viewing as <strong>{impersonatedUser.full_name || impersonatedUser.email}</strong></span>
+      <div class="banner-actions">
+        <a href="/dashboard" class="banner-link">Go to Dashboard</a>
+        <button id="stop-impersonation" class="banner-btn">✕ Exit</button>
+      </div>
+    </div>
+  )}
+  
+  <div class:list={["admin-layout", { 'has-banner': isImpersonating }]}>
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="sidebar-header">
@@ -179,6 +193,64 @@ function isActive(href: string, exact = false) {
       background: #f5f6fa;
       color: #1a1a2e;
       line-height: 1.5;
+    }
+
+    /* Impersonation Banner */
+    .impersonation-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(135deg, #7c3aed, #6d28d9);
+      color: white;
+      padding: 0.5rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 9999;
+      font-size: 0.875rem;
+    }
+
+    .impersonation-banner strong {
+      font-weight: 600;
+    }
+
+    .banner-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .banner-link {
+      color: rgba(255,255,255,0.9);
+      text-decoration: none;
+    }
+
+    .banner-link:hover {
+      color: white;
+      text-decoration: underline;
+    }
+
+    .banner-btn {
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      color: white;
+      padding: 0.25rem 0.75rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.8125rem;
+    }
+
+    .banner-btn:hover {
+      background: rgba(255,255,255,0.25);
+    }
+
+    .admin-layout.has-banner {
+      padding-top: 40px;
+    }
+
+    .admin-layout.has-banner .sidebar {
+      top: 40px;
     }
 
     .admin-layout {
@@ -490,5 +562,25 @@ function isActive(href: string, exact = false) {
       }
     }
   </style>
+  
+  <script is:inline>
+    document.getElementById('stop-impersonation')?.addEventListener('click', async () => {
+      try {
+        const response = await fetch('/api/admin/impersonate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'stop' }),
+        });
+        
+        if (response.ok) {
+          window.location.href = '/admin/users';
+        } else {
+          alert('Failed to exit view mode');
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    });
+  </script>
 </body>
 </html>
