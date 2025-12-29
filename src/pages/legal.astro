@@ -2,460 +2,454 @@
 // src/pages/legal.astro
 import Layout from '../layouts/Layout.astro';
 
-const lastUpdated = "4 December 2025";
+const lastUpdated = "January 1, 2025";
 ---
 
 <Layout title="Legal">
-    <style>
-        .legal-hero {
-            text-align: center;
-            margin-bottom: 3rem;
-            animation: fadeIn 0.6s ease-out;
-        }
-        
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-        }
-        
-        .badge {
-            display: inline-block;
-            padding: 0.375rem 1rem;
-            background: var(--color-accent-light);
-            color: var(--color-accent);
-            border-radius: 100px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            margin-bottom: 1.5rem;
-        }
-        
-        .legal-hero h1 {
-            font-family: var(--font-serif);
-            font-size: 4rem;
-            font-weight: 700;
-            line-height: 1.1;
-            letter-spacing: -0.03em;
-            margin-bottom: 1rem;
-        }
-        
-        .hero-subtitle {
-            font-size: 1.25rem;
-            color: var(--color-muted);
-            max-width: 600px;
-            margin: 0 auto;
-        }
-        
-        .content-wrapper {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        
-        .section {
-            margin-bottom: 4rem;
-            animation: fadeIn 0.6s ease-out both;
-        }
-        
-        .section:nth-child(2) { animation-delay: 0.1s; }
-        .section:nth-child(3) { animation-delay: 0.2s; }
-        
-        .section-header {
-            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-            border-left: 4px solid var(--color-accent);
-            padding: 2rem;
-            margin-bottom: 2.5rem;
-            border-radius: 0 8px 8px 0;
-        }
-        
-        .section-header.terms {
-            background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
-            border-left-color: #9333ea;
-        }
-        
-        .section-title {
-            font-family: var(--font-serif);
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin-bottom: 0.5rem;
-            letter-spacing: -0.02em;
-        }
-        
-        .section-meta {
-            font-size: 0.875rem;
-            color: var(--color-muted);
-            font-weight: 500;
-        }
-        
-        .prose {
-            font-size: 1.0625rem;
-            line-height: 1.75;
-        }
-        
-        .prose h3 {
-            font-family: var(--font-serif);
-            font-size: 1.75rem;
-            font-weight: 700;
-            margin-top: 2.5rem;
-            margin-bottom: 1rem;
-            letter-spacing: -0.01em;
-        }
-        
-        .prose p {
-            margin-bottom: 1.25rem;
-            color: #374151;
-        }
-        
-        .prose strong {
-            font-weight: 600;
-            color: var(--color-ink);
-        }
-        
-        .prose ul {
-            margin-bottom: 1.5rem;
-            padding-left: 1.5rem;
-        }
-        
-        .prose li {
-            margin-bottom: 0.5rem;
-            color: #374151;
-        }
-        
-        .prose a {
-            color: var(--color-accent);
-            text-decoration: none;
-            border-bottom: 1px solid transparent;
-            transition: border-color 0.2s;
-        }
-        
-        .prose a:hover {
-            border-bottom-color: var(--color-accent);
-        }
-        
-        .divider {
-            height: 1px;
-            background: linear-gradient(to right, transparent, var(--color-border), transparent);
-            margin: 5rem 0;
-        }
-        
-        .contact-section {
-            background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
-            border-radius: 12px;
-            padding: 3rem;
-            text-align: center;
-            margin-top: 4rem;
-            animation: fadeIn 0.6s ease-out 0.3s both;
-        }
-        
-        .contact-title {
-            font-family: var(--font-serif);
-            font-size: 2rem;
-            font-weight: 700;
-            margin-bottom: 1rem;
-        }
-        
-        .contact-info {
-            color: var(--color-muted);
-            margin-bottom: 2rem;
-        }
-        
-        .contact-buttons {
-            display: flex;
-            gap: 1rem;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-        
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.875rem 1.75rem;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 0.9375rem;
-            text-decoration: none;
-            transition: all 0.2s;
-            letter-spacing: 0.01em;
-        }
-        
-        .btn-primary {
-            background: var(--color-accent);
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background: #1d4ed8;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-        }
-        
-        .btn-secondary {
-            background: white;
-            color: var(--color-ink);
-            border: 1px solid var(--color-border);
-        }
-        
-        .btn-secondary:hover {
-            border-color: var(--color-accent);
-            color: var(--color-accent);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-        }
-        
-        .icon {
-            width: 1.25rem;
-            height: 1.25rem;
-        }
-        
-        @media (max-width: 768px) {
-            .legal-hero h1 {
-                font-size: 2.5rem;
-            }
-            
-            .section-title {
-                font-size: 2rem;
-            }
-            
-            .contact-buttons {
-                flex-direction: column;
-            }
-        }
-    </style>
-
+  <div class="legal-page">
     <!-- Hero -->
     <section class="legal-hero">
-        <span class="badge">Legal Documentation</span>
-        <h1>Privacy & Terms</h1>
-        <p class="hero-subtitle">
-            Transparent policies for our creator community. Last updated {lastUpdated}.
-        </p>
+      <span class="badge">Legal Documentation</span>
+      <h1>Privacy & Terms</h1>
+      <p class="hero-subtitle">
+        Transparent policies for our creator community. Last updated {lastUpdated}.
+      </p>
     </section>
 
     <!-- Content -->
     <div class="content-wrapper">
-        
-        <!-- Privacy Policy -->
-        <article id="privacy" class="section">
-            <div class="section-header">
-                <h2 class="section-title">1. Privacy Policy</h2>
-                <p class="section-meta"><strong>Effective Date:</strong> {lastUpdated}</p>
-            </div>
+      
+      <!-- Privacy Policy -->
+      <article id="privacy" class="section">
+        <div class="section-header">
+          <h2 class="section-title">1. Privacy Policy</h2>
+          <p class="section-meta"><strong>Effective Date:</strong> {lastUpdated}</p>
+        </div>
 
-            <div class="prose">
-                <p>
-                    Banity Ltd ("Banity", "we", "us", "our") operates banity.com and related campaign platforms. 
-                    We run paid user-generated content (UGC) campaigns on behalf of brands.
-                </p>
+        <div class="prose">
+          <p>
+            Banity Ltd ("Banity", "we", "us", "our") operates banity.com and related campaign platforms. 
+            We run paid user-generated content (UGC) campaigns on behalf of brands.
+          </p>
 
-                <p>
-                    This Privacy Policy applies worldwide and complies with GDPR, CCPA/CPRA, LGPD, and other applicable 
-                    data-protection laws.
-                </p>
+          <p>
+            This Privacy Policy applies worldwide and complies with GDPR, CCPA/CPRA, LGPD, and other applicable 
+            data-protection laws.
+          </p>
 
-                <h3>1. Information We Collect</h3>
-                <ul>
-                    <li>Identity & contact data (name, email, phone, postal address, social handles)</li>
-                    <li>Payment & tax data (via Stripe/PayPal, W-9/W-8BEN)</li>
-                    <li>Profile data (age, location, audience demographics, follower counts)</li>
-                    <li>UGC you submit or post</li>
-                    <li>Technical & usage data (IP, device, cookies, analytics)</li>
-                </ul>
+          <h3>1. Information We Collect</h3>
+          <ul>
+            <li>Identity & contact data (name, email, phone, postal address, social handles)</li>
+            <li>Payment & tax data (via Stripe/PayPal, W-9/W-8BEN)</li>
+            <li>Profile data (age, location, audience demographics, follower counts)</li>
+            <li>UGC you submit or post</li>
+            <li>Technical & usage data (IP, device, cookies, analytics)</li>
+          </ul>
 
-                <h3>2. How We Use Your Information</h3>
-                <p>Legal bases (GDPR Art. 6):</p>
-                <ul>
-                    <li>Performance of contract (campaign fulfilment and payment)</li>
-                    <li>Legitimate interests (fraud prevention, analytics, service improvement)</li>
-                    <li>Legal obligation (tax reporting)</li>
-                    <li>Consent (optional marketing)</li>
-                </ul>
+          <h3>2. How We Use Your Information</h3>
+          <p>Legal bases (GDPR Art. 6):</p>
+          <ul>
+            <li>Performance of contract (campaign fulfilment and payment)</li>
+            <li>Legitimate interests (fraud prevention, analytics, service improvement)</li>
+            <li>Legal obligation (tax reporting)</li>
+            <li>Consent (optional marketing)</li>
+          </ul>
 
-                <h3>3. Sharing</h3>
-                <ul>
-                    <li>With the brand that sponsors your specific campaign (limited to what is necessary)</li>
-                    <li>Payment processors, tax authorities, cloud/hosting providers</li>
-                    <li>Legal authorities when required</li>
-                </ul>
-                <p>We do <strong>not</strong> sell personal data.</p>
+          <h3>3. Sharing</h3>
+          <ul>
+            <li>With the brand that sponsors your specific campaign (limited to what is necessary)</li>
+            <li>Payment processors, tax authorities, cloud/hosting providers</li>
+            <li>Legal authorities when required</li>
+          </ul>
+          <p>We do <strong>not</strong> sell personal data.</p>
 
-                <h3>4. International Transfers</h3>
-                <p>
-                    Data may be processed in the United States, EU, or other countries. We use EU Standard Contractual 
-                    Clauses (2021/914) and UK International Data Transfer Addendum where required.
-                </p>
+          <h3>4. International Transfers</h3>
+          <p>
+            Data may be processed in the United States, EU, or other countries. We use EU Standard Contractual 
+            Clauses (2021/914) and UK International Data Transfer Addendum where required.
+          </p>
 
-                <h3>5. Retention</h3>
-                <ul>
-                    <li>Campaign & payment records: 7 years (tax requirements)</li>
-                    <li>Account data: deleted on request or 3 years after last activity</li>
-                    <li>Marketing preferences: until consent withdrawn</li>
-                </ul>
+          <h3>5. Retention</h3>
+          <ul>
+            <li>Campaign & payment records: 7 years (tax requirements)</li>
+            <li>Account data: deleted on request or 3 years after last activity</li>
+            <li>Marketing preferences: until consent withdrawn</li>
+          </ul>
 
-                <h3>6. Your Rights (worldwide baseline)</h3>
-                <p>
-                    You may at any time: access, rectify, delete, restrict, object, port your data, or withdraw consent 
-                    by emailing <a href="mailto:privacy@banity.com">privacy@banity.com</a>.
-                </p>
-                <p>
-                    California residents: additional CCPA rights (see Section 10).
-                </p>
+          <h3>6. Your Rights (worldwide baseline)</h3>
+          <p>
+            You may at any time: access, rectify, delete, restrict, object, port your data, or withdraw consent 
+            by emailing <a href="mailto:privacy@banity.com">privacy@banity.com</a>.
+          </p>
+          <p>
+            California residents: additional CCPA rights (see Section 10).
+          </p>
 
-                <h3>7. Security & Children</h3>
-                <p>
-                    We use industry-standard encryption and access controls.<br>
-                    The service is not directed to persons under 16.
-                </p>
+          <h3>7. Security & Children</h3>
+          <p>
+            We use industry-standard encryption and access controls.<br>
+            The service is not directed to persons under 16.
+          </p>
 
-                <h3>8. Changes</h3>
-                <p>
-                    Material changes will be notified by email or in-app notice.
-                </p>
+          <h3>8. Changes</h3>
+          <p>
+            Material changes will be notified by email or in-app notice.
+          </p>
 
-                <h3>9. Contact & Data Controller</h3>
-                <p>
-                    <strong>Banity Ltd</strong><br>
-                    Email: <a href="mailto:privacy@banity.com">privacy@banity.com</a><br>
-                    EU representative: available on request
-                </p>
+          <h3>9. Contact & Data Controller</h3>
+          <p>
+            <strong>Banity Ltd</strong><br>
+            Email: <a href="mailto:privacy@banity.com">privacy@banity.com</a><br>
+            EU representative: available on request
+          </p>
 
-                <h3>10. California-Specific Rights (CCPA/CPRA)</h3>
-                <p>
-                    You have the right to know, delete, correct, and opt out of "sale" or "sharing" (we do not sell or 
-                    share for cross-context behavioural advertising). Submit requests at 
-                    <a href="mailto:privacy@banity.com">privacy@banity.com</a> or our web form.
-                </p>
-            </div>
-        </article>
+          <h3>10. California-Specific Rights (CCPA/CPRA)</h3>
+          <p>
+            You have the right to know, delete, correct, and opt out of "sale" or "sharing" (we do not sell or 
+            share for cross-context behavioural advertising). Submit requests at 
+            <a href="mailto:privacy@banity.com">privacy@banity.com</a> or our web form.
+          </p>
+        </div>
+      </article>
 
-        <!-- Divider -->
-        <div class="divider"></div>
+      <!-- Divider -->
+      <div class="divider"></div>
 
-        <!-- Terms of Service -->
-        <article id="terms" class="section">
-            <div class="section-header terms">
-                <h2 class="section-title">2. Terms of Service</h2>
-                <p class="section-meta"><strong>Last Updated:</strong> {lastUpdated}</p>
-            </div>
+      <!-- Terms of Service -->
+      <article id="terms" class="section">
+        <div class="section-header terms">
+          <h2 class="section-title">2. Terms of Service</h2>
+          <p class="section-meta"><strong>Last Updated:</strong> {lastUpdated}</p>
+        </div>
 
-            <div class="prose">
-                <p>
-                    By creating an account or participating in any Banity campaign, you agree to these Terms.
-                </p>
+        <div class="prose">
+          <p>
+            By creating an account or participating in any Banity campaign, you agree to these Terms.
+          </p>
 
-                <h3>1. Eligibility</h3>
-                <p>
-                    You must be 18+ (or age of majority in your jurisdiction) and legally able to contract.
-                </p>
+          <h3>1. Eligibility</h3>
+          <p>
+            You must be 18+ (or age of majority in your jurisdiction) and legally able to contract.
+          </p>
 
-                <h3>2. Independent Contractor Status</h3>
-                <p>
-                    You are an independent creator, not an employee. You are solely responsible for all taxes, 
-                    social-security contributions, and compliance with local laws.
-                </p>
+          <h3>2. Independent Contractor Status</h3>
+          <p>
+            You are an independent creator, not an employee. You are solely responsible for all taxes, 
+            social-security contributions, and compliance with local laws.
+          </p>
 
-                <h3>3. Campaign Process</h3>
-                <ul>
-                    <li>Each campaign has its own brief, deliverables, deadlines, and fixed compensation.</li>
-                    <li>Payment is made within 30 days after the campaign end date, provided all deliverables are 
-                        approved and remain live for the required period.</li>
-                </ul>
+          <h3>3. Campaign Process</h3>
+          <ul>
+            <li>Each campaign has its own brief, deliverables, deadlines, and fixed compensation.</li>
+            <li>Payment is made within 30 days after the campaign end date, provided all deliverables are 
+              approved and remain live for the required period.</li>
+          </ul>
 
-                <h3>4. Limited, Non-Exclusive License (Fair & Modern Standard)</h3>
-                <p>When you are paid for a campaign:</p>
-                <p>
-                    You grant Banity and the sponsoring brand a <strong>worldwide, non-exclusive, royalty-free, 
-                    fully-paid, transferable, sublicensable license</strong> to use your approved UGC (including your 
-                    name, image, voice, likeness, and social handle) for the following purposes only:
-                </p>
-                <ul>
-                    <li>On the brand's owned channels, paid media, and website</li>
-                    <li>In campaign reporting and case studies</li>
-                    <li>For a maximum duration of <strong>5 years from the campaign end date</strong>, after which the 
-                        license automatically terminates (except for content already published in non-removable formats 
-                        such as printed materials or archived press releases).</li>
-                </ul>
-                <p>
-                    You retain full ownership and may continue to use your UGC anywhere, anytime, for any purpose.
-                </p>
+          <h3>4. Limited, Non-Exclusive License (Fair & Modern Standard)</h3>
+          <p>When you are paid for a campaign:</p>
+          <p>
+            You grant Banity and the sponsoring brand a <strong>worldwide, non-exclusive, royalty-free, 
+            fully-paid, transferable, sublicensable license</strong> to use your approved UGC (including your 
+            name, image, voice, likeness, and social handle) for the following purposes only:
+          </p>
+          <ul>
+            <li>On the brand's owned channels, paid media, and website</li>
+            <li>In campaign reporting and case studies</li>
+            <li>For a maximum duration of <strong>5 years from the campaign end date</strong>, after which the 
+              license automatically terminates (except for content already published in non-removable formats 
+              such as printed materials or archived press releases).</li>
+          </ul>
+          <p>
+            You retain full ownership and may continue to use your UGC anywhere, anytime, for any purpose.
+          </p>
 
-                <h3>5. Your Warranties</h3>
-                <p>You represent and warrant that:</p>
-                <ul>
-                    <li>You own or control all rights in the UGC</li>
-                    <li>The UGC does not infringe third-party IP, privacy, or publicity rights</li>
-                    <li>You have all necessary releases</li>
-                    <li>You will make clear paid-partnership disclosures as required by law and platform rules 
-                        (#ad, #sponsored, etc.)</li>
-                </ul>
+          <h3>5. Your Warranties</h3>
+          <p>You represent and warrant that:</p>
+          <ul>
+            <li>You own or control all rights in the UGC</li>
+            <li>The UGC does not infringe third-party IP, privacy, or publicity rights</li>
+            <li>You have all necessary releases</li>
+            <li>You will make clear paid-partnership disclosures as required by law and platform rules 
+              (#ad, #sponsored, etc.)</li>
+          </ul>
 
-                <h3>6. Approval & Payment Conditions</h3>
-                <ul>
-                    <li>Content must be posted and remain live for the period stated in the brief (typically 6–12 months).</li>
-                    <li>We or the brand may request reasonable revisions.</li>
-                    <li>Payment may be withheld or clawed back if you delete required posts early or breach these Terms.</li>
-                </ul>
+          <h3>6. Approval & Payment Conditions</h3>
+          <ul>
+            <li>Content must be posted and remain live for the period stated in the brief (typically 6–12 months).</li>
+            <li>We or the brand may request reasonable revisions.</li>
+            <li>Payment may be withheld or clawed back if you delete required posts early or breach these Terms.</li>
+          </ul>
 
-                <h3>7. Termination & Account Suspension</h3>
-                <p>
-                    We may suspend or terminate your account immediately for fraud, material breach, or behaviour that 
-                    harms Banity or its clients.
-                </p>
+          <h3>7. Termination & Account Suspension</h3>
+          <p>
+            We may suspend or terminate your account immediately for fraud, material breach, or behaviour that 
+            harms Banity or its clients.
+          </p>
 
-                <h3>8. Indemnification</h3>
-                <p>
-                    You indemnify Banity and the brand against third-party claims arising from your breach of warranties above.
-                </p>
+          <h3>8. Indemnification</h3>
+          <p>
+            You indemnify Banity and the brand against third-party claims arising from your breach of warranties above.
+          </p>
 
-                <h3>9. Limitation of Liability & Disclaimer</h3>
-                <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW:</p>
-                <ul>
-                    <li>Our total liability is limited to the amount actually paid to you in the preceding 12 months.</li>
-                    <li>We are not liable for indirect, consequential, or punitive damages.</li>
-                </ul>
+          <h3>9. Limitation of Liability & Disclaimer</h3>
+          <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW:</p>
+          <ul>
+            <li>Our total liability is limited to the amount actually paid to you in the preceding 12 months.</li>
+            <li>We are not liable for indirect, consequential, or punitive damages.</li>
+          </ul>
 
-                <h3>10. Governing Law & Dispute Resolution</h3>
-                <ul>
-                    <li><strong>Governing law:</strong> Laws of England and Wales</li>
-                    <li><strong>Dispute resolution:</strong> Any dispute shall first be negotiated in good faith. If 
-                        unresolved after 30 days, it shall be referred to binding arbitration in London under LCIA Rules 
-                        (fast-track procedure for claims under £100,000). Judgment may be entered in any court of 
-                        competent jurisdiction.</li>
-                </ul>
+          <h3>10. Governing Law & Dispute Resolution</h3>
+          <ul>
+            <li><strong>Governing law:</strong> Laws of England and Wales</li>
+            <li><strong>Dispute resolution:</strong> Any dispute shall first be negotiated in good faith. If 
+              unresolved after 30 days, it shall be referred to binding arbitration in London under LCIA Rules 
+              (fast-track procedure for claims under £100,000). Judgment may be entered in any court of 
+              competent jurisdiction.</li>
+          </ul>
 
-                <h3>11. Miscellaneous</h3>
-                <ul>
-                    <li>These Terms may be updated; we will notify you of material changes. Continued participation = acceptance.</li>
-                    <li>If any provision is unenforceable, the rest remains valid.</li>
-                </ul>
-            </div>
-        </article>
+          <h3>11. Miscellaneous</h3>
+          <ul>
+            <li>These Terms may be updated; we will notify you of material changes. Continued participation = acceptance.</li>
+            <li>If any provision is unenforceable, the rest remains valid.</li>
+          </ul>
+        </div>
+      </article>
 
-        <!-- Contact Section -->
-        <section id="contact" class="contact-section">
-            <h2 class="contact-title">Contact</h2>
-            <p class="contact-info">
-                <strong>Banity Ltd</strong>
-            </p>
-            <div class="contact-buttons">
-                <a href="mailto:legal@banity.com" class="btn btn-primary">
-                    <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                              d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
-                    Legal Inquiries
-                </a>
-                <a href="mailto:privacy@banity.com" class="btn btn-secondary">
-                    <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                    Privacy Requests
-                </a>
-            </div>
-        </section>
+      <!-- Contact Section -->
+      <section id="contact" class="contact-section">
+        <h2 class="contact-title">Questions?</h2>
+        <p class="contact-info">
+          <strong>Banity Ltd</strong>
+        </p>
+        <div class="contact-buttons">
+          <a href="mailto:legal@banity.com" class="btn btn-primary">
+            📧 Legal Inquiries
+          </a>
+          <a href="mailto:privacy@banity.com" class="btn btn-secondary">
+            🔒 Privacy Requests
+          </a>
+          <a href="/contact" class="btn btn-secondary">
+            💬 Contact Us
+          </a>
+        </div>
+      </section>
 
     </div>
+  </div>
+
+  <style>
+    .legal-page {
+      background: #f8fafc;
+      min-height: 100vh;
+    }
+
+    .legal-hero {
+      text-align: center;
+      padding: 4rem 2rem 3rem;
+      background: linear-gradient(135deg, #1a1a2e, #2d2d4a);
+      color: white;
+    }
+    
+    .badge {
+      display: inline-block;
+      padding: 0.375rem 1rem;
+      background: rgba(37, 99, 235, 0.2);
+      color: #60a5fa;
+      border-radius: 100px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 1.5rem;
+    }
+    
+    .legal-hero h1 {
+      font-size: 3rem;
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 1rem;
+    }
+    
+    .hero-subtitle {
+      font-size: 1.125rem;
+      color: rgba(255,255,255,0.8);
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    
+    .content-wrapper {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 3rem 2rem;
+    }
+    
+    .section {
+      margin-bottom: 3rem;
+      background: white;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    
+    .section-header {
+      background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+      border-left: 4px solid #2563eb;
+      padding: 2rem;
+    }
+    
+    .section-header.terms {
+      background: linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%);
+      border-left-color: #9333ea;
+    }
+    
+    .section-title {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+    
+    .section-meta {
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+    
+    .prose {
+      padding: 2rem;
+      font-size: 1rem;
+      line-height: 1.75;
+    }
+    
+    .prose h3 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-top: 2rem;
+      margin-bottom: 0.75rem;
+    }
+    
+    .prose h3:first-child {
+      margin-top: 0;
+    }
+    
+    .prose p {
+      margin-bottom: 1rem;
+      color: #4b5563;
+    }
+    
+    .prose strong {
+      font-weight: 600;
+      color: #1a1a2e;
+    }
+    
+    .prose ul {
+      margin-bottom: 1rem;
+      padding-left: 1.5rem;
+    }
+    
+    .prose li {
+      margin-bottom: 0.5rem;
+      color: #4b5563;
+    }
+    
+    .prose a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+    
+    .prose a:hover {
+      text-decoration: underline;
+    }
+    
+    .divider {
+      height: 1px;
+      background: linear-gradient(to right, transparent, #e5e7eb, transparent);
+      margin: 3rem 0;
+    }
+    
+    .contact-section {
+      background: white;
+      border-radius: 16px;
+      padding: 3rem;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    
+    .contact-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+    
+    .contact-info {
+      color: #6b7280;
+      margin-bottom: 1.5rem;
+    }
+    
+    .contact-buttons {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.9375rem;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #1d4ed8;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    }
+    
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+      border: 1px solid #e5e7eb;
+    }
+    
+    .btn-secondary:hover {
+      border-color: #2563eb;
+      color: #2563eb;
+      transform: translateY(-2px);
+    }
+    
+    @media (max-width: 768px) {
+      .legal-hero h1 {
+        font-size: 2rem;
+      }
+      
+      .section-title {
+        font-size: 1.5rem;
+      }
+      
+      .content-wrapper {
+        padding: 2rem 1rem;
+      }
+      
+      .prose {
+        padding: 1.5rem;
+      }
+      
+      .contact-buttons {
+        flex-direction: column;
+      }
+    }
+  </style>
 </Layout>
