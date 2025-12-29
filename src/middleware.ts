@@ -122,7 +122,27 @@ export const onRequest = defineMiddleware(async (context, next) => {
   
   if (impersonateCookie && (locals.isAdmin || locals.isMasterKeySession)) {
     try {
-      const impersonatedUser = JSON.parse(impersonateCookie);
+      // Try to decode base64 cookie value
+      let impersonatedUser;
+      try {
+        const decodedValue = Buffer.from(impersonateCookie, 'base64').toString('utf-8');
+        impersonatedUser = JSON.parse(decodedValue);
+      } catch (decodeError) {
+        // If base64 decode fails, try direct JSON parse (old format)
+        try {
+          impersonatedUser = JSON.parse(impersonateCookie);
+        } catch {
+          // Invalid cookie, clear it
+          cookies.delete("impersonate_user", { path: "/" });
+          console.error("Invalid impersonate_user cookie, cleared");
+          return next();
+        }
+      }
+      
+      if (!impersonatedUser || !impersonatedUser.id) {
+        cookies.delete("impersonate_user", { path: "/" });
+        return next();
+      }
       
       // Only apply impersonation on non-admin pages
       if (!path.startsWith("/admin") && !path.startsWith("/api/admin")) {
