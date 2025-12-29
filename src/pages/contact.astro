@@ -3,6 +3,9 @@
 export const prerender = false;
 
 import Layout from "../layouts/Layout.astro";
+import { getPageContent } from "../lib/content";
+
+const content = await getPageContent('contact');
 
 let successMessage = '';
 let errorMessage = '';
@@ -70,8 +73,9 @@ if (Astro.request.method === 'POST') {
     <!-- Hero -->
     <section class="hero">
       <div class="hero-content">
-        <h1>Get in Touch</h1>
-        <p>Have a question or want to learn more? We'd love to hear from you.</p>
+        {content.hero?.badge && <span class="hero-badge">{content.hero.badge}</span>}
+        <h1>{content.hero?.title || "Get in Touch"}</h1>
+        <p>{content.hero?.subtitle || "Have a question or want to learn more? We'd love to hear from you."}</p>
       </div>
     </section>
 
@@ -137,21 +141,21 @@ if (Astro.request.method === 'POST') {
               <div class="info-icon">📧</div>
               <h3>Email Us</h3>
               <p>For general inquiries</p>
-              <a href="mailto:hello@banity.com">hello@banity.com</a>
+              <a href={`mailto:${content.info?.email || "hello@banity.com"}`}>{content.info?.email || "hello@banity.com"}</a>
             </div>
             
             <div class="info-card">
               <div class="info-icon">💬</div>
               <h3>Support</h3>
               <p>Need help with your account?</p>
-              <a href="mailto:support@banity.com">support@banity.com</a>
+              <a href={`mailto:${content.info?.support_email || "support@banity.com"}`}>{content.info?.support_email || "support@banity.com"}</a>
             </div>
             
             <div class="info-card">
               <div class="info-icon">🤝</div>
               <h3>Partnerships</h3>
               <p>Interested in working together?</p>
-              <a href="mailto:partners@banity.com">partners@banity.com</a>
+              <a href={`mailto:${content.info?.partnerships_email || "partners@banity.com"}`}>{content.info?.partnerships_email || "partners@banity.com"}</a>
             </div>
 
             <div class="social-links">
@@ -220,6 +224,18 @@ if (Astro.request.method === 'POST') {
     .hero-content {
       max-width: 600px;
       margin: 0 auto;
+    }
+
+    .hero-badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      color: white;
+      padding: 0.5rem 1.25rem;
+      border-radius: 100px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+      border: 1px solid rgba(255,255,255,0.2);
     }
 
     .hero h1 {
