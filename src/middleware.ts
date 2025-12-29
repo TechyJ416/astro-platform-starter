@@ -25,6 +25,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
     locals.isAdmin = false;
     locals.isModerator = false;
     locals.isMasterKeySession = false;
+    locals.isImpersonating = false;
+    locals.impersonatedUser = null;
+    locals.realAdmin = null;
     return next();
   }
 
@@ -41,6 +44,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
   locals.isAdmin = false;
   locals.isModerator = false;
   locals.isMasterKeySession = false;
+  locals.isImpersonating = false;
+  locals.impersonatedUser = null;
+  locals.realAdmin = null;
 
   // ============================================================
   // STEP 3: CHECK AUTHENTICATION
@@ -110,7 +116,55 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   // ============================================================
-  // STEP 4: PROTECT ROUTES
+  // STEP 4: CHECK IMPERSONATION (Admin feature)
+  // ============================================================
+  const impersonateCookie = cookies.get("impersonate_user")?.value;
+  
+  if (impersonateCookie && (locals.isAdmin || locals.isMasterKeySession)) {
+    try {
+      const impersonatedUser = JSON.parse(impersonateCookie);
+      
+      // Only apply impersonation on non-admin pages
+      if (!path.startsWith("/admin") && !path.startsWith("/api/admin")) {
+        locals.isImpersonating = true;
+        locals.impersonatedUser = impersonatedUser;
+        
+        // Store real admin info for the banner
+        locals.realAdmin = {
+          isMasterKey: locals.isMasterKeySession,
+          profile: locals.profile,
+        };
+        
+        // Override profile with impersonated user for dashboard pages
+        if (path.startsWith("/dashboard")) {
+          // Fetch full profile for impersonated user
+          const { data: fullProfile } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", impersonatedUser.id)
+            .single();
+          
+          if (fullProfile) {
+            locals.profile = fullProfile;
+            // Create a fake session for the impersonated user
+            locals.session = {
+              user: { id: impersonatedUser.id, email: impersonatedUser.email },
+            } as any;
+          }
+        }
+      } else {
+        // On admin pages, just track that impersonation is active
+        locals.isImpersonating = true;
+        locals.impersonatedUser = impersonatedUser;
+      }
+    } catch (e) {
+      // Invalid cookie, clear it
+      cookies.delete("impersonate_user", { path: "/" });
+    }
+  }
+
+  // ============================================================
+  // STEP 5: PROTECT ROUTES
   // ============================================================
 
   // Admin routes (except login/setup which are handled above)
@@ -118,13 +172,21 @@ export const onRequest = defineMiddleware(async (context, next) => {
     if (!locals.isMasterKeySession && !locals.session) {
       return redirect("/admin/login");
     }
-    if (!locals.isAdmin && !locals.isModerator && !locals.isMasterKeySession) {
+    // Check real admin status (not impersonated)
+    const realProfile = locals.realAdmin?.profile || locals.profile;
+    const realIsAdmin = locals.isMasterKeySession || realProfile?.role === 'admin' || realProfile?.role === 'moderator';
+    if (!realIsAdmin && !locals.isMasterKeySession) {
       return redirect("/unauthorized");
     }
   }
 
   // Dashboard routes - check for pending/denied accounts
   if (path.startsWith("/dashboard")) {
+    // Allow if impersonating (admin viewing as user)
+    if (locals.isImpersonating) {
+      return next();
+    }
+    
     if (!locals.session && !locals.isMasterKeySession) {
       return redirect("/login?redirect=" + encodeURIComponent(path));
     }
