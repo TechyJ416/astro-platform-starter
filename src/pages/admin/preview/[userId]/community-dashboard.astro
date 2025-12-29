@@ -1,0 +1,595 @@
+---
+// src/pages/admin/preview/[userId]/community-dashboard.astro
+export const prerender = false;
+
+import AdminLayout from "../../../../layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const { userId } = Astro.params;
+
+// Check admin access
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+const adminProfile = Astro.locals.profile;
+
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+const isAdmin = isMasterKeySession || adminProfile?.role === 'admin';
+if (!isAdmin) {
+  return Astro.redirect('/admin');
+}
+
+// Create service client
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+// Fetch target user
+const { data: profile } = await supabase
+  .from('profiles')
+  .select('*')
+  .eq('id', userId)
+  .single();
+
+if (!profile) {
+  return Astro.redirect('/admin/users?error=user_not_found');
+}
+
+// Check if user is a moderator/manager
+const isManager = profile.role === 'moderator' || profile.role === 'community_manager' || profile.role === 'admin';
+
+// Fetch communities (if community table exists)
+let communities: any[] = [];
+let communityStats = { total: 0, members: 0, posts: 0 };
+
+try {
+  const { data: communitiesData } = await supabase
+    .from('communities')
+    .select('*')
+    .order('created_at', { ascending: false });
+  
+  communities = communitiesData || [];
+  communityStats.total = communities.length;
+
+  // Get member count
+  const { count: memberCount } = await supabase
+    .from('community_members')
+    .select('*', { count: 'exact', head: true });
+  communityStats.members = memberCount || 0;
+
+  // Get post count
+  const { count: postCount } = await supabase
+    .from('community_posts')
+    .select('*', { count: 'exact', head: true });
+  communityStats.posts = postCount || 0;
+} catch (e) {
+  // Tables might not exist
+}
+
+// Fetch recent posts for moderation queue
+let recentPosts: any[] = [];
+try {
+  const { data: postsData } = await supabase
+    .from('community_posts')
+    .select(`
+      *,
+      author:profiles!community_posts_user_id_fkey(full_name, email),
+      community:communities(name)
+    `)
+    .order('created_at', { ascending: false })
+    .limit(10);
+  recentPosts = postsData || [];
+} catch (e) {
+  // Table might not exist
+}
+---
+
+<AdminLayout title={`Community Dashboard Preview: ${profile.full_name || profile.email}`}>
+  <div class="preview-banner">
+    <div class="preview-info">
+      <span class="preview-icon">👁️</span>
+      <span>Viewing <strong>{profile.full_name || profile.email}</strong>'s Community Dashboard</span>
+      <span class="role-badge">{profile.role}</span>
+    </div>
+    <div class="preview-actions">
+      <a href={`/admin/preview/${userId}`} class="btn-preview">← Back to Preview Hub</a>
+      <a href={`/admin/preview/${userId}/dashboard`} class="btn-preview">Creator Dashboard</a>
+    </div>
+  </div>
+
+  {!isManager ? (
+    <div class="access-denied">
+      <span>🚫</span>
+      <h2>Not a Community Manager</h2>
+      <p>This user ({profile.role}) doesn't have access to the Community Dashboard.</p>
+      <p>Only users with <strong>moderator</strong>, <strong>community_manager</strong>, or <strong>admin</strong> roles can access this area.</p>
+    </div>
+  ) : (
+    <div class="community-preview">
+      <div class="dashboard-header">
+        <h1>🏘️ Community Dashboard</h1>
+        <p>Manage communities, moderate content, and engage with members.</p>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">🏘️</div>
+          <div class="stat-content">
+            <span class="stat-value">{communityStats.total}</span>
+            <span class="stat-label">Communities</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">👥</div>
+          <div class="stat-content">
+            <span class="stat-value">{communityStats.members}</span>
+            <span class="stat-label">Total Members</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">💬</div>
+          <div class="stat-content">
+            <span class="stat-value">{communityStats.posts}</span>
+            <span class="stat-label">Posts</span>
+          </div>
+        </div>
+        <div class="stat-card highlight">
+          <div class="stat-icon">🛡️</div>
+          <div class="stat-content">
+            <span class="stat-value">0</span>
+            <span class="stat-label">Flagged</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Grid -->
+      <div class="dashboard-grid">
+        <!-- Communities List -->
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Communities</h2>
+            <button class="btn btn-primary disabled" disabled>+ Create Community</button>
+          </div>
+          <div class="panel-content">
+            {communities.length > 0 ? (
+              <div class="community-list">
+                {communities.slice(0, 5).map(community => (
+                  <div class="community-item">
+                    <div class="community-avatar">
+                      {community.name?.charAt(0).toUpperCase() || '?'}
+                    </div>
+                    <div class="community-info">
+                      <h4>{community.name}</h4>
+                      <p>{community.description?.substring(0, 60) || 'No description'}...</p>
+                    </div>
+                    <span class={`status-badge ${community.is_active ? 'status-active' : 'status-inactive'}`}>
+                      {community.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div class="empty-state">
+                <span>🏘️</span>
+                <p>No communities yet</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <!-- Recent Posts -->
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Recent Posts</h2>
+            <a href={`/admin/preview/${userId}/moderation`} class="view-all">View Queue →</a>
+          </div>
+          <div class="panel-content">
+            {recentPosts.length > 0 ? (
+              <div class="post-list">
+                {recentPosts.slice(0, 5).map(post => (
+                  <div class="post-item">
+                    <div class="post-header">
+                      <span class="post-author">{post.author?.full_name || post.author?.email || 'Unknown'}</span>
+                      <span class="post-time">{new Date(post.created_at).toLocaleDateString()}</span>
+                    </div>
+                    <p class="post-content">{post.content?.substring(0, 80) || 'No content'}...</p>
+                    <span class="post-community">in {post.community?.name || 'Unknown Community'}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div class="empty-state">
+                <span>💬</span>
+                <p>No posts yet</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="quick-actions">
+        <h2>Quick Actions</h2>
+        <div class="actions-grid">
+          <button class="action-card disabled" disabled>
+            <span class="action-icon">🛡️</span>
+            <h4>Moderation Queue</h4>
+            <p>Review flagged content</p>
+          </button>
+          <button class="action-card disabled" disabled>
+            <span class="action-icon">📊</span>
+            <h4>Analytics</h4>
+            <p>View engagement metrics</p>
+          </button>
+          <button class="action-card disabled" disabled>
+            <span class="action-icon">📢</span>
+            <h4>Announcements</h4>
+            <p>Post to communities</p>
+          </button>
+          <button class="action-card disabled" disabled>
+            <span class="action-icon">⚙️</span>
+            <h4>Settings</h4>
+            <p>Community preferences</p>
+          </button>
+        </div>
+      </div>
+    </div>
+  )}
+
+  <style>
+    .preview-banner {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      padding: 1rem 1.5rem;
+      border-radius: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .preview-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .preview-icon { font-size: 1.25rem; }
+
+    .role-badge {
+      background: rgba(255,255,255,0.2);
+      padding: 0.25rem 0.75rem;
+      border-radius: 100px;
+      font-size: 0.75rem;
+      text-transform: capitalize;
+    }
+
+    .preview-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .btn-preview {
+      background: rgba(255,255,255,0.2);
+      color: white;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+
+    .access-denied {
+      background: #fee2e2;
+      border: 2px solid #ef4444;
+      border-radius: 16px;
+      padding: 3rem;
+      text-align: center;
+    }
+
+    .access-denied span {
+      font-size: 3rem;
+      display: block;
+      margin-bottom: 1rem;
+    }
+
+    .access-denied h2 {
+      color: #991b1b;
+      margin-bottom: 0.5rem;
+    }
+
+    .access-denied p {
+      color: #7f1d1d;
+    }
+
+    .community-preview {
+      background: #f0fdf4;
+      border-radius: 16px;
+      padding: 2rem;
+    }
+
+    .dashboard-header {
+      margin-bottom: 2rem;
+    }
+
+    .dashboard-header h1 {
+      font-size: 1.75rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+
+    .dashboard-header p {
+      color: #6b7280;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .stat-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .stat-card.highlight {
+      background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+      border: 2px solid #10b981;
+    }
+
+    .stat-icon {
+      font-size: 1.5rem;
+      width: 48px;
+      height: 48px;
+      background: #f3f4f6;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .stat-value {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .stat-label {
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .panel {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .panel-header h2 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    .view-all {
+      font-size: 0.875rem;
+      color: #10b981;
+      text-decoration: none;
+    }
+
+    .panel-content {
+      padding: 1rem 1.25rem;
+    }
+
+    .btn {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: #10b981;
+      color: white;
+    }
+
+    .btn.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .community-list,
+    .post-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .community-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 8px;
+    }
+
+    .community-avatar {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: #059669;
+    }
+
+    .community-info {
+      flex: 1;
+    }
+
+    .community-info h4 {
+      font-size: 0.875rem;
+      color: #1a1a2e;
+      margin-bottom: 0.125rem;
+    }
+
+    .community-info p {
+      font-size: 0.75rem;
+      color: #6b7280;
+      margin: 0;
+    }
+
+    .status-badge {
+      padding: 0.25rem 0.75rem;
+      border-radius: 100px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+    }
+
+    .status-active { background: #d1fae5; color: #065f46; }
+    .status-inactive { background: #fee2e2; color: #991b1b; }
+
+    .post-item {
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 8px;
+    }
+
+    .post-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.25rem;
+    }
+
+    .post-author {
+      font-weight: 600;
+      font-size: 0.8125rem;
+      color: #1a1a2e;
+    }
+
+    .post-time {
+      font-size: 0.6875rem;
+      color: #9ca3af;
+    }
+
+    .post-content {
+      font-size: 0.8125rem;
+      color: #6b7280;
+      margin-bottom: 0.25rem;
+    }
+
+    .post-community {
+      font-size: 0.6875rem;
+      color: #10b981;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 2rem;
+      color: #9ca3af;
+    }
+
+    .empty-state span {
+      font-size: 2rem;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+
+    .quick-actions h2 {
+      font-size: 1.125rem;
+      color: #374151;
+      margin-bottom: 1rem;
+    }
+
+    .actions-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+    }
+
+    .action-card {
+      background: white;
+      border: 2px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 1.25rem;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .action-card.disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .action-icon {
+      font-size: 1.5rem;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+
+    .action-card h4 {
+      font-size: 0.875rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+
+    .action-card p {
+      font-size: 0.75rem;
+      color: #6b7280;
+      margin: 0;
+    }
+
+    @media (max-width: 1024px) {
+      .stats-grid,
+      .actions-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .stats-grid,
+      .actions-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</AdminLayout>
