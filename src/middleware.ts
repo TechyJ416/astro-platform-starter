@@ -118,26 +118,28 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // ============================================================
   // STEP 4: CHECK IMPERSONATION (Admin feature)
   // ============================================================
-  // Look for new format (just ID) or old format (JSON)
-  const impersonateUserId = cookies.get("impersonate_user_id")?.value;
-  const oldImpersonateCookie = cookies.get("impersonate_user")?.value;
+  // Check for impersonation cookies (try multiple formats for compatibility)
+  const impersonateId = cookies.get("impersonate_id")?.value 
+    || cookies.get("impersonate_user_id")?.value;
   
-  // Clear old format cookie if it exists
-  if (oldImpersonateCookie) {
+  // Clear any old format cookies
+  const oldCookie = cookies.get("impersonate_user")?.value;
+  if (oldCookie) {
     cookies.delete("impersonate_user", { path: "/" });
   }
   
-  if (impersonateUserId && (locals.isAdmin || locals.isMasterKeySession)) {
+  if (impersonateId && (locals.isAdmin || locals.isMasterKeySession)) {
     try {
       // Fetch the impersonated user's profile
       const { data: impersonatedProfile } = await supabase
         .from("profiles")
         .select("id, email, full_name, role")
-        .eq("id", impersonateUserId)
+        .eq("id", impersonateId)
         .single();
       
       if (!impersonatedProfile) {
-        // Invalid user ID, clear the cookie
+        // Invalid user ID, clear the cookies
+        cookies.delete("impersonate_id", { path: "/" });
         cookies.delete("impersonate_user_id", { path: "/" });
         return next();
       }
@@ -183,7 +185,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
         locals.impersonatedUser = impersonatedUser;
       }
     } catch (e) {
-      // Error fetching user, clear cookie
+      // Error fetching user, clear cookies
+      cookies.delete("impersonate_id", { path: "/" });
       cookies.delete("impersonate_user_id", { path: "/" });
       console.error("Impersonation error:", e);
     }
