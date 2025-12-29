@@ -1,25 +1,27 @@
 // src/lib/content.ts
-import { supabase } from './supabase';
+import { createClient } from '@supabase/supabase-js';
 
 export interface PageContent {
   [key: string]: any;
 }
 
-// Cache for page content (reduces DB calls)
-const contentCache: Map<string, { data: PageContent; timestamp: number }> = new Map();
-const CACHE_TTL = 60000; // 1 minute cache
+// Create a dedicated client for content fetching
+function getSupabaseClient() {
+  const url = import.meta.env.SUPABASE_URL;
+  const key = import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+  
+  return createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  });
+}
 
 /**
- * Get page content from database with caching
+ * Get page content from database (no caching for now to ensure fresh data)
  */
 export async function getPageContent(pageKey: string): Promise<PageContent> {
-  // Check cache first
-  const cached = contentCache.get(pageKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
-  }
-
   try {
+    const supabase = getSupabaseClient();
+    
     const { data, error } = await supabase
       .from('page_content')
       .select('content')
@@ -27,14 +29,16 @@ export async function getPageContent(pageKey: string): Promise<PageContent> {
       .eq('is_active', true)
       .single();
 
-    if (error || !data) {
-      console.error(`Failed to load content for ${pageKey}:`, error);
+    if (error) {
+      console.error(`Content fetch error for ${pageKey}:`, error.message);
       return getDefaultContent(pageKey);
     }
 
-    // Update cache
-    contentCache.set(pageKey, { data: data.content, timestamp: Date.now() });
-    
+    if (!data || !data.content) {
+      console.warn(`No content found for ${pageKey}, using defaults`);
+      return getDefaultContent(pageKey);
+    }
+
     return data.content;
   } catch (e) {
     console.error(`Error loading content for ${pageKey}:`, e);
@@ -99,15 +103,4 @@ function getDefaultContent(pageKey: string): PageContent {
   };
 
   return defaults[pageKey] || {};
-}
-
-/**
- * Clear content cache (call after updates)
- */
-export function clearContentCache(pageKey?: string) {
-  if (pageKey) {
-    contentCache.delete(pageKey);
-  } else {
-    contentCache.clear();
-  }
 }
