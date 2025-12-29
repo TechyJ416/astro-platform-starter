@@ -1,0 +1,507 @@
+---
+// src/pages/contact.astro
+export const prerender = false;
+
+import Layout from "../layouts/Layout.astro";
+
+let successMessage = '';
+let errorMessage = '';
+
+if (Astro.request.method === 'POST') {
+  try {
+    const formData = await Astro.request.formData();
+    const name = formData.get('name') as string;
+    const email = formData.get('email') as string;
+    const subject = formData.get('subject') as string;
+    const message = formData.get('message') as string;
+
+    // Validate
+    if (!name || !email || !message) {
+      errorMessage = 'Please fill in all required fields.';
+    } else if (!email.includes('@')) {
+      errorMessage = 'Please enter a valid email address.';
+    } else {
+      // In production, you would send this to an email service or save to database
+      // For now, we'll just show a success message
+      
+      // Optional: Send via Resend if configured
+      const RESEND_API_KEY = import.meta.env.RESEND_API_KEY;
+      const EMAIL_FROM = import.meta.env.EMAIL_FROM;
+      const CONTACT_EMAIL = 'contact@yourdomain.com'; // Change this
+      
+      if (RESEND_API_KEY && EMAIL_FROM) {
+        try {
+          await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${RESEND_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: EMAIL_FROM,
+              to: CONTACT_EMAIL,
+              subject: `Contact Form: ${subject || 'General Inquiry'}`,
+              html: `
+                <h2>New Contact Form Submission</h2>
+                <p><strong>Name:</strong> ${name}</p>
+                <p><strong>Email:</strong> ${email}</p>
+                <p><strong>Subject:</strong> ${subject || 'N/A'}</p>
+                <p><strong>Message:</strong></p>
+                <p>${message.replace(/\n/g, '<br>')}</p>
+              `,
+              reply_to: email,
+            }),
+          });
+        } catch (e) {
+          console.error('Failed to send email:', e);
+        }
+      }
+      
+      successMessage = 'Thank you for your message! We\'ll get back to you soon.';
+    }
+  } catch (e) {
+    errorMessage = 'Something went wrong. Please try again.';
+  }
+}
+---
+
+<Layout title="Contact Us">
+  <div class="contact-page">
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero-content">
+        <h1>Get in Touch</h1>
+        <p>Have a question or want to learn more? We'd love to hear from you.</p>
+      </div>
+    </section>
+
+    <!-- Main Content -->
+    <section class="contact-section">
+      <div class="container">
+        <div class="contact-grid">
+          <!-- Contact Form -->
+          <div class="contact-form-wrapper">
+            <h2>Send Us a Message</h2>
+            
+            {successMessage && (
+              <div class="alert success">
+                <span>✓</span> {successMessage}
+              </div>
+            )}
+            
+            {errorMessage && (
+              <div class="alert error">
+                <span>!</span> {errorMessage}
+              </div>
+            )}
+
+            {!successMessage && (
+              <form method="POST" class="contact-form">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="name">Name *</label>
+                    <input type="text" id="name" name="name" required placeholder="Your name" />
+                  </div>
+                  <div class="form-group">
+                    <label for="email">Email *</label>
+                    <input type="email" id="email" name="email" required placeholder="you@example.com" />
+                  </div>
+                </div>
+                
+                <div class="form-group">
+                  <label for="subject">Subject</label>
+                  <select id="subject" name="subject">
+                    <option value="">Select a topic</option>
+                    <option value="general">General Inquiry</option>
+                    <option value="creator">Creator Questions</option>
+                    <option value="brand">Brand Partnership</option>
+                    <option value="support">Technical Support</option>
+                    <option value="feedback">Feedback</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                
+                <div class="form-group">
+                  <label for="message">Message *</label>
+                  <textarea id="message" name="message" rows="5" required placeholder="How can we help you?"></textarea>
+                </div>
+                
+                <button type="submit" class="btn btn-primary">Send Message</button>
+              </form>
+            )}
+          </div>
+
+          <!-- Contact Info -->
+          <div class="contact-info">
+            <div class="info-card">
+              <div class="info-icon">📧</div>
+              <h3>Email Us</h3>
+              <p>For general inquiries</p>
+              <a href="mailto:hello@banity.com">hello@banity.com</a>
+            </div>
+            
+            <div class="info-card">
+              <div class="info-icon">💬</div>
+              <h3>Support</h3>
+              <p>Need help with your account?</p>
+              <a href="mailto:support@banity.com">support@banity.com</a>
+            </div>
+            
+            <div class="info-card">
+              <div class="info-icon">🤝</div>
+              <h3>Partnerships</h3>
+              <p>Interested in working together?</p>
+              <a href="mailto:partners@banity.com">partners@banity.com</a>
+            </div>
+
+            <div class="social-links">
+              <h3>Follow Us</h3>
+              <div class="social-icons">
+                <a href="#" class="social-icon" title="Twitter">𝕏</a>
+                <a href="#" class="social-icon" title="Instagram">📸</a>
+                <a href="#" class="social-icon" title="LinkedIn">in</a>
+                <a href="#" class="social-icon" title="TikTok">🎵</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ Quick Links -->
+    <section class="faq-links">
+      <div class="container">
+        <h2>Common Questions</h2>
+        <div class="faq-grid">
+          <a href="/creators#faq" class="faq-link">
+            <span class="faq-icon">🎨</span>
+            <div>
+              <strong>Creator FAQ</strong>
+              <p>Questions about creating content and getting paid</p>
+            </div>
+          </a>
+          <a href="/campaigns" class="faq-link">
+            <span class="faq-icon">📢</span>
+            <div>
+              <strong>Browse Campaigns</strong>
+              <p>See available opportunities</p>
+            </div>
+          </a>
+          <a href="/about" class="faq-link">
+            <span class="faq-icon">ℹ️</span>
+            <div>
+              <strong>About Us</strong>
+              <p>Learn more about our mission</p>
+            </div>
+          </a>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .contact-page {
+      background: #f8fafc;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 2rem;
+    }
+
+    /* Hero */
+    .hero {
+      padding: 5rem 2rem 3rem;
+      text-align: center;
+      background: linear-gradient(135deg, #1a1a2e, #2d2d4a);
+    }
+
+    .hero-content {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .hero h1 {
+      font-size: 2.5rem;
+      color: white;
+      margin-bottom: 1rem;
+    }
+
+    .hero p {
+      font-size: 1.125rem;
+      color: rgba(255,255,255,0.8);
+    }
+
+    /* Contact Section */
+    .contact-section {
+      padding: 4rem 0;
+    }
+
+    .contact-grid {
+      display: grid;
+      grid-template-columns: 1.5fr 1fr;
+      gap: 4rem;
+    }
+
+    /* Form */
+    .contact-form-wrapper {
+      background: white;
+      padding: 2.5rem;
+      border-radius: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .contact-form-wrapper h2 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin-bottom: 1.5rem;
+    }
+
+    .alert {
+      padding: 1rem 1.25rem;
+      border-radius: 10px;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .alert.success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .alert.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .alert span {
+      font-weight: 700;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.5rem;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 1rem;
+      transition: border-color 0.2s;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .btn {
+      display: inline-flex;
+      padding: 0.875rem 2rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 1rem;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    /* Contact Info */
+    .contact-info {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .info-card {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 12px;
+    }
+
+    .info-icon {
+      font-size: 1.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .info-card h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+
+    .info-card p {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin-bottom: 0.5rem;
+    }
+
+    .info-card a {
+      color: #2563eb;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .info-card a:hover {
+      text-decoration: underline;
+    }
+
+    .social-links {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 12px;
+    }
+
+    .social-links h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin-bottom: 1rem;
+    }
+
+    .social-icons {
+      display: flex;
+      gap: 0.75rem;
+    }
+
+    .social-icon {
+      width: 44px;
+      height: 44px;
+      background: #f3f4f6;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      font-size: 1.25rem;
+      transition: all 0.2s;
+    }
+
+    .social-icon:hover {
+      background: #2563eb;
+      color: white;
+    }
+
+    /* FAQ Links */
+    .faq-links {
+      padding: 4rem 0;
+      background: white;
+    }
+
+    .faq-links h2 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .faq-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+
+    .faq-link {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1.5rem;
+      background: #f8fafc;
+      border-radius: 12px;
+      text-decoration: none;
+      transition: all 0.2s;
+      border: 2px solid transparent;
+    }
+
+    .faq-link:hover {
+      border-color: #2563eb;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
+    }
+
+    .faq-icon {
+      font-size: 1.5rem;
+      flex-shrink: 0;
+    }
+
+    .faq-link strong {
+      display: block;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+
+    .faq-link p {
+      color: #6b7280;
+      font-size: 0.875rem;
+      margin: 0;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .contact-grid {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+      }
+
+      .contact-info {
+        flex-direction: row;
+        flex-wrap: wrap;
+      }
+
+      .info-card,
+      .social-links {
+        flex: 1;
+        min-width: 200px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+
+      .faq-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .contact-info {
+        flex-direction: column;
+      }
+    }
+  </style>
+</Layout>
