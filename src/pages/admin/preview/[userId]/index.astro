@@ -1,0 +1,432 @@
+---
+// src/pages/admin/preview/[userId]/index.astro
+export const prerender = false;
+
+import AdminLayout from "../../../../layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const { userId } = Astro.params;
+
+// Check admin access
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+const isAdmin = isMasterKeySession || profile?.role === 'admin';
+if (!isAdmin) {
+  return Astro.redirect('/admin');
+}
+
+// Create service client
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+// Fetch target user
+const { data: targetUser, error } = await supabase
+  .from('profiles')
+  .select('*')
+  .eq('id', userId)
+  .single();
+
+if (error || !targetUser) {
+  return Astro.redirect('/admin/users?error=user_not_found');
+}
+
+// Fetch user stats
+const { count: campaignCount } = await supabase
+  .from('campaign_applications')
+  .select('*', { count: 'exact', head: true })
+  .eq('user_id', userId);
+
+const { count: submissionCount } = await supabase
+  .from('content_submissions')
+  .select('*', { count: 'exact', head: true })
+  .eq('user_id', userId);
+
+const { data: earnings } = await supabase
+  .from('creator_payments')
+  .select('amount')
+  .eq('user_id', userId)
+  .eq('status', 'completed');
+
+const totalEarnings = earnings?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+
+// Role-specific preview options
+const isCreator = targetUser.role === 'creator';
+const isManager = targetUser.role === 'moderator' || targetUser.role === 'community_manager';
+const isAdminUser = targetUser.role === 'admin';
+---
+
+<AdminLayout title={`Preview: ${targetUser.full_name || targetUser.email}`}>
+  <div class="preview-hub">
+    <!-- Header -->
+    <div class="preview-header">
+      <a href="/admin/users" class="back-link">← Back to Users</a>
+      <div class="preview-badge">👁️ Preview Mode</div>
+    </div>
+
+    <!-- User Card -->
+    <div class="user-card">
+      <div class="user-avatar">
+        {targetUser.avatar_url ? (
+          <img src={targetUser.avatar_url} alt={targetUser.full_name} />
+        ) : (
+          <span>{(targetUser.full_name || targetUser.email || '?').charAt(0).toUpperCase()}</span>
+        )}
+      </div>
+      <div class="user-info">
+        <h1>{targetUser.full_name || 'Unnamed User'}</h1>
+        <p class="user-email">{targetUser.email}</p>
+        <div class="user-meta">
+          <span class={`role-badge role-${targetUser.role}`}>{targetUser.role}</span>
+          <span class={`status-badge status-${targetUser.status}`}>{targetUser.status}</span>
+          {!targetUser.is_active && <span class="status-badge status-inactive">Inactive</span>}
+        </div>
+      </div>
+      <div class="user-stats">
+        <div class="stat">
+          <span class="stat-value">{campaignCount || 0}</span>
+          <span class="stat-label">Campaigns</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">{submissionCount || 0}</span>
+          <span class="stat-label">Submissions</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">${totalEarnings.toFixed(0)}</span>
+          <span class="stat-label">Earned</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Preview Options -->
+    <h2 class="section-title">Preview As This User</h2>
+    
+    <div class="preview-grid">
+      {/* Creator Previews */}
+      {(isCreator || isAdminUser) && (
+        <>
+          <a href={`/admin/preview/${userId}/dashboard`} class="preview-card">
+            <div class="preview-icon">📊</div>
+            <h3>Creator Dashboard</h3>
+            <p>View the main dashboard with stats and recent activity</p>
+          </a>
+          
+          <a href={`/admin/preview/${userId}/campaigns`} class="preview-card">
+            <div class="preview-icon">📢</div>
+            <h3>My Campaigns</h3>
+            <p>See campaign applications and active campaigns</p>
+          </a>
+          
+          <a href={`/admin/preview/${userId}/earnings`} class="preview-card">
+            <div class="preview-icon">💰</div>
+            <h3>Earnings</h3>
+            <p>View payment history and earnings breakdown</p>
+          </a>
+          
+          <a href={`/admin/preview/${userId}/profile`} class="preview-card">
+            <div class="preview-icon">👤</div>
+            <h3>Profile</h3>
+            <p>See how their profile appears and what info they've added</p>
+          </a>
+        </>
+      )}
+
+      {/* Manager/Moderator Previews */}
+      {(isManager || isAdminUser) && (
+        <>
+          <a href={`/admin/preview/${userId}/community-dashboard`} class="preview-card manager">
+            <div class="preview-icon">🏘️</div>
+            <h3>Community Dashboard</h3>
+            <p>View community management tools and stats</p>
+          </a>
+          
+          <a href={`/admin/preview/${userId}/moderation`} class="preview-card manager">
+            <div class="preview-icon">🛡️</div>
+            <h3>Moderation Queue</h3>
+            <p>See content awaiting moderation</p>
+          </a>
+        </>
+      )}
+
+      {/* Admin Previews */}
+      {isAdminUser && (
+        <a href={`/admin/preview/${userId}/admin-view`} class="preview-card admin">
+          <div class="preview-icon">⚙️</div>
+          <h3>Admin Dashboard</h3>
+          <p>Preview the admin control panel view</p>
+        </a>
+      )}
+    </div>
+
+    <!-- Quick Actions -->
+    <h2 class="section-title">Quick Actions</h2>
+    <div class="actions-row">
+      <a href={`/admin/users/${userId}`} class="btn btn-secondary">📝 Edit User</a>
+      <a href={`mailto:${targetUser.email}`} class="btn btn-secondary">✉️ Send Email</a>
+      <button class="btn btn-primary" onclick="copyUserId()">📋 Copy User ID</button>
+    </div>
+  </div>
+
+  <script is:inline define:vars={{ userId }}>
+    function copyUserId() {
+      navigator.clipboard.writeText(userId);
+      alert('User ID copied to clipboard!');
+    }
+  </script>
+
+  <style>
+    .preview-hub {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .back-link {
+      color: #6b7280;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .back-link:hover {
+      color: #2563eb;
+    }
+
+    .preview-badge {
+      background: linear-gradient(135deg, #8b5cf6, #6366f1);
+      color: white;
+      padding: 0.5rem 1rem;
+      border-radius: 100px;
+      font-weight: 600;
+      font-size: 0.875rem;
+    }
+
+    .user-card {
+      background: white;
+      border-radius: 16px;
+      padding: 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .user-avatar {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #dbeafe, #c7d2fe);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      font-weight: 700;
+      color: #2563eb;
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
+    .user-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .user-info {
+      flex: 1;
+    }
+
+    .user-info h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+
+    .user-email {
+      color: #6b7280;
+      margin-bottom: 0.5rem;
+    }
+
+    .user-meta {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .role-badge, .status-badge {
+      padding: 0.25rem 0.75rem;
+      border-radius: 100px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+
+    .role-badge {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    .role-admin { background: #fef3c7; color: #92400e; }
+    .role-moderator { background: #d1fae5; color: #065f46; }
+    .role-creator { background: #dbeafe; color: #1e40af; }
+
+    .status-badge {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .status-active { background: #d1fae5; color: #065f46; }
+    .status-pending { background: #fef3c7; color: #92400e; }
+    .status-denied, .status-inactive { background: #fee2e2; color: #991b1b; }
+
+    .user-stats {
+      display: flex;
+      gap: 2rem;
+    }
+
+    .stat {
+      text-align: center;
+    }
+
+    .stat-value {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .stat-label {
+      font-size: 0.75rem;
+      color: #6b7280;
+      text-transform: uppercase;
+    }
+
+    .section-title {
+      font-size: 1.125rem;
+      color: #374151;
+      margin-bottom: 1rem;
+      font-weight: 600;
+    }
+
+    .preview-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .preview-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-decoration: none;
+      color: inherit;
+      border: 2px solid #e5e7eb;
+      transition: all 0.2s;
+    }
+
+    .preview-card:hover {
+      border-color: #2563eb;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+    }
+
+    .preview-card.manager {
+      border-color: #d1fae5;
+    }
+
+    .preview-card.manager:hover {
+      border-color: #10b981;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15);
+    }
+
+    .preview-card.admin {
+      border-color: #fef3c7;
+    }
+
+    .preview-card.admin:hover {
+      border-color: #f59e0b;
+      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.15);
+    }
+
+    .preview-icon {
+      font-size: 2rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .preview-card h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+
+    .preview-card p {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin: 0;
+    }
+
+    .actions-row {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 0.75rem 1.25rem;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.875rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .btn:hover {
+      opacity: 0.9;
+    }
+
+    @media (max-width: 768px) {
+      .user-card {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .user-stats {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .user-meta {
+        justify-content: center;
+      }
+    }
+  </style>
+</AdminLayout>
