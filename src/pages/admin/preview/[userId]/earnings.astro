@@ -1,0 +1,376 @@
+---
+// src/pages/admin/preview/[userId]/earnings.astro
+export const prerender = false;
+
+import AdminLayout from "../../../../layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const { userId } = Astro.params;
+
+// Check admin access
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+const adminProfile = Astro.locals.profile;
+
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+const isAdmin = isMasterKeySession || adminProfile?.role === 'admin';
+if (!isAdmin) {
+  return Astro.redirect('/admin');
+}
+
+// Create service client
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+// Fetch target user
+const { data: profile } = await supabase
+  .from('profiles')
+  .select('*')
+  .eq('id', userId)
+  .single();
+
+if (!profile) {
+  return Astro.redirect('/admin/users?error=user_not_found');
+}
+
+// Fetch all payments
+const { data: payments } = await supabase
+  .from('creator_payments')
+  .select(`
+    *,
+    campaign:campaigns(title, brand_name)
+  `)
+  .eq('user_id', userId)
+  .order('created_at', { ascending: false });
+
+// Calculate stats
+const allPayments = payments || [];
+const completed = allPayments.filter(p => p.status === 'completed');
+const pending = allPayments.filter(p => p.status === 'pending');
+
+const stats = {
+  totalEarned: completed.reduce((sum, p) => sum + (p.amount || 0), 0),
+  pendingAmount: pending.reduce((sum, p) => sum + (p.amount || 0), 0),
+  completedCount: completed.length,
+  pendingCount: pending.length,
+};
+
+// Check Stripe status
+const stripeConnected = !!profile.stripe_account_id;
+const stripeVerified = profile.stripe_account_status === 'verified' || profile.stripe_account_status === 'active';
+---
+
+<AdminLayout title={`Earnings Preview: ${profile.full_name || profile.email}`}>
+  <div class="preview-banner">
+    <div class="preview-info">
+      <span class="preview-icon">👁️</span>
+      <span>Viewing <strong>{profile.full_name || profile.email}</strong>'s Earnings</span>
+    </div>
+    <div class="preview-actions">
+      <a href={`/admin/preview/${userId}`} class="btn-preview">← Back to Preview Hub</a>
+      <a href={`/admin/preview/${userId}/dashboard`} class="btn-preview">Dashboard</a>
+    </div>
+  </div>
+
+  <div class="earnings-preview">
+    <h1>Earnings & Payments</h1>
+
+    <!-- Stripe Status -->
+    <div class={`stripe-status ${stripeConnected ? (stripeVerified ? 'verified' : 'pending') : 'not-connected'}`}>
+      <div class="stripe-icon">
+        {stripeConnected ? (stripeVerified ? '✅' : '⏳') : '⚠️'}
+      </div>
+      <div class="stripe-info">
+        <h3>
+          {stripeConnected 
+            ? (stripeVerified ? 'Payment Account Connected' : 'Payment Account Pending Verification')
+            : 'Payment Account Not Set Up'}
+        </h3>
+        <p>
+          {stripeConnected 
+            ? `Stripe Account ID: ${profile.stripe_account_id?.substring(0, 15)}...`
+            : 'User has not connected a Stripe account for receiving payments.'}
+        </p>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card highlight">
+        <span class="stat-label">Total Earned</span>
+        <span class="stat-value">${stats.totalEarned.toFixed(2)}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Pending</span>
+        <span class="stat-value pending">${stats.pendingAmount.toFixed(2)}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Completed Payments</span>
+        <span class="stat-value">{stats.completedCount}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Pending Payments</span>
+        <span class="stat-value">{stats.pendingCount}</span>
+      </div>
+    </div>
+
+    <!-- Payment History -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Payment History</h2>
+      </div>
+      <div class="panel-content">
+        {allPayments.length > 0 ? (
+          <table class="payments-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Campaign</th>
+                <th>Brand</th>
+                <th>Amount</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allPayments.map(payment => (
+                <tr>
+                  <td>{new Date(payment.created_at).toLocaleDateString()}</td>
+                  <td>{payment.campaign?.title || payment.description || 'N/A'}</td>
+                  <td>{payment.campaign?.brand_name || 'N/A'}</td>
+                  <td class="amount">${(payment.amount || 0).toFixed(2)}</td>
+                  <td><span class={`status-badge status-${payment.status}`}>{payment.status}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div class="empty-state">
+            <span>💰</span>
+            <p>No payment history yet</p>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .preview-banner {
+      background: linear-gradient(135deg, #8b5cf6, #6366f1);
+      color: white;
+      padding: 1rem 1.5rem;
+      border-radius: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .preview-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .preview-icon { font-size: 1.25rem; }
+
+    .preview-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .btn-preview {
+      background: rgba(255,255,255,0.2);
+      color: white;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+
+    .earnings-preview {
+      background: #f8fafc;
+      border-radius: 16px;
+      padding: 2rem;
+    }
+
+    .earnings-preview h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin-bottom: 1.5rem;
+    }
+
+    .stripe-status {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1.25rem;
+      border-radius: 12px;
+      margin-bottom: 1.5rem;
+    }
+
+    .stripe-status.verified {
+      background: #d1fae5;
+      border: 2px solid #10b981;
+    }
+
+    .stripe-status.pending {
+      background: #fef3c7;
+      border: 2px solid #f59e0b;
+    }
+
+    .stripe-status.not-connected {
+      background: #fee2e2;
+      border: 2px solid #ef4444;
+    }
+
+    .stripe-icon {
+      font-size: 1.5rem;
+    }
+
+    .stripe-info h3 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+
+    .stripe-info p {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin: 0;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.25rem;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .stat-card.highlight {
+      background: linear-gradient(135deg, #dbeafe, #c7d2fe);
+      border: 2px solid #2563eb;
+    }
+
+    .stat-label {
+      display: block;
+      font-size: 0.75rem;
+      color: #6b7280;
+      text-transform: uppercase;
+      margin-bottom: 0.5rem;
+    }
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #059669;
+    }
+
+    .stat-value.pending {
+      color: #d97706;
+    }
+
+    .panel {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .panel-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .panel-header h2 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    .panel-content {
+      padding: 0;
+    }
+
+    .payments-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .payments-table th,
+    .payments-table td {
+      text-align: left;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .payments-table th {
+      font-size: 0.75rem;
+      color: #6b7280;
+      text-transform: uppercase;
+      font-weight: 600;
+      background: #f9fafb;
+    }
+
+    .payments-table td {
+      font-size: 0.875rem;
+      color: #374151;
+    }
+
+    .payments-table .amount {
+      font-weight: 600;
+      color: #059669;
+    }
+
+    .status-badge {
+      padding: 0.25rem 0.75rem;
+      border-radius: 100px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+
+    .status-completed { background: #d1fae5; color: #065f46; }
+    .status-pending { background: #fef3c7; color: #92400e; }
+    .status-failed { background: #fee2e2; color: #991b1b; }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem;
+      color: #9ca3af;
+    }
+
+    .empty-state span {
+      font-size: 2.5rem;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+
+    @media (max-width: 1024px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</AdminLayout>
