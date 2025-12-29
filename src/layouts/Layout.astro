@@ -1,6 +1,7 @@
 ---
 // src/layouts/Layout.astro
 import { supabase } from "../lib/supabase";
+import ImpersonationBanner from "../components/ImpersonationBanner.astro";
 
 interface Props {
   title?: string;
@@ -49,6 +50,10 @@ const pageDescription = description || general.description;
 const session = Astro.locals?.session;
 const isAdmin = Astro.locals?.isAdmin;
 const isModerator = Astro.locals?.isModerator;
+
+// Check impersonation state
+const isImpersonating = Astro.locals?.isImpersonating || false;
+const impersonatedUser = Astro.locals?.impersonatedUser;
 ---
 
 <!doctype html>
@@ -69,7 +74,14 @@ const isModerator = Astro.locals?.isModerator;
     <meta property="og:description" content={pageDescription} />
     {appearance.logoUrl && <meta property="og:image" content={appearance.logoUrl} />}
   </head>
-  <body style={`--primary-color: ${appearance.primaryColor}; --accent-color: ${appearance.accentColor};`}>
+  <body 
+    style={`--primary-color: ${appearance.primaryColor}; --accent-color: ${appearance.accentColor};`}
+    class:list={[{ 'has-impersonation-banner': isImpersonating }]}
+  >
+    {isImpersonating && impersonatedUser && (
+      <ImpersonationBanner user={impersonatedUser} />
+    )}
+    
     <header class="site-header">
       <div class="header-container">
         <a href="/" class="logo">
@@ -91,10 +103,12 @@ const isModerator = Astro.locals?.isModerator;
           {session ? (
             <>
               <a href="/dashboard" class="btn btn-secondary">Dashboard</a>
-              {(isAdmin || isModerator) && (
+              {(isAdmin || isModerator) && !isImpersonating && (
                 <a href="/admin" class="btn btn-secondary">Admin</a>
               )}
-              <a href="/logout" class="btn btn-primary">Log Out</a>
+              {!isImpersonating && (
+                <a href="/logout" class="btn btn-primary">Log Out</a>
+              )}
             </>
           ) : (
             <>
@@ -154,6 +168,15 @@ const isModerator = Astro.locals?.isModerator;
         line-height: 1.6;
         color: #1a1a2e;
         background: #f8fafc;
+      }
+      
+      /* Adjust for impersonation banner */
+      body.has-impersonation-banner .site-header {
+        top: 52px;
+      }
+      
+      body.has-impersonation-banner main {
+        padding-top: 122px;
       }
       
       .site-header {
@@ -291,6 +314,14 @@ const isModerator = Astro.locals?.isModerator;
       @media (max-width: 768px) {
         .main-nav, .header-actions { display: none; }
         .footer-links { grid-template-columns: 1fr; }
+        
+        body.has-impersonation-banner .site-header {
+          top: 85px;
+        }
+        
+        body.has-impersonation-banner main {
+          padding-top: 155px;
+        }
       }
     </style>
   </body>
