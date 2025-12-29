@@ -141,6 +141,7 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
             <a href="/campaigns">Campaigns</a>
             <a href="/creators">Creators</a>
             <a href="/communities">Communities</a>
+            <a href="/premium" class="premium-link">⭐ Premium</a>
           </div>
           <div class="footer-column">
             <h4>Company</h4>
@@ -310,6 +311,15 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
       }
       
       .footer-column a:hover { color: white; }
+      
+      .footer-column a.premium-link {
+        color: #f59e0b;
+        font-weight: 600;
+      }
+      
+      .footer-column a.premium-link:hover {
+        color: #fbbf24;
+      }
       
       .footer-bottom {
         padding-top: 2rem;
