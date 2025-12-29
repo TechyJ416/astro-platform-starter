@@ -12,8 +12,19 @@ const isMasterKeySession = Astro.locals.isMasterKeySession || false;
 const session = Astro.locals.session;
 const currentPath = Astro.url.pathname;
 
+// Create admin client with service role for badge counts
+import { createClient } from "@supabase/supabase-js";
+const supabaseUrl = import.meta.env.SUPABASE_URL;
+const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_KEY;
+const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+
+const supabase = createClient(
+  supabaseUrl,
+  supabaseServiceKey || supabaseAnonKey,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
 // Get pending waitlist count for badge
-import { supabase } from "../lib/supabase";
 const { count: pendingCount } = await supabase
   .from('profiles')
   .select('*', { count: 'exact', head: true })
@@ -35,13 +46,19 @@ const { count: pendingApplications } = await supabase
   .select('*', { count: 'exact', head: true })
   .eq('status', 'invited');
 
+// Count pending submissions
+const { count: pendingSubmissions } = await supabase
+  .from('milestone_submissions')
+  .select('*', { count: 'exact', head: true })
+  .eq('status', 'pending');
+
 // Navigation items
 const navItems = [
   { href: '/admin', icon: '📊', label: 'Dashboard', exact: true },
   { href: '/admin/users', icon: '👥', label: 'Users', badge: pendingCount || 0, badgeType: 'warning' },
   { href: '/admin/campaigns', icon: '📢', label: 'Campaigns' },
   { href: '/admin/applications', icon: '📝', label: 'Applications', badge: pendingApplications || 0, badgeType: 'warning' },
-  { href: '/admin/submissions', icon: '📤', label: 'Submissions' },
+  { href: '/admin/submissions', icon: '📤', label: 'Submissions', badge: pendingSubmissions || 0, badgeType: 'success' },
   { href: '/admin/communities', icon: '💬', label: 'Communities' },
   { href: '/admin/review', icon: '✅', label: 'Review Queue', badge: pendingReviewCount || 0, badgeType: 'danger' },
   { href: '/admin/messages', icon: '📬', label: 'Messages', badge: unreadMessages || 0, badgeType: 'info' },
@@ -290,6 +307,7 @@ function isActive(href: string, exact = false) {
     .nav-badge.warning { background: #f59e0b; color: white; }
     .nav-badge.danger { background: #ef4444; color: white; }
     .nav-badge.info { background: #3b82f6; color: white; }
+    .nav-badge.success { background: #10b981; color: white; }
 
     .sidebar-footer {
       padding: 1rem 0;
