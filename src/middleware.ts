@@ -2,9 +2,36 @@
 import { defineMiddleware } from "astro:middleware";
 import { supabase } from "./lib/supabase";
 
+// Helper to parse cookies from raw header (bypasses Astro's strict validation)
+function parseCookies(cookieHeader: string): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  if (!cookieHeader) return cookies;
+  
+  try {
+    const pairs = cookieHeader.split(';');
+    for (const pair of pairs) {
+      const idx = pair.indexOf('=');
+      if (idx > 0) {
+        const name = pair.substring(0, idx).trim();
+        const value = pair.substring(idx + 1).trim();
+        // Only store if it looks like a valid value (skip JSON objects)
+        if (name && value && !/^[{"\[]/.test(value)) {
+          cookies[name] = value;
+        }
+      }
+    }
+  } catch (e) {
+    console.error("Cookie parse error:", e);
+  }
+  return cookies;
+}
+
 export const onRequest = defineMiddleware(async (context, next) => {
-  const { cookies, url, redirect, locals } = context;
+  const { cookies, url, redirect, locals, request } = context;
   const path = url.pathname;
+
+  // Parse cookies from raw header to avoid Astro's strict validation
+  const rawCookies = parseCookies(request.headers.get('cookie') || '');
 
   // ============================================================
   // STEP 1: IMMEDIATELY SKIP THESE ROUTES - NO PROCESSING AT ALL
@@ -19,7 +46,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
     path === '/unauthorized' ||
     path === '/'
   ) {
-    // Set default locals and continue - NO REDIRECTS
     locals.session = null;
     locals.profile = null;
     locals.isAdmin = false;
@@ -49,11 +75,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
   locals.realAdmin = null;
 
   // ============================================================
-  // STEP 3: CHECK AUTHENTICATION
+  // STEP 3: CHECK AUTHENTICATION (using raw parsed cookies)
   // ============================================================
   
-  // Check master key first
-  const masterKeySession = cookies.get("master_key_session")?.value;
+  const masterKeySession = rawCookies["master_key_session"];
   const adminMasterKey = import.meta.env.ADMIN_MASTER_KEY;
 
   if (masterKeySession && adminMasterKey && masterKeySession === adminMasterKey) {
@@ -61,9 +86,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
     locals.isAdmin = true;
     locals.isModerator = true;
   } else {
-    // Check Supabase session
-    const accessToken = cookies.get("sb-access-token")?.value;
-    const refreshToken = cookies.get("sb-refresh-token")?.value;
+    const accessToken = rawCookies["sb-access-token"];
+    const refreshToken = rawCookies["sb-refresh-token"];
 
     if (accessToken && refreshToken) {
       try {
@@ -73,30 +97,34 @@ export const onRequest = defineMiddleware(async (context, next) => {
         });
 
         if (error) {
-          cookies.delete("sb-access-token", { path: "/" });
-          cookies.delete("sb-refresh-token", { path: "/" });
+          try {
+            cookies.delete("sb-access-token", { path: "/" });
+            cookies.delete("sb-refresh-token", { path: "/" });
+          } catch (e) { /* ignore */ }
         } else if (sessionData.session) {
           locals.session = sessionData.session;
 
-          // Refresh tokens if needed
           if (sessionData.session.access_token !== accessToken) {
-            cookies.set("sb-access-token", sessionData.session.access_token, {
-              path: "/",
-              httpOnly: true,
-              secure: import.meta.env.PROD,
-              sameSite: "lax",
-              maxAge: 60 * 60 * 24 * 7,
-            });
-            cookies.set("sb-refresh-token", sessionData.session.refresh_token, {
-              path: "/",
-              httpOnly: true,
-              secure: import.meta.env.PROD,
-              sameSite: "lax",
-              maxAge: 60 * 60 * 24 * 30,
-            });
+            try {
+              cookies.set("sb-access-token", sessionData.session.access_token, {
+                path: "/",
+                httpOnly: true,
+                secure: import.meta.env.PROD,
+                sameSite: "lax",
+                maxAge: 60 * 60 * 24 * 7,
+              });
+              cookies.set("sb-refresh-token", sessionData.session.refresh_token, {
+                path: "/",
+                httpOnly: true,
+                secure: import.meta.env.PROD,
+                sameSite: "lax",
+                maxAge: 60 * 60 * 24 * 30,
+              });
+            } catch (e) {
+              console.error("Cookie set error:", e);
+            }
           }
 
-          // Get profile
           const { data: profile } = await supabase
             .from("profiles")
             .select("*")
@@ -116,79 +144,60 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   // ============================================================
-  // STEP 4: CHECK IMPERSONATION (Admin feature)
+  // STEP 4: CHECK IMPERSONATION (using raw parsed cookies)
   // ============================================================
-  // Check for impersonation cookies (try multiple formats for compatibility)
-  const impersonateId = cookies.get("impersonate_id")?.value 
-    || cookies.get("impersonate_user_id")?.value;
-  
-  // Clear any old format cookies
-  const oldCookie = cookies.get("impersonate_user")?.value;
-  if (oldCookie) {
-    cookies.delete("impersonate_user", { path: "/" });
-  }
+  const impersonateId = rawCookies["impersonate_id"];
   
   if (impersonateId && (locals.isAdmin || locals.isMasterKeySession)) {
-    try {
-      // Fetch the impersonated user's profile
-      const { data: impersonatedProfile } = await supabase
-        .from("profiles")
-        .select("id, email, full_name, role")
-        .eq("id", impersonateId)
-        .single();
-      
-      if (!impersonatedProfile) {
-        // Invalid user ID, clear the cookies
-        cookies.delete("impersonate_id", { path: "/" });
-        cookies.delete("impersonate_user_id", { path: "/" });
-        return next();
-      }
-      
-      const impersonatedUser = {
-        id: impersonatedProfile.id,
-        email: impersonatedProfile.email,
-        full_name: impersonatedProfile.full_name,
-        role: impersonatedProfile.role,
-      };
-      
-      // Only apply impersonation on non-admin pages
-      if (!path.startsWith("/admin") && !path.startsWith("/api/admin")) {
-        locals.isImpersonating = true;
-        locals.impersonatedUser = impersonatedUser;
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    
+    if (uuidRegex.test(impersonateId)) {
+      try {
+        const { data: impersonatedProfile } = await supabase
+          .from("profiles")
+          .select("id, email, full_name, role")
+          .eq("id", impersonateId)
+          .single();
         
-        // Store real admin info for the banner
-        locals.realAdmin = {
-          isMasterKey: locals.isMasterKeySession,
-          profile: locals.profile,
-        };
-        
-        // Override profile with impersonated user for dashboard pages
-        if (path.startsWith("/dashboard")) {
-          // Fetch full profile for impersonated user
-          const { data: fullProfile } = await supabase
-            .from("profiles")
-            .select("*")
-            .eq("id", impersonatedUser.id)
-            .single();
+        if (impersonatedProfile) {
+          const impersonatedUser = {
+            id: impersonatedProfile.id,
+            email: impersonatedProfile.email,
+            full_name: impersonatedProfile.full_name,
+            role: impersonatedProfile.role,
+          };
           
-          if (fullProfile) {
-            locals.profile = fullProfile;
-            // Create a fake session for the impersonated user
-            locals.session = {
-              user: { id: impersonatedUser.id, email: impersonatedUser.email },
-            } as any;
+          if (!path.startsWith("/admin") && !path.startsWith("/api/admin")) {
+            locals.isImpersonating = true;
+            locals.impersonatedUser = impersonatedUser;
+            locals.realAdmin = {
+              isMasterKey: locals.isMasterKeySession,
+              profile: locals.profile,
+            };
+            
+            if (path.startsWith("/dashboard")) {
+              const { data: fullProfile } = await supabase
+                .from("profiles")
+                .select("*")
+                .eq("id", impersonatedUser.id)
+                .single();
+              
+              if (fullProfile) {
+                locals.profile = fullProfile;
+                locals.session = {
+                  user: { id: impersonatedUser.id, email: impersonatedUser.email },
+                } as any;
+              }
+            }
+          } else {
+            locals.isImpersonating = true;
+            locals.impersonatedUser = impersonatedUser;
           }
         }
-      } else {
-        // On admin pages, just track that impersonation is active
-        locals.isImpersonating = true;
-        locals.impersonatedUser = impersonatedUser;
+      } catch (e) {
+        console.error("Impersonation error:", e);
       }
-    } catch (e) {
-      // Error fetching user, clear cookies
-      cookies.delete("impersonate_id", { path: "/" });
-      cookies.delete("impersonate_user_id", { path: "/" });
-      console.error("Impersonation error:", e);
     }
   }
 
@@ -196,12 +205,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // STEP 5: PROTECT ROUTES
   // ============================================================
 
-  // Admin routes (except login/setup which are handled above)
   if (path.startsWith("/admin")) {
     if (!locals.isMasterKeySession && !locals.session) {
       return redirect("/admin/login");
     }
-    // Check real admin status (not impersonated)
     const realProfile = locals.realAdmin?.profile || locals.profile;
     const realIsAdmin = locals.isMasterKeySession || realProfile?.role === 'admin' || realProfile?.role === 'moderator';
     if (!realIsAdmin && !locals.isMasterKeySession) {
@@ -209,9 +216,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
   }
 
-  // Dashboard routes - check for pending/denied accounts
   if (path.startsWith("/dashboard")) {
-    // Allow if impersonating (admin viewing as user)
     if (locals.isImpersonating) {
       return next();
     }
@@ -220,7 +225,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
       return redirect("/login?redirect=" + encodeURIComponent(path));
     }
     
-    // Check if user account is pending or denied
     if (locals.profile) {
       if (locals.profile.status === 'pending') {
         return redirect("/login?status=pending");
@@ -234,7 +238,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
   }
 
-  // Campaign application routes - require approved account
   if (path.startsWith("/campaigns/") && path.includes("/apply")) {
     if (!locals.session) {
       return redirect("/login?redirect=" + encodeURIComponent(path));
@@ -244,7 +247,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
   }
 
-  // Community interaction routes - require approved account
   if (path.startsWith("/community/") && (path.includes("/join") || path.includes("/post"))) {
     if (!locals.session) {
       return redirect("/login?redirect=" + encodeURIComponent(path));
