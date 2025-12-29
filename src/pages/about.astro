@@ -1,6 +1,11 @@
 ---
 // src/pages/about.astro
+export const prerender = false;
+
 import Layout from "../layouts/Layout.astro";
+import { getPageContent } from "../lib/content";
+
+const content = await getPageContent('about');
 ---
 
 <Layout title="About Us">
@@ -8,8 +13,9 @@ import Layout from "../layouts/Layout.astro";
     <!-- Hero Section -->
     <section class="hero">
       <div class="hero-content">
-        <h1>Connecting Creators with Brands</h1>
-        <p>We're building the future of authentic content marketing by empowering creators to do what they love.</p>
+        {content.hero?.badge && <span class="hero-badge">{content.hero.badge}</span>}
+        <h1>{content.hero?.title || "Connecting Creators with Brands"}</h1>
+        <p>{content.hero?.subtitle || "We're building the future of authentic content marketing."}</p>
       </div>
     </section>
 
@@ -18,10 +24,9 @@ import Layout from "../layouts/Layout.astro";
       <div class="container">
         <div class="mission-grid">
           <div class="mission-content">
-            <span class="label">Our Mission</span>
+            <span class="label">{content.mission?.title || "Our Mission"}</span>
             <h2>Democratizing Creator Marketing</h2>
-            <p>We believe every creator deserves the opportunity to monetize their passion. Our platform bridges the gap between talented content creators and brands seeking authentic voices.</p>
-            <p>Gone are the days when only mega-influencers could land brand deals. We're here to ensure creators of all sizes can find meaningful partnerships and get paid fairly for their work.</p>
+            <p>{content.mission?.content || "We believe every creator deserves the opportunity to monetize their passion. Our platform bridges the gap between talented content creators and brands seeking authentic voices."}</p>
           </div>
           <div class="mission-visual">
             <div class="visual-block block-1">🎨</div>
@@ -40,24 +45,41 @@ import Layout from "../layouts/Layout.astro";
           <p>Our core values guide everything we do.</p>
         </div>
         <div class="values-grid">
-          <div class="value-card">
-            <div class="value-icon">🎯</div>
-            <h3>Authenticity First</h3>
-            <p>We believe the best content comes from genuine enthusiasm. We match creators with brands they actually love.</p>
-          </div>
-          <div class="value-card">
-            <div class="value-icon">⚖️</div>
-            <h3>Fair Compensation</h3>
-            <p>Creators deserve to be paid fairly for their work. We fight for competitive rates and transparent payments.</p>
-          </div>
-          <div class="value-card">
-            <div class="value-icon">🚀</div>
-            <h3>Creator Growth</h3>
-            <p>We're invested in your success. Our platform helps you build your portfolio and grow your career.</p>
-          </div>
-          <div class="value-card">
-            <div class="value-icon">🔒</div>
-            <h3>Trust & Transparency</h3>
+          {content.values?.length > 0 ? (
+            content.values.map((value: any) => (
+              <div class="value-card">
+                <div class="value-icon">{value.icon}</div>
+                <h3>{value.title}</h3>
+                <p>{value.description}</p>
+              </div>
+            ))
+          ) : (
+            <>
+              <div class="value-card">
+                <div class="value-icon">🎯</div>
+                <h3>Authenticity First</h3>
+                <p>We believe the best content comes from genuine enthusiasm.</p>
+              </div>
+              <div class="value-card">
+                <div class="value-icon">⚖️</div>
+                <h3>Fair Compensation</h3>
+                <p>Creators deserve to be paid fairly for their work.</p>
+              </div>
+              <div class="value-card">
+                <div class="value-icon">🚀</div>
+                <h3>Creator Growth</h3>
+                <p>We're invested in your success and career growth.</p>
+              </div>
+              <div class="value-card">
+                <div class="value-icon">🔒</div>
+                <h3>Trust & Transparency</h3>
+                <p>Clear terms, honest communication, no hidden fees.</p>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
             <p>No hidden fees, no surprise terms. We believe in clear communication and honest relationships.</p>
           </div>
         </div>
@@ -191,6 +213,18 @@ import Layout from "../layouts/Layout.astro";
     .hero-content {
       max-width: 700px;
       margin: 0 auto;
+    }
+
+    .hero-badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      color: white;
+      padding: 0.5rem 1.25rem;
+      border-radius: 100px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+      border: 1px solid rgba(255,255,255,0.2);
     }
 
     .hero h1 {
