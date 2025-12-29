@@ -515,9 +515,9 @@ const showForm = action === 'new' || editUserId;
                     </div>
                   ) : (
                     <>
-                      <button type="button" class="btn btn-sm btn-primary view-as-btn" data-user-id={user.id} title="View dashboard as this user">
+                      <a href={`/admin/preview/${user.id}`} class="btn btn-sm btn-primary" title="Preview as this user">
                         👁️
-                      </button>
+                      </a>
                       <a href={`/admin/users/${user.id}`} class="btn btn-sm btn-secondary">Details</a>
                       <a href={`?edit=${user.id}`} class="btn btn-sm btn-secondary">Edit</a>
                       <div class="dropdown">
@@ -554,32 +554,6 @@ const showForm = action === 'new' || editUserId;
           </div>
         )}
       </div>
-
-      <script is:inline>
-        document.querySelectorAll('.view-as-btn').forEach(btn => {
-          btn.addEventListener('click', async function() {
-            const userId = this.getAttribute('data-user-id');
-            
-            try {
-              const response = await fetch('/api/admin/impersonate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'start', userId }),
-              });
-              
-              const data = await response.json();
-              
-              if (response.ok) {
-                window.location.href = '/dashboard';
-              } else {
-                alert('Error: ' + (data.error || 'Failed to start view mode'));
-              }
-            } catch (err) {
-              alert('Error: ' + err.message);
-            }
-          });
-        });
-      </script>
     </>
   )}
 
