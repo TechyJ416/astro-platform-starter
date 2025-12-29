@@ -41,14 +41,9 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
         });
       }
 
-      // Set impersonation cookie - just store the user ID (UUID is safe for cookies)
-      cookies.set('impersonate_user_id', targetUser.id, {
-        path: '/',
-        httpOnly: true,
-        secure: import.meta.env.PROD,
-        sameSite: 'lax',
-        maxAge: 60 * 60, // 1 hour
-      });
+      // Set cookie using native Set-Cookie header
+      const isProduction = import.meta.env.PROD;
+      const cookieValue = `impersonate_id=${targetUser.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600${isProduction ? '; Secure' : ''}`;
 
       return new Response(JSON.stringify({ 
         success: true, 
@@ -56,21 +51,31 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
         user: targetUser
       }), {
         status: 200,
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 
+          'Content-Type': 'application/json',
+          'Set-Cookie': cookieValue
+        }
       });
 
     } else if (action === 'stop') {
-      // Clear impersonation cookie
-      cookies.delete('impersonate_user_id', { path: '/' });
-      // Also clear old cookie format if exists
-      cookies.delete('impersonate_user', { path: '/' });
+      // Clear cookie by setting expired date
+      const clearCookies = [
+        'impersonate_id=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',
+        'impersonate_user_id=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',
+        'impersonate_user=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',
+      ];
 
       return new Response(JSON.stringify({ 
         success: true, 
         message: 'Impersonation ended'
       }), {
         status: 200,
-        headers: { 'Content-Type': 'application/json' }
+        headers: [
+          ['Content-Type', 'application/json'],
+          ['Set-Cookie', clearCookies[0]],
+          ['Set-Cookie', clearCookies[1]],
+          ['Set-Cookie', clearCookies[2]],
+        ]
       });
 
     } else {
