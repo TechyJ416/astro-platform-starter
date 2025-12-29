@@ -1,0 +1,482 @@
+---
+// src/pages/about.astro
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="About Us">
+  <div class="about-page">
+    <!-- Hero Section -->
+    <section class="hero">
+      <div class="hero-content">
+        <h1>Connecting Creators with Brands</h1>
+        <p>We're building the future of authentic content marketing by empowering creators to do what they love.</p>
+      </div>
+    </section>
+
+    <!-- Mission -->
+    <section class="mission">
+      <div class="container">
+        <div class="mission-grid">
+          <div class="mission-content">
+            <span class="label">Our Mission</span>
+            <h2>Democratizing Creator Marketing</h2>
+            <p>We believe every creator deserves the opportunity to monetize their passion. Our platform bridges the gap between talented content creators and brands seeking authentic voices.</p>
+            <p>Gone are the days when only mega-influencers could land brand deals. We're here to ensure creators of all sizes can find meaningful partnerships and get paid fairly for their work.</p>
+          </div>
+          <div class="mission-visual">
+            <div class="visual-block block-1">🎨</div>
+            <div class="visual-block block-2">🤝</div>
+            <div class="visual-block block-3">💫</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Values -->
+    <section class="values">
+      <div class="container">
+        <div class="section-header">
+          <h2>What We Stand For</h2>
+          <p>Our core values guide everything we do.</p>
+        </div>
+        <div class="values-grid">
+          <div class="value-card">
+            <div class="value-icon">🎯</div>
+            <h3>Authenticity First</h3>
+            <p>We believe the best content comes from genuine enthusiasm. We match creators with brands they actually love.</p>
+          </div>
+          <div class="value-card">
+            <div class="value-icon">⚖️</div>
+            <h3>Fair Compensation</h3>
+            <p>Creators deserve to be paid fairly for their work. We fight for competitive rates and transparent payments.</p>
+          </div>
+          <div class="value-card">
+            <div class="value-icon">🚀</div>
+            <h3>Creator Growth</h3>
+            <p>We're invested in your success. Our platform helps you build your portfolio and grow your career.</p>
+          </div>
+          <div class="value-card">
+            <div class="value-icon">🔒</div>
+            <h3>Trust & Transparency</h3>
+            <p>No hidden fees, no surprise terms. We believe in clear communication and honest relationships.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Story -->
+    <section class="story">
+      <div class="container">
+        <div class="story-content">
+          <span class="label">Our Story</span>
+          <h2>Built by Creators, for Creators</h2>
+          <p>We started this platform because we experienced the frustrations firsthand. As creators ourselves, we knew there had to be a better way to connect with brands without the endless email chains, unclear expectations, and delayed payments.</p>
+          <p>What began as a simple idea has grown into a thriving community of creators and brands working together to produce amazing content. Every feature we build is designed with the creator experience in mind.</p>
+          <p>We're just getting started, and we're excited to have you on this journey with us.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stats -->
+    <section class="stats">
+      <div class="container">
+        <div class="stats-grid">
+          <div class="stat-item">
+            <span class="stat-value">500+</span>
+            <span class="stat-label">Active Creators</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">100+</span>
+            <span class="stat-label">Brand Partners</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">$50k+</span>
+            <span class="stat-label">Paid to Creators</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">1000+</span>
+            <span class="stat-label">Campaigns Completed</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Team (placeholder) -->
+    <section class="team">
+      <div class="container">
+        <div class="section-header">
+          <h2>The Team</h2>
+          <p>Meet the people behind the platform.</p>
+        </div>
+        <div class="team-grid">
+          <div class="team-member">
+            <div class="member-avatar">👨‍💼</div>
+            <h3>Founder & CEO</h3>
+            <p>Building the future of creator marketing with passion and purpose.</p>
+          </div>
+          <div class="team-member">
+            <div class="member-avatar">👩‍💻</div>
+            <h3>Head of Product</h3>
+            <p>Crafting intuitive experiences that creators and brands love.</p>
+          </div>
+          <div class="team-member">
+            <div class="member-avatar">👨‍🎨</div>
+            <h3>Creator Relations</h3>
+            <p>Supporting our community and ensuring creator success.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta-section">
+      <div class="container">
+        <div class="cta-content">
+          <h2>Join Our Community</h2>
+          <p>Whether you're a creator looking to monetize your content or a brand seeking authentic voices, we'd love to have you.</p>
+          <div class="cta-actions">
+            <a href="/signup" class="btn btn-white">Join as Creator</a>
+            <a href="/contact" class="btn btn-outline">Contact Us</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .about-page {
+      background: #f8fafc;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 2rem;
+    }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .section-header h2 {
+      font-size: 2rem;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+
+    .section-header p {
+      color: #6b7280;
+      font-size: 1.125rem;
+    }
+
+    .label {
+      display: inline-block;
+      background: linear-gradient(135deg, #dbeafe, #c7d2fe);
+      color: #2563eb;
+      padding: 0.375rem 0.875rem;
+      border-radius: 999px;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+
+    /* Hero */
+    .hero {
+      padding: 6rem 2rem 4rem;
+      text-align: center;
+      background: linear-gradient(135deg, #1a1a2e, #2d2d4a);
+    }
+
+    .hero-content {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .hero h1 {
+      font-size: 2.75rem;
+      color: white;
+      margin-bottom: 1.5rem;
+      line-height: 1.2;
+    }
+
+    .hero p {
+      font-size: 1.25rem;
+      color: rgba(255,255,255,0.8);
+      line-height: 1.6;
+    }
+
+    /* Mission */
+    .mission {
+      padding: 5rem 0;
+      background: white;
+    }
+
+    .mission-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: center;
+    }
+
+    .mission-content h2 {
+      font-size: 2rem;
+      color: #1a1a2e;
+      margin-bottom: 1.5rem;
+    }
+
+    .mission-content p {
+      color: #4b5563;
+      font-size: 1.0625rem;
+      line-height: 1.7;
+      margin-bottom: 1rem;
+    }
+
+    .mission-visual {
+      position: relative;
+      height: 300px;
+    }
+
+    .visual-block {
+      position: absolute;
+      width: 100px;
+      height: 100px;
+      background: white;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.5rem;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    }
+
+    .block-1 { top: 0; left: 20%; background: linear-gradient(135deg, #dbeafe, #c7d2fe); }
+    .block-2 { top: 50%; right: 10%; background: linear-gradient(135deg, #d1fae5, #a7f3d0); }
+    .block-3 { bottom: 0; left: 40%; background: linear-gradient(135deg, #fef3c7, #fde68a); }
+
+    /* Values */
+    .values {
+      padding: 5rem 0;
+    }
+
+    .values-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.5rem;
+    }
+
+    .value-card {
+      background: white;
+      padding: 2rem;
+      border-radius: 16px;
+      text-align: center;
+    }
+
+    .value-icon {
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .value-card h3 {
+      font-size: 1.0625rem;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+
+    .value-card p {
+      color: #6b7280;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    /* Story */
+    .story {
+      padding: 5rem 0;
+      background: white;
+    }
+
+    .story-content {
+      max-width: 700px;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .story-content h2 {
+      font-size: 2rem;
+      color: #1a1a2e;
+      margin-bottom: 1.5rem;
+    }
+
+    .story-content p {
+      color: #4b5563;
+      font-size: 1.0625rem;
+      line-height: 1.7;
+      margin-bottom: 1.25rem;
+    }
+
+    /* Stats */
+    .stats {
+      padding: 4rem 0;
+      background: linear-gradient(135deg, #2563eb, #7c3aed);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 2rem;
+      text-align: center;
+    }
+
+    .stat-value {
+      display: block;
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: white;
+    }
+
+    .stat-label {
+      color: rgba(255,255,255,0.8);
+      font-size: 0.9375rem;
+    }
+
+    /* Team */
+    .team {
+      padding: 5rem 0;
+    }
+
+    .team-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2rem;
+    }
+
+    .team-member {
+      background: white;
+      padding: 2rem;
+      border-radius: 16px;
+      text-align: center;
+    }
+
+    .member-avatar {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, #dbeafe, #c7d2fe);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      margin: 0 auto 1rem;
+    }
+
+    .team-member h3 {
+      font-size: 1.0625rem;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+
+    .team-member p {
+      color: #6b7280;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+    }
+
+    /* CTA */
+    .cta-section {
+      padding: 5rem 0;
+      background: #1a1a2e;
+      text-align: center;
+    }
+
+    .cta-content {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .cta-content h2 {
+      font-size: 2rem;
+      color: white;
+      margin-bottom: 1rem;
+    }
+
+    .cta-content p {
+      color: rgba(255,255,255,0.8);
+      font-size: 1.125rem;
+      margin-bottom: 2rem;
+      line-height: 1.6;
+    }
+
+    .cta-actions {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+    }
+
+    .btn {
+      display: inline-flex;
+      padding: 0.875rem 1.75rem;
+      border-radius: 10px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+
+    .btn-white {
+      background: white;
+      color: #2563eb;
+    }
+
+    .btn-white:hover {
+      background: #f8fafc;
+    }
+
+    .btn-outline {
+      background: transparent;
+      color: white;
+      border: 2px solid rgba(255,255,255,0.3);
+    }
+
+    .btn-outline:hover {
+      border-color: white;
+    }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .mission-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .mission-visual {
+        display: none;
+      }
+
+      .values-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .hero h1 {
+        font-size: 2rem;
+      }
+
+      .values-grid,
+      .team-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .stats-grid {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+      }
+
+      .cta-actions {
+        flex-direction: column;
+      }
+    }
+  </style>
+</Layout>
