@@ -1,0 +1,905 @@
+---
+// src/pages/admin/support.astro
+export const prerender = false;
+
+import AdminLayout from "../../layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+let actionMessage = '';
+let actionError = '';
+
+// Handle actions
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action') as string;
+  const ticketId = form.get('ticket_id') as string;
+
+  if (action === 'update_status') {
+    const newStatus = form.get('status') as string;
+    const { error } = await supabase
+      .from('support_tickets')
+      .update({ 
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+        resolved_at: newStatus === 'resolved' ? new Date().toISOString() : null
+      })
+      .eq('id', ticketId);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = `Ticket status updated to ${newStatus}`;
+    }
+  }
+
+  if (action === 'reply') {
+    const message = form.get('message') as string;
+    const staffId = session?.user?.id || null;
+
+    const { error } = await supabase
+      .from('support_ticket_messages')
+      .insert({
+        ticket_id: ticketId,
+        sender_id: staffId,
+        message,
+        is_staff_reply: true
+      });
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = 'Reply sent successfully';
+    }
+  }
+
+  if (action === 'assign') {
+    const assignTo = form.get('assign_to') as string;
+    const { error } = await supabase
+      .from('support_tickets')
+      .update({ 
+        assigned_to: assignTo || null,
+        status: 'in_progress',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', ticketId);
+
+    if (error) {
+      actionError = error.message;
+    } else {
+      actionMessage = 'Ticket assigned';
+    }
+  }
+}
+
+// URL params
+const filterStatus = Astro.url.searchParams.get('status') || 'open';
+const filterPriority = Astro.url.searchParams.get('priority') || 'all';
+const viewTicketId = Astro.url.searchParams.get('view');
+
+// Build query
+let query = supabase
+  .from('support_tickets')
+  .select(`
+    *,
+    user:profiles!support_tickets_user_id_fkey(id, email, full_name, is_premium, creator_level, avatar_url),
+    assigned:profiles!support_tickets_assigned_to_fkey(id, email, full_name)
+  `)
+  .order('is_premium_ticket', { ascending: false })
+  .order('created_at', { ascending: false });
+
+if (filterStatus !== 'all') {
+  query = query.eq('status', filterStatus);
+}
+
+if (filterPriority !== 'all') {
+  query = query.eq('priority', filterPriority);
+}
+
+const { data: tickets, error: loadError } = await query;
+
+// Get ticket details if viewing
+let viewTicket = null;
+let ticketMessages: any[] = [];
+if (viewTicketId) {
+  const { data: ticket } = await supabase
+    .from('support_tickets')
+    .select(`
+      *,
+      user:profiles!support_tickets_user_id_fkey(*),
+      assigned:profiles!support_tickets_assigned_to_fkey(id, email, full_name)
+    `)
+    .eq('id', viewTicketId)
+    .single();
+  viewTicket = ticket;
+
+  const { data: messages } = await supabase
+    .from('support_ticket_messages')
+    .select(`
+      *,
+      sender:profiles!support_ticket_messages_sender_id_fkey(id, email, full_name, avatar_url, role)
+    `)
+    .eq('ticket_id', viewTicketId)
+    .order('created_at', { ascending: true });
+  ticketMessages = messages || [];
+}
+
+// Get staff list for assignment
+const { data: staffList } = await supabase
+  .from('profiles')
+  .select('id, email, full_name')
+  .in('role', ['admin', 'moderator']);
+
+// Stats
+const { count: openCount } = await supabase
+  .from('support_tickets')
+  .select('*', { count: 'exact', head: true })
+  .eq('status', 'open');
+
+const { count: premiumOpenCount } = await supabase
+  .from('support_tickets')
+  .select('*', { count: 'exact', head: true })
+  .eq('status', 'open')
+  .eq('is_premium_ticket', true);
+
+const { count: inProgressCount } = await supabase
+  .from('support_tickets')
+  .select('*', { count: 'exact', head: true })
+  .eq('status', 'in_progress');
+---
+
+<AdminLayout title="Support Tickets">
+  {actionMessage && <div class="alert success">{actionMessage}</div>}
+  {actionError && <div class="alert error">{actionError}</div>}
+
+  {viewTicket ? (
+    <!-- Single Ticket View -->
+    <div class="ticket-view">
+      <div class="ticket-header">
+        <a href="/admin/support" class="back-link">← Back to Tickets</a>
+        <div class="ticket-badges">
+          {viewTicket.is_premium_ticket && <span class="badge premium">⭐ Premium</span>}
+          <span class={`badge priority-${viewTicket.priority}`}>{viewTicket.priority}</span>
+          <span class={`badge status-${viewTicket.status}`}>{viewTicket.status}</span>
+        </div>
+      </div>
+
+      <div class="ticket-grid">
+        <div class="ticket-main">
+          <div class="ticket-subject">
+            <h2>{viewTicket.subject}</h2>
+            <span class="ticket-id">#{viewTicket.id.substring(0, 8)}</span>
+          </div>
+
+          <div class="ticket-message original">
+            <div class="message-header">
+              <div class="sender-info">
+                <div class="sender-avatar">
+                  {viewTicket.user?.avatar_url ? (
+                    <img src={viewTicket.user.avatar_url} alt="" />
+                  ) : (
+                    <span>{(viewTicket.user?.full_name || viewTicket.user?.email || '?').charAt(0)}</span>
+                  )}
+                </div>
+                <div>
+                  <span class="sender-name">{viewTicket.user?.full_name || viewTicket.user?.email}</span>
+                  {viewTicket.user?.is_premium && <span class="premium-badge">Premium</span>}
+                  <span class="message-time">{new Date(viewTicket.created_at).toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+            <div class="message-body">
+              {viewTicket.message}
+            </div>
+          </div>
+
+          <!-- Conversation Thread -->
+          {ticketMessages.length > 0 && (
+            <div class="ticket-thread">
+              <h4>Conversation</h4>
+              {ticketMessages.map(msg => (
+                <div class={`ticket-message ${msg.is_staff_reply ? 'staff' : 'user'}`}>
+                  <div class="message-header">
+                    <div class="sender-info">
+                      <div class="sender-avatar">
+                        {msg.sender?.avatar_url ? (
+                          <img src={msg.sender.avatar_url} alt="" />
+                        ) : (
+                          <span>{(msg.sender?.full_name || msg.sender?.email || '?').charAt(0)}</span>
+                        )}
+                      </div>
+                      <div>
+                        <span class="sender-name">
+                          {msg.sender?.full_name || msg.sender?.email}
+                          {msg.is_staff_reply && <span class="staff-badge">Staff</span>}
+                        </span>
+                        <span class="message-time">{new Date(msg.created_at).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="message-body">{msg.message}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <!-- Reply Form -->
+          {viewTicket.status !== 'closed' && (
+            <form method="POST" class="reply-form">
+              <input type="hidden" name="action" value="reply" />
+              <input type="hidden" name="ticket_id" value={viewTicket.id} />
+              <textarea 
+                name="message" 
+                placeholder="Write your reply..." 
+                rows="4" 
+                required
+              ></textarea>
+              <button type="submit" class="btn btn-primary">Send Reply</button>
+            </form>
+          )}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="ticket-sidebar">
+          <div class="sidebar-card">
+            <h4>User Info</h4>
+            <div class="user-info">
+              <div class="user-avatar">
+                {viewTicket.user?.avatar_url ? (
+                  <img src={viewTicket.user.avatar_url} alt="" />
+                ) : (
+                  <span>{(viewTicket.user?.full_name || '?').charAt(0)}</span>
+                )}
+              </div>
+              <div>
+                <p class="user-name">{viewTicket.user?.full_name || 'Unknown'}</p>
+                <p class="user-email">{viewTicket.user?.email}</p>
+              </div>
+            </div>
+            <div class="user-badges">
+              {viewTicket.user?.is_premium && (
+                <span class="badge premium">⭐ Premium Member</span>
+              )}
+              <span class="badge level">Level {viewTicket.user?.creator_level || 1}</span>
+            </div>
+            <a href={`/admin/preview/${viewTicket.user?.id}`} class="btn btn-sm btn-secondary">View Profile</a>
+          </div>
+
+          <div class="sidebar-card">
+            <h4>Ticket Actions</h4>
+            
+            <form method="POST" class="action-form">
+              <input type="hidden" name="action" value="update_status" />
+              <input type="hidden" name="ticket_id" value={viewTicket.id} />
+              <label>Status</label>
+              <select name="status" onchange="this.form.submit()">
+                <option value="open" selected={viewTicket.status === 'open'}>Open</option>
+                <option value="in_progress" selected={viewTicket.status === 'in_progress'}>In Progress</option>
+                <option value="resolved" selected={viewTicket.status === 'resolved'}>Resolved</option>
+                <option value="closed" selected={viewTicket.status === 'closed'}>Closed</option>
+              </select>
+            </form>
+
+            <form method="POST" class="action-form">
+              <input type="hidden" name="action" value="assign" />
+              <input type="hidden" name="ticket_id" value={viewTicket.id} />
+              <label>Assigned To</label>
+              <select name="assign_to" onchange="this.form.submit()">
+                <option value="">Unassigned</option>
+                {staffList?.map(staff => (
+                  <option value={staff.id} selected={viewTicket.assigned_to === staff.id}>
+                    {staff.full_name || staff.email}
+                  </option>
+                ))}
+              </select>
+            </form>
+          </div>
+
+          <div class="sidebar-card">
+            <h4>Ticket Details</h4>
+            <dl class="details-list">
+              <dt>Created</dt>
+              <dd>{new Date(viewTicket.created_at).toLocaleString()}</dd>
+              <dt>Priority</dt>
+              <dd><span class={`badge priority-${viewTicket.priority}`}>{viewTicket.priority}</span></dd>
+              {viewTicket.resolved_at && (
+                <>
+                  <dt>Resolved</dt>
+                  <dd>{new Date(viewTicket.resolved_at).toLocaleString()}</dd>
+                </>
+              )}
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : (
+    <!-- Tickets List -->
+    <div class="support-page">
+      <div class="page-header">
+        <h1>🎫 Support Tickets</h1>
+        <p>Manage creator support requests</p>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-icon">📬</span>
+          <div class="stat-content">
+            <span class="stat-value">{openCount || 0}</span>
+            <span class="stat-label">Open Tickets</span>
+          </div>
+        </div>
+        <div class="stat-card premium-highlight">
+          <span class="stat-icon">⭐</span>
+          <div class="stat-content">
+            <span class="stat-value">{premiumOpenCount || 0}</span>
+            <span class="stat-label">Premium Priority</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <span class="stat-icon">⏳</span>
+          <div class="stat-content">
+            <span class="stat-value">{inProgressCount || 0}</span>
+            <span class="stat-label">In Progress</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="filters">
+        <div class="filter-group">
+          <label>Status:</label>
+          <div class="filter-tabs">
+            <a href="?status=open" class={filterStatus === 'open' ? 'active' : ''}>Open</a>
+            <a href="?status=in_progress" class={filterStatus === 'in_progress' ? 'active' : ''}>In Progress</a>
+            <a href="?status=resolved" class={filterStatus === 'resolved' ? 'active' : ''}>Resolved</a>
+            <a href="?status=all" class={filterStatus === 'all' ? 'active' : ''}>All</a>
+          </div>
+        </div>
+        <div class="filter-group">
+          <label>Priority:</label>
+          <select onchange="window.location.href=`?status=${new URLSearchParams(window.location.search).get('status') || 'open'}&priority=${this.value}`">
+            <option value="all" selected={filterPriority === 'all'}>All Priorities</option>
+            <option value="urgent" selected={filterPriority === 'urgent'}>Urgent</option>
+            <option value="high" selected={filterPriority === 'high'}>High</option>
+            <option value="normal" selected={filterPriority === 'normal'}>Normal</option>
+            <option value="low" selected={filterPriority === 'low'}>Low</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Tickets Table -->
+      <div class="tickets-table-wrapper">
+        <table class="tickets-table">
+          <thead>
+            <tr>
+              <th>Ticket</th>
+              <th>User</th>
+              <th>Priority</th>
+              <th>Status</th>
+              <th>Assigned</th>
+              <th>Created</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {tickets && tickets.length > 0 ? (
+              tickets.map(ticket => (
+                <tr class={ticket.is_premium_ticket ? 'premium-row' : ''}>
+                  <td class="ticket-cell">
+                    {ticket.is_premium_ticket && <span class="premium-star">⭐</span>}
+                    <div>
+                      <span class="ticket-subject">{ticket.subject}</span>
+                      <span class="ticket-id">#{ticket.id.substring(0, 8)}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="user-cell">
+                      <span class="user-name">{ticket.user?.full_name || ticket.user?.email || 'Unknown'}</span>
+                      {ticket.user?.is_premium && <span class="badge premium-sm">Premium</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <span class={`badge priority-${ticket.priority}`}>{ticket.priority}</span>
+                  </td>
+                  <td>
+                    <span class={`badge status-${ticket.status}`}>{ticket.status}</span>
+                  </td>
+                  <td>
+                    {ticket.assigned?.full_name || ticket.assigned?.email || (
+                      <span class="unassigned">Unassigned</span>
+                    )}
+                  </td>
+                  <td class="time-cell">
+                    {new Date(ticket.created_at).toLocaleDateString()}
+                  </td>
+                  <td>
+                    <a href={`?view=${ticket.id}`} class="btn btn-sm btn-primary">View</a>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colspan="7" class="empty-row">
+                  <div class="empty-state">
+                    <span>🎫</span>
+                    <p>No tickets found</p>
+                  </div>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )}
+
+  <style>
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+
+    /* List View */
+    .support-page { max-width: 1200px; }
+
+    .page-header {
+      margin-bottom: 1.5rem;
+    }
+    .page-header h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+    .page-header p {
+      color: #6b7280;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+      background: white;
+      padding: 1.25rem;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .stat-card.premium-highlight {
+      background: linear-gradient(135deg, #fef3c7, #fde68a);
+      border: 2px solid #f59e0b;
+    }
+
+    .stat-icon { font-size: 1.5rem; }
+    .stat-value { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; display: block; }
+    .stat-label { font-size: 0.8125rem; color: #6b7280; }
+
+    .filters {
+      display: flex;
+      gap: 2rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .filter-group label {
+      font-weight: 600;
+      color: #374151;
+      font-size: 0.875rem;
+    }
+
+    .filter-tabs {
+      display: flex;
+      background: white;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .filter-tabs a {
+      padding: 0.5rem 1rem;
+      text-decoration: none;
+      color: #6b7280;
+      font-size: 0.875rem;
+      border-right: 1px solid #e5e7eb;
+    }
+
+    .filter-tabs a:last-child { border-right: none; }
+    .filter-tabs a:hover { background: #f3f4f6; }
+    .filter-tabs a.active { background: #2563eb; color: white; }
+
+    .filter-group select {
+      padding: 0.5rem 1rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 0.875rem;
+    }
+
+    .tickets-table-wrapper {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .tickets-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .tickets-table th,
+    .tickets-table td {
+      padding: 1rem;
+      text-align: left;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .tickets-table th {
+      background: #f9fafb;
+      font-size: 0.75rem;
+      color: #6b7280;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .tickets-table tr.premium-row {
+      background: linear-gradient(90deg, #fef3c7 0%, white 20%);
+    }
+
+    .ticket-cell {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .premium-star { font-size: 1.25rem; }
+
+    .ticket-subject {
+      display: block;
+      font-weight: 500;
+      color: #1a1a2e;
+    }
+
+    .ticket-id {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    .user-cell { display: flex; align-items: center; gap: 0.5rem; }
+    .user-name { font-size: 0.875rem; }
+
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      border-radius: 100px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+
+    .badge.premium { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
+    .badge.premium-sm { background: #fef3c7; color: #92400e; font-size: 0.625rem; }
+    .badge.level { background: #dbeafe; color: #1e40af; }
+
+    .priority-urgent { background: #fee2e2; color: #991b1b; }
+    .priority-high { background: #ffedd5; color: #9a3412; }
+    .priority-normal { background: #dbeafe; color: #1e40af; }
+    .priority-low { background: #f3f4f6; color: #374151; }
+
+    .status-open { background: #dbeafe; color: #1e40af; }
+    .status-in_progress { background: #fef3c7; color: #92400e; }
+    .status-resolved { background: #d1fae5; color: #065f46; }
+    .status-closed { background: #f3f4f6; color: #6b7280; }
+
+    .unassigned { color: #9ca3af; font-style: italic; }
+    .time-cell { font-size: 0.875rem; color: #6b7280; }
+
+    .btn {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.8125rem;
+    }
+    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.75rem; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+
+    .empty-row td { padding: 3rem; }
+    .empty-state { text-align: center; color: #9ca3af; }
+    .empty-state span { font-size: 2rem; display: block; margin-bottom: 0.5rem; }
+
+    /* Single Ticket View */
+    .ticket-view { max-width: 1200px; }
+
+    .ticket-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .back-link {
+      color: #6b7280;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .back-link:hover { color: #2563eb; }
+
+    .ticket-badges { display: flex; gap: 0.5rem; }
+
+    .ticket-grid {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 1.5rem;
+    }
+
+    .ticket-main {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+    }
+
+    .ticket-subject {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .ticket-subject h2 {
+      font-size: 1.25rem;
+      color: #1a1a2e;
+    }
+
+    .ticket-message {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+
+    .ticket-message.original {
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+    }
+
+    .ticket-message.staff {
+      background: #dbeafe;
+      border: 1px solid #93c5fd;
+      margin-left: 2rem;
+    }
+
+    .ticket-message.user {
+      background: #f8fafc;
+    }
+
+    .message-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.75rem;
+    }
+
+    .sender-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .sender-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #e5e7eb;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: #6b7280;
+      overflow: hidden;
+    }
+
+    .sender-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .sender-name {
+      font-weight: 600;
+      color: #1a1a2e;
+      display: block;
+    }
+
+    .message-time {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    .premium-badge, .staff-badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.625rem;
+      font-weight: 600;
+      margin-left: 0.5rem;
+    }
+
+    .premium-badge { background: #fef3c7; color: #92400e; }
+    .staff-badge { background: #dbeafe; color: #1e40af; }
+
+    .message-body {
+      color: #374151;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .ticket-thread h4 {
+      color: #6b7280;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+    }
+
+    .reply-form {
+      margin-top: 1.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .reply-form textarea {
+      width: 100%;
+      padding: 1rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      font-family: inherit;
+      resize: vertical;
+    }
+
+    .reply-form textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+
+    .ticket-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .sidebar-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+
+    .sidebar-card h4 {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin-bottom: 1rem;
+      text-transform: uppercase;
+    }
+
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .user-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: #e5e7eb;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: #6b7280;
+      font-size: 1.25rem;
+      overflow: hidden;
+    }
+
+    .user-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .user-name { font-weight: 600; color: #1a1a2e; }
+    .user-email { font-size: 0.8125rem; color: #6b7280; }
+
+    .user-badges {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .action-form {
+      margin-bottom: 1rem;
+    }
+
+    .action-form label {
+      display: block;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.375rem;
+    }
+
+    .action-form select {
+      width: 100%;
+      padding: 0.5rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      font-size: 0.875rem;
+    }
+
+    .details-list {
+      display: grid;
+      grid-template-columns: 80px 1fr;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+    }
+
+    .details-list dt { color: #6b7280; }
+    .details-list dd { color: #1a1a2e; font-weight: 500; margin: 0; }
+
+    @media (max-width: 1024px) {
+      .ticket-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .ticket-sidebar {
+        flex-direction: row;
+        flex-wrap: wrap;
+      }
+
+      .sidebar-card {
+        flex: 1;
+        min-width: 250px;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .filters {
+        flex-direction: column;
+        gap: 1rem;
+      }
+    }
+  </style>
+</AdminLayout>
