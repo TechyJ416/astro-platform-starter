@@ -181,9 +181,36 @@ function getStatusBadge(status: string) {
       </div>
     </div>
     <div class="header-actions">
+      <button type="button" class="btn btn-primary" id="view-as-user" data-user-id={user.id}>
+        👁️ View as User
+      </button>
       <a href={`mailto:${user.email}`} class="btn btn-secondary">📧 Email User</a>
     </div>
   </div>
+
+  <script is:inline>
+    document.getElementById('view-as-user')?.addEventListener('click', async function() {
+      const userId = this.getAttribute('data-user-id');
+      
+      try {
+        const response = await fetch('/api/admin/impersonate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'start', userId }),
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+          window.location.href = '/dashboard';
+        } else {
+          alert('Error: ' + (data.error || 'Failed to start view mode'));
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    });
+  </script>
 
   <div class="content-grid">
     <!-- Main Content -->
