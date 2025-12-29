@@ -3,7 +3,7 @@
 export const prerender = false;
 
 import AdminLayout from "../../layouts/AdminLayout.astro";
-import { supabase } from "../../lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
 const session = Astro.locals.session;
@@ -11,6 +11,17 @@ const session = Astro.locals.session;
 if (!isMasterKeySession && !session) {
   return Astro.redirect('/admin/login');
 }
+
+// Create admin client with service role
+const supabaseUrl = import.meta.env.SUPABASE_URL;
+const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_KEY;
+const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+
+const supabase = createClient(
+  supabaseUrl,
+  supabaseServiceKey || supabaseAnonKey,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
 
 // Fetch stats
 const { count: totalUsers } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
@@ -21,6 +32,13 @@ const { count: activeCampaigns } = await supabase.from('campaigns').select('*', 
 const { count: totalCommunities } = await supabase.from('communities').select('*', { count: 'exact', head: true });
 const { count: pendingReviews } = await supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'pending');
 const { count: unreadMessages } = await supabase.from('messages').select('*', { count: 'exact', head: true }).eq('is_read', false);
+
+// Milestone submissions stats
+const { count: pendingSubmissions } = await supabase.from('milestone_submissions').select('*', { count: 'exact', head: true }).eq('status', 'pending');
+const { count: totalSubmissions } = await supabase.from('milestone_submissions').select('*', { count: 'exact', head: true });
+
+// Pending applications
+const { count: pendingApplications } = await supabase.from('campaign_assignments').select('*', { count: 'exact', head: true }).eq('status', 'invited');
 
 // Recent signups
 const { data: recentSignups } = await supabase
@@ -69,6 +87,28 @@ const { data: recentPosts } = await supabase
     </div>
   )}
 
+  {(pendingSubmissions || 0) > 0 && (
+    <div class="alert-card success">
+      <div class="alert-icon">📤</div>
+      <div class="alert-content">
+        <h3>{pendingSubmissions} milestone submission{pendingSubmissions > 1 ? 's' : ''} to review</h3>
+        <p>Creators have submitted work. Review and process payments.</p>
+      </div>
+      <a href="/admin/submissions" class="btn btn-success">Review Submissions</a>
+    </div>
+  )}
+
+  {(pendingApplications || 0) > 0 && (
+    <div class="alert-card info">
+      <div class="alert-icon">📝</div>
+      <div class="alert-content">
+        <h3>{pendingApplications} campaign application{pendingApplications > 1 ? 's' : ''} pending</h3>
+        <p>Creators are waiting to hear back about their applications.</p>
+      </div>
+      <a href="/admin/applications" class="btn btn-primary">Review Applications</a>
+    </div>
+  )}
+
   {/* Stats Grid */}
   <div class="stats-grid">
     <a href="/admin/users" class="stat-card">
@@ -110,6 +150,23 @@ const { data: recentPosts } = await supabase
       <div class="stat-content">
         <div class="stat-value">{pendingReviews || 0}</div>
         <div class="stat-label">Pending Reviews</div>
+      </div>
+    </a>
+    
+    <a href="/admin/submissions" class="stat-card">
+      <div class="stat-icon">📤</div>
+      <div class="stat-content">
+        <div class="stat-value">{pendingSubmissions || 0}</div>
+        <div class="stat-label">Pending Submissions</div>
+      </div>
+      {(totalSubmissions || 0) > 0 && <span class="stat-sub">{totalSubmissions} total</span>}
+    </a>
+    
+    <a href="/admin/applications" class="stat-card">
+      <div class="stat-icon">📝</div>
+      <div class="stat-content">
+        <div class="stat-value">{pendingApplications || 0}</div>
+        <div class="stat-label">Pending Applications</div>
       </div>
     </a>
     
@@ -262,6 +319,11 @@ const { data: recentPosts } = await supabase
     .alert-card.info {
       background: linear-gradient(135deg, #dbeafe, #bfdbfe);
       border: 2px solid #3b82f6;
+    }
+    
+    .alert-card.success {
+      background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+      border: 2px solid #10b981;
     }
     
     .alert-icon {
