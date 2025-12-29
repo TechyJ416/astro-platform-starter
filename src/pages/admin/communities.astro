@@ -3,7 +3,7 @@
 export const prerender = false;
 
 import AdminLayout from "../../layouts/AdminLayout.astro";
-import { supabase } from "../../lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
 const session = Astro.locals.session;
@@ -12,226 +12,742 @@ if (!isMasterKeySession && !session) {
   return Astro.redirect('/admin/login');
 }
 
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
 let successMessage = '';
 let errorMessage = '';
-const action = Astro.url.searchParams.get('action');
+
+const tab = Astro.url.searchParams.get('tab') || 'categories';
 const editId = Astro.url.searchParams.get('edit');
 
-// Get community being edited
-let editCommunity = null;
-if (editId) {
-  const { data } = await supabase.from('communities').select('*').eq('id', editId).single();
-  editCommunity = data;
-}
-
+// Handle form submissions
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  const formAction = form.get('action') as string;
+  const action = form.get('action') as string;
 
-  if (formAction === 'create' || formAction === 'update') {
+  // Category actions
+  if (action === 'create_category' || action === 'update_category') {
     const name = (form.get('name') as string)?.trim();
-    
+    const slug = (form.get('slug') as string)?.trim() || name?.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    const description = (form.get('description') as string)?.trim() || null;
+    const icon = (form.get('icon') as string)?.trim() || '💬';
+    const isPublic = form.get('is_public') === 'on';
+
     if (!name) {
-      errorMessage = 'Community name is required.';
+      errorMessage = 'Category name is required';
     } else {
-      let slug = (form.get('slug') as string)?.trim();
-      if (!slug) {
-        slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-      }
+      const data = { name, slug, description, icon, is_public: isPublic };
       
-      const description = (form.get('description') as string)?.trim() || null;
-
-      const communityData = { name, slug, description };
-
-      if (formAction === 'update') {
-        const communityId = form.get('communityId') as string;
-        const { error } = await supabase.from('communities').update(communityData).eq('id', communityId);
-        if (error) {
-          errorMessage = error.code === '23505' ? 'A community with this slug already exists.' : error.message;
-        } else {
-          return Astro.redirect('/admin/communities?updated=true');
-        }
+      if (action === 'update_category') {
+        const categoryId = form.get('category_id') as string;
+        const { error } = await supabase.from('communities').update(data).eq('id', categoryId);
+        if (error) errorMessage = error.message;
+        else successMessage = 'Category updated!';
       } else {
-        const { error } = await supabase.from('communities').insert(communityData);
-        if (error) {
-          errorMessage = error.code === '23505' ? 'A community with this slug already exists.' : error.message;
-        } else {
-          return Astro.redirect('/admin/communities?created=true');
-        }
+        const { error } = await supabase.from('communities').insert(data);
+        if (error) errorMessage = error.message;
+        else successMessage = 'Category created!';
       }
     }
   }
 
-  if (formAction === 'delete') {
-    const communityId = form.get('communityId') as string;
-    
-    // Check for related members/posts (adjust based on your schema)
-    // For now, just try to delete and show error if FK fails
-    const { error } = await supabase.from('communities').delete().eq('id', communityId);
-    if (error) {
-      if (error.code === '23503') {
-        errorMessage = 'Cannot delete: This community has related data. Remove all members and posts first.';
-      } else {
-        errorMessage = error.message;
-      }
-    } else {
-      successMessage = 'Community deleted.';
-    }
+  if (action === 'delete_category') {
+    const categoryId = form.get('category_id') as string;
+    const { error } = await supabase.from('communities').delete().eq('id', categoryId);
+    if (error) errorMessage = error.message;
+    else successMessage = 'Category deleted';
+  }
+
+  // Topic actions
+  if (action === 'pin_topic') {
+    const topicId = form.get('topic_id') as string;
+    const { data: topic } = await supabase.from('forum_topics').select('is_pinned').eq('id', topicId).single();
+    await supabase.from('forum_topics').update({ is_pinned: !topic?.is_pinned }).eq('id', topicId);
+    successMessage = topic?.is_pinned ? 'Topic unpinned' : 'Topic pinned';
+  }
+
+  if (action === 'lock_topic') {
+    const topicId = form.get('topic_id') as string;
+    const { data: topic } = await supabase.from('forum_topics').select('is_locked').eq('id', topicId).single();
+    await supabase.from('forum_topics').update({ is_locked: !topic?.is_locked }).eq('id', topicId);
+    successMessage = topic?.is_locked ? 'Topic unlocked' : 'Topic locked';
+  }
+
+  if (action === 'announce_topic') {
+    const topicId = form.get('topic_id') as string;
+    const { data: topic } = await supabase.from('forum_topics').select('is_announcement').eq('id', topicId).single();
+    await supabase.from('forum_topics').update({ is_announcement: !topic?.is_announcement }).eq('id', topicId);
+    successMessage = topic?.is_announcement ? 'Announcement removed' : 'Topic marked as announcement';
+  }
+
+  if (action === 'delete_topic') {
+    const topicId = form.get('topic_id') as string;
+    await supabase.from('forum_topics').delete().eq('id', topicId);
+    successMessage = 'Topic deleted';
+  }
+
+  if (action === 'delete_reply') {
+    const replyId = form.get('reply_id') as string;
+    await supabase.from('forum_replies').delete().eq('id', replyId);
+    successMessage = 'Reply deleted';
   }
 }
 
-if (Astro.url.searchParams.get('created')) successMessage = 'Community created successfully!';
-if (Astro.url.searchParams.get('updated')) successMessage = 'Community updated successfully!';
-
-// Load communities
-const { data: communities, error: loadError } = await supabase.from('communities').select('*').order('created_at', { ascending: false });
-
-if (loadError && loadError.code === '42P01') {
-  errorMessage = 'Communities table not found. Please run the database migration.';
+// Get category being edited
+let editCategory = null;
+if (editId && tab === 'categories') {
+  const { data } = await supabase.from('communities').select('*').eq('id', editId).single();
+  editCategory = data;
 }
 
-const showForm = action === 'new' || editId;
+// Fetch categories
+const { data: categories } = await supabase
+  .from('communities')
+  .select('*')
+  .order('name');
+
+// Fetch topics with author info
+let topics: any[] = [];
+try {
+  const { data } = await supabase
+    .from('forum_topics')
+    .select(`
+      *,
+      author:profiles!forum_topics_user_id_fkey(full_name, email, role),
+      community:communities(name, icon)
+    `)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  topics = data || [];
+} catch (e) { /* table may not exist */ }
+
+// Fetch recent replies for moderation
+let recentReplies: any[] = [];
+try {
+  const { data } = await supabase
+    .from('forum_replies')
+    .select(`
+      *,
+      author:profiles!forum_replies_user_id_fkey(full_name, email),
+      topic:forum_topics(id, title)
+    `)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  recentReplies = data || [];
+} catch (e) { /* table may not exist */ }
+
+// Stats
+let topicCount = 0;
+let replyCount = 0;
+try {
+  const { count: tc } = await supabase.from('forum_topics').select('*', { count: 'exact', head: true });
+  const { count: rc } = await supabase.from('forum_replies').select('*', { count: 'exact', head: true });
+  topicCount = tc || 0;
+  replyCount = rc || 0;
+} catch (e) { /* tables may not exist */ }
+
+function timeAgo(date: string) {
+  const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
 ---
 
-<AdminLayout title="Communities">
+<AdminLayout title="Forum Management">
   {successMessage && <div class="alert success">{successMessage}</div>}
   {errorMessage && <div class="alert error">{errorMessage}</div>}
 
-  {showForm ? (
-    <div class="panel">
-      <div class="panel-header">
-        <h2>{editCommunity ? 'Edit Community' : 'Create New Community'}</h2>
-        <a href="/admin/communities" class="btn btn-secondary">← Back</a>
+  <div class="forum-admin">
+    <div class="page-header">
+      <div>
+        <h1>💬 Forum Management</h1>
+        <p>Manage forum categories, topics, and moderation</p>
       </div>
-      <form method="POST" class="form">
-        <input type="hidden" name="action" value={editCommunity ? 'update' : 'create'} />
-        {editCommunity && <input type="hidden" name="communityId" value={editCommunity.id} />}
-        
-        <div class="form-row">
-          <div class="form-group">
-            <label>Community Name *</label>
-            <input type="text" name="name" required placeholder="Fashion Creators" value={editCommunity?.name || ''} />
-          </div>
-          <div class="form-group">
-            <label>Slug <span class="hint">(auto-generated if empty)</span></label>
-            <input type="text" name="slug" placeholder="fashion-creators" value={editCommunity?.slug || ''} />
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label>Description</label>
-          <textarea name="description" rows="4" placeholder="What is this community about?">{editCommunity?.description || ''}</textarea>
-        </div>
-
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">{editCommunity ? 'Update Community' : 'Create Community'}</button>
-          <a href="/admin/communities" class="btn btn-secondary">Cancel</a>
-        </div>
-      </form>
+      <a href="/forum" target="_blank" class="btn btn-secondary">👁️ View Forum</a>
     </div>
-  ) : (
-    <>
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-icon">💬</div>
-          <div>
-            <div class="stat-value">{communities?.length || 0}</div>
-            <div class="stat-label">Total Communities</div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <span class="stat-icon">📁</span>
+        <div class="stat-content">
+          <span class="stat-value">{categories?.length || 0}</span>
+          <span class="stat-label">Categories</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-icon">📝</span>
+        <div class="stat-content">
+          <span class="stat-value">{topicCount}</span>
+          <span class="stat-label">Topics</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-icon">💬</span>
+        <div class="stat-content">
+          <span class="stat-value">{replyCount}</span>
+          <span class="stat-label">Replies</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <a href="?tab=categories" class={`tab ${tab === 'categories' ? 'active' : ''}`}>📁 Categories</a>
+      <a href="?tab=topics" class={`tab ${tab === 'topics' ? 'active' : ''}`}>📝 Topics</a>
+      <a href="?tab=moderation" class={`tab ${tab === 'moderation' ? 'active' : ''}`}>🛡️ Moderation</a>
+    </div>
+
+    <!-- Categories Tab -->
+    {tab === 'categories' && (
+      <div class="tab-content">
+        <div class="content-grid">
+          <!-- Category Form -->
+          <div class="panel">
+            <div class="panel-header">
+              <h2>{editCategory ? '✏️ Edit Category' : '➕ New Category'}</h2>
+            </div>
+            <div class="panel-content">
+              <form method="POST" class="category-form">
+                <input type="hidden" name="action" value={editCategory ? 'update_category' : 'create_category'} />
+                {editCategory && <input type="hidden" name="category_id" value={editCategory.id} />}
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Icon</label>
+                    <input type="text" name="icon" value={editCategory?.icon || '💬'} style="width: 60px; text-align: center; font-size: 1.5rem;" />
+                  </div>
+                  <div class="form-group" style="flex: 1;">
+                    <label>Name *</label>
+                    <input type="text" name="name" value={editCategory?.name || ''} required placeholder="e.g. General Discussion" />
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label>Slug</label>
+                  <input type="text" name="slug" value={editCategory?.slug || ''} placeholder="auto-generated from name" />
+                </div>
+
+                <div class="form-group">
+                  <label>Description</label>
+                  <textarea name="description" rows="2" placeholder="What's this category for?">{editCategory?.description || ''}</textarea>
+                </div>
+
+                <div class="form-group checkbox">
+                  <label>
+                    <input type="checkbox" name="is_public" checked={editCategory?.is_public !== false} />
+                    Public (visible to all users)
+                  </label>
+                </div>
+
+                <div class="form-actions">
+                  {editCategory && (
+                    <a href="?tab=categories" class="btn btn-secondary">Cancel</a>
+                  )}
+                  <button type="submit" class="btn btn-primary">
+                    {editCategory ? 'Update Category' : 'Create Category'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Categories List -->
+          <div class="panel">
+            <div class="panel-header">
+              <h2>📁 Categories ({categories?.length || 0})</h2>
+            </div>
+            <div class="panel-content">
+              {categories && categories.length > 0 ? (
+                <div class="category-list">
+                  {categories.map(cat => (
+                    <div class="category-item">
+                      <span class="cat-icon">{cat.icon || '💬'}</span>
+                      <div class="cat-info">
+                        <span class="cat-name">{cat.name}</span>
+                        <span class="cat-slug">/{cat.slug}</span>
+                      </div>
+                      <div class="cat-badges">
+                        {cat.is_public === false && <span class="badge private">Private</span>}
+                      </div>
+                      <div class="cat-actions">
+                        <a href={`?tab=categories&edit=${cat.id}`} class="btn btn-sm btn-secondary">Edit</a>
+                        <form method="POST" class="inline-form" onsubmit="return confirm('Delete this category? Topics will also be deleted.')">
+                          <input type="hidden" name="action" value="delete_category" />
+                          <input type="hidden" name="category_id" value={cat.id} />
+                          <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                        </form>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div class="empty-state">
+                  <span>📁</span>
+                  <p>No categories yet. Create your first one!</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
+    )}
 
-      <div class="toolbar">
-        <h2>All Communities</h2>
-        <a href="?action=new" class="btn btn-primary">+ New Community</a>
+    <!-- Topics Tab -->
+    {tab === 'topics' && (
+      <div class="tab-content">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>📝 All Topics</h2>
+          </div>
+          <div class="panel-content">
+            {topics && topics.length > 0 ? (
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Topic</th>
+                    <th>Author</th>
+                    <th>Category</th>
+                    <th>Stats</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topics.map(topic => (
+                    <tr>
+                      <td>
+                        <a href={`/forum/topic/${topic.id}`} target="_blank" class="topic-link">
+                          {topic.title}
+                        </a>
+                        <span class="topic-time">{timeAgo(topic.created_at)}</span>
+                      </td>
+                      <td>
+                        <span class="author-name">{topic.author?.full_name || topic.author?.email || 'Unknown'}</span>
+                        {topic.author?.role === 'admin' && <span class="role-tag admin">Admin</span>}
+                      </td>
+                      <td>
+                        {topic.community?.icon} {topic.community?.name}
+                      </td>
+                      <td class="stats-cell">
+                        <span>💬 {topic.reply_count || 0}</span>
+                        <span>👁️ {topic.view_count || 0}</span>
+                      </td>
+                      <td>
+                        {topic.is_pinned && <span class="status-badge pinned">📌</span>}
+                        {topic.is_announcement && <span class="status-badge announce">📢</span>}
+                        {topic.is_locked && <span class="status-badge locked">🔒</span>}
+                      </td>
+                      <td>
+                        <div class="action-buttons">
+                          <form method="POST" class="inline-form">
+                            <input type="hidden" name="action" value="pin_topic" />
+                            <input type="hidden" name="topic_id" value={topic.id} />
+                            <button type="submit" class="btn btn-xs" title={topic.is_pinned ? 'Unpin' : 'Pin'}>
+                              📌
+                            </button>
+                          </form>
+                          <form method="POST" class="inline-form">
+                            <input type="hidden" name="action" value="lock_topic" />
+                            <input type="hidden" name="topic_id" value={topic.id} />
+                            <button type="submit" class="btn btn-xs" title={topic.is_locked ? 'Unlock' : 'Lock'}>
+                              🔒
+                            </button>
+                          </form>
+                          <form method="POST" class="inline-form">
+                            <input type="hidden" name="action" value="announce_topic" />
+                            <input type="hidden" name="topic_id" value={topic.id} />
+                            <button type="submit" class="btn btn-xs" title={topic.is_announcement ? 'Remove announcement' : 'Make announcement'}>
+                              📢
+                            </button>
+                          </form>
+                          <form method="POST" class="inline-form" onsubmit="return confirm('Delete this topic and all replies?')">
+                            <input type="hidden" name="action" value="delete_topic" />
+                            <input type="hidden" name="topic_id" value={topic.id} />
+                            <button type="submit" class="btn btn-xs btn-danger">🗑️</button>
+                          </form>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div class="empty-state">
+                <span>📝</span>
+                <p>No topics yet. Run forum-schema.sql to set up the forum tables.</p>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
+    )}
 
-      {communities && communities.length > 0 ? (
-        <div class="grid">
-          {communities.map(c => (
-            <div class="card">
-              <div class="card-header">
-                <div class="community-icon">💬</div>
-                <div>
-                  <h3>{c.name}</h3>
-                  <span class="slug">/{c.slug}</span>
-                </div>
+    <!-- Moderation Tab -->
+    {tab === 'moderation' && (
+      <div class="tab-content">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>🛡️ Recent Replies (for moderation)</h2>
+          </div>
+          <div class="panel-content">
+            {recentReplies && recentReplies.length > 0 ? (
+              <div class="replies-list">
+                {recentReplies.map(reply => (
+                  <div class="reply-item">
+                    <div class="reply-header">
+                      <span class="reply-author">{reply.author?.full_name || reply.author?.email}</span>
+                      <span class="reply-topic">
+                        in <a href={`/forum/topic/${reply.topic?.id}`} target="_blank">{reply.topic?.title}</a>
+                      </span>
+                      <span class="reply-time">{timeAgo(reply.created_at)}</span>
+                    </div>
+                    <div class="reply-content">
+                      {reply.content.substring(0, 200)}{reply.content.length > 200 ? '...' : ''}
+                    </div>
+                    <div class="reply-actions">
+                      <a href={`/forum/topic/${reply.topic?.id}#reply-${reply.id}`} target="_blank" class="btn btn-xs btn-secondary">
+                        View
+                      </a>
+                      <form method="POST" class="inline-form" onsubmit="return confirm('Delete this reply?')">
+                        <input type="hidden" name="action" value="delete_reply" />
+                        <input type="hidden" name="reply_id" value={reply.id} />
+                        <button type="submit" class="btn btn-xs btn-danger">Delete</button>
+                      </form>
+                    </div>
+                  </div>
+                ))}
               </div>
-              {c.description && <p class="card-desc">{c.description}</p>}
-              <div class="card-meta">
-                <span>Created {new Date(c.created_at).toLocaleDateString()}</span>
+            ) : (
+              <div class="empty-state">
+                <span>🛡️</span>
+                <p>No replies to moderate. Run forum-schema.sql if tables don't exist.</p>
               </div>
-              <div class="card-actions">
-                <a href={`?edit=${c.id}`} class="btn btn-sm btn-secondary">✏️ Edit</a>
-                <a href={`/community/${c.slug}`} class="btn btn-sm btn-secondary" target="_blank">View →</a>
-                <form method="POST" class="inline" onsubmit="return confirm('Are you sure you want to delete this community? This cannot be undone.');">
-                  <input type="hidden" name="communityId" value={c.id} />
-                  <button name="action" value="delete" class="btn btn-sm btn-danger">🗑️</button>
-                </form>
-              </div>
-            </div>
-          ))}
+            )}
+          </div>
         </div>
-      ) : (
-        <div class="empty">
-          <span>💬</span>
-          <p>No communities yet</p>
-          <a href="?action=new" class="btn btn-primary">Create First Community</a>
-        </div>
-      )}
-    </>
-  )}
+      </div>
+    )}
+  </div>
 
   <style>
-    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
-    .stat-card { background: white; padding: 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 1rem; }
-    .stat-icon { font-size: 1.5rem; width: 44px; height: 44px; background: #f3f4f6; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-    .stat-value { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
-    .stat-label { font-size: 0.8125rem; color: #6b7280; }
-    
-    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; background: white; padding: 1rem 1.25rem; border-radius: 12px; }
-    .toolbar h2 { font-size: 1rem; color: #1a1a2e; margin: 0; }
-    
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; }
-    .card { background: white; border-radius: 12px; padding: 1.25rem; }
-    .card-header { display: flex; gap: 1rem; align-items: center; margin-bottom: 0.75rem; }
-    .community-icon { width: 48px; height: 48px; background: linear-gradient(135deg, #dbeafe, #c7d2fe); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; flex-shrink: 0; }
-    .card-header h3 { font-size: 1rem; color: #1a1a2e; margin-bottom: 0.125rem; }
-    .slug { font-size: 0.75rem; color: #9ca3af; font-family: monospace; }
-    .card-desc { font-size: 0.875rem; color: #6b7280; margin-bottom: 1rem; line-height: 1.5; }
-    .card-meta { font-size: 0.8125rem; color: #9ca3af; margin-bottom: 1rem; }
-    .card-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-    .inline { display: inline; }
-    
-    .panel { background: white; border-radius: 12px; overflow: hidden; }
-    .panel-header { display: flex; justify-content: space-between; align-items: center; padding: 1.25rem; border-bottom: 1px solid #e5e7eb; }
-    .panel-header h2 { font-size: 1.125rem; color: #1a1a2e; margin: 0; }
-    .form { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-    .form-group { display: flex; flex-direction: column; gap: 0.5rem; }
-    .form-group label { font-weight: 600; font-size: 0.875rem; color: #374151; }
-    .form-group .hint { font-weight: 400; color: #9ca3af; font-size: 0.75rem; }
-    .form-group input, .form-group textarea { padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 1rem; }
-    .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #2563eb; }
-    .form-actions { display: flex; gap: 1rem; margin-top: 0.5rem; }
-    
-    .btn { padding: 0.625rem 1.25rem; border-radius: 8px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
-    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
-    .btn-primary { background: #2563eb; color: white; }
-    .btn-secondary { background: #f3f4f6; color: #374151; }
-    .btn-danger { background: #dc2626; color: white; }
-    
-    .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
     .alert.success { background: #d1fae5; color: #065f46; }
     .alert.error { background: #fee2e2; color: #991b1b; }
-    
-    .empty { text-align: center; padding: 4rem 2rem; background: white; border-radius: 12px; }
-    .empty span { font-size: 3rem; display: block; margin-bottom: 1rem; }
-    .empty p { color: #6b7280; margin-bottom: 1rem; }
-    
-    @media (max-width: 768px) {
+
+    .forum-admin { max-width: 1200px; }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1.5rem;
+    }
+
+    .page-header h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+
+    .page-header p { color: #6b7280; }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+      background: white;
+      padding: 1.25rem;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .stat-icon { font-size: 1.5rem; }
+    .stat-value { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; display: block; }
+    .stat-label { font-size: 0.8125rem; color: #6b7280; }
+
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .tab {
+      padding: 0.75rem 1.25rem;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #6b7280;
+      font-weight: 500;
+      background: white;
+    }
+
+    .tab:hover { background: #f3f4f6; }
+    .tab.active { background: #2563eb; color: white; }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    .panel {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .panel-header h2 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0;
+    }
+
+    .panel-content { padding: 1.25rem; }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.375rem;
+    }
+
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+      width: 100%;
+      padding: 0.625rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 0.9375rem;
+    }
+
+    .form-group.checkbox label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+    }
+
+    .form-group.checkbox input {
+      width: auto;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 1rem;
+    }
+
+    .form-actions {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: flex-end;
+      padding-top: 1rem;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .btn {
+      padding: 0.625rem 1.25rem;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+
+    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
+    .btn-xs { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+    .btn-danger { background: #fee2e2; color: #991b1b; }
+
+    .inline-form { display: inline; }
+
+    .category-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .category-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 8px;
+    }
+
+    .cat-icon { font-size: 1.5rem; }
+
+    .cat-info { flex: 1; }
+
+    .cat-name {
+      font-weight: 600;
+      color: #1a1a2e;
+      display: block;
+    }
+
+    .cat-slug {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    .cat-badges { display: flex; gap: 0.25rem; }
+
+    .badge {
+      padding: 0.125rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+    }
+
+    .badge.private { background: #f3f4f6; color: #6b7280; }
+
+    .cat-actions { display: flex; gap: 0.375rem; }
+
+    .empty-state {
+      text-align: center;
+      padding: 2rem;
+      color: #9ca3af;
+    }
+
+    .empty-state span {
+      font-size: 2rem;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+
+    /* Data Table */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .data-table th,
+    .data-table td {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .data-table th {
+      font-size: 0.75rem;
+      color: #6b7280;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .topic-link {
+      color: #1a1a2e;
+      text-decoration: none;
+      font-weight: 500;
+      display: block;
+    }
+
+    .topic-link:hover { color: #2563eb; }
+
+    .topic-time {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      display: block;
+    }
+
+    .author-name {
+      font-size: 0.875rem;
+    }
+
+    .role-tag {
+      font-size: 0.625rem;
+      padding: 0.125rem 0.375rem;
+      border-radius: 4px;
+      font-weight: 600;
+      margin-left: 0.25rem;
+    }
+
+    .role-tag.admin { background: #fef3c7; color: #92400e; }
+
+    .stats-cell {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      font-size: 0.75rem;
+      color: #6b7280;
+    }
+
+    .status-badge {
+      display: inline-block;
+      margin-right: 0.25rem;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 0.25rem;
+    }
+
+    /* Replies list */
+    .replies-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .reply-item {
+      padding: 1rem;
+      background: #f9fafb;
+      border-radius: 8px;
+    }
+
+    .reply-header {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 0.5rem;
+      font-size: 0.8125rem;
+    }
+
+    .reply-author { font-weight: 600; color: #1a1a2e; }
+    .reply-topic { color: #6b7280; }
+    .reply-topic a { color: #2563eb; }
+    .reply-time { color: #9ca3af; margin-left: auto; }
+
+    .reply-content {
+      font-size: 0.875rem;
+      color: #4b5563;
+      margin-bottom: 0.75rem;
+    }
+
+    .reply-actions { display: flex; gap: 0.5rem; }
+
+    @media (max-width: 900px) {
+      .content-grid { grid-template-columns: 1fr; }
       .stats-grid { grid-template-columns: 1fr; }
-      .form-row { grid-template-columns: 1fr; }
     }
   </style>
 </AdminLayout>
