@@ -1,7 +1,12 @@
 ---
 // src/pages/creators.astro
+export const prerender = false;
+
 import Layout from "../layouts/Layout.astro";
 import { supabase } from "../lib/supabase";
+import { getPageContent } from "../lib/content";
+
+const content = await getPageContent('creators');
 
 // Get some stats
 const { count: creatorCount } = await supabase
@@ -28,9 +33,9 @@ const { data: featuredCampaigns } = await supabase
     <!-- Hero Section -->
     <section class="hero">
       <div class="hero-content">
-        <span class="hero-badge">For Creators</span>
-        <h1>Turn Your Content Into Income</h1>
-        <p>Join thousands of creators earning money by creating authentic content for brands they love.</p>
+        <span class="hero-badge">{content.hero?.badge || "For Creators"}</span>
+        <h1>{content.hero?.title || "Turn Your Content Into Income"}</h1>
+        <p>{content.hero?.subtitle || "Join thousands of creators earning money by creating authentic content for brands they love."}</p>
         <div class="hero-actions">
           <a href="/signup" class="btn btn-primary btn-lg">Start Earning Today</a>
           <a href="/campaigns" class="btn btn-secondary btn-lg">Browse Campaigns</a>
