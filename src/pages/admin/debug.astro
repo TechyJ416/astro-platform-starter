@@ -32,6 +32,9 @@ const checks = {
 const serviceKeyValid = serviceKey && serviceKey.startsWith('eyJ') && serviceKey.length > 200;
 const keysAreDifferent = serviceKey !== anonKey;
 
+// Check if we should run write tests (only if ?test=true)
+const runWriteTests = Astro.url.searchParams.get('test') === 'true';
+
 // Test database connection with service key
 let dbTests: any[] = [];
 
@@ -42,7 +45,7 @@ if (serviceKey) {
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 
-  // Test 1: Read profiles
+  // Test 1: Read profiles (always run)
   try {
     const { data, error } = await supabase.from('profiles').select('id').limit(1);
     dbTests.push({
@@ -66,65 +69,94 @@ if (serviceKey) {
     dbTests.push({ name: 'Read campaigns', success: false, message: e.message });
   }
 
-  // Test 3: Insert campaign
-  try {
-    const testSlug = `__test__${Date.now()}`;
-    const { data, error } = await supabase
-      .from('campaigns')
-      .insert({ title: '__DEBUG_TEST__', slug: testSlug, status: 'draft' })
-      .select()
-      .single();
-    
-    if (error) {
-      dbTests.push({
-        name: 'INSERT campaign',
-        success: false,
-        message: `FAILED: ${error.message} (code: ${error.code})`
-      });
-    } else {
-      dbTests.push({
-        name: 'INSERT campaign',
-        success: true,
-        message: `Success! Created ID: ${data.id}`
-      });
+  // WRITE TESTS - only run if ?test=true
+  if (runWriteTests) {
+    // Test 3: Insert campaign
+    try {
+      const testSlug = `__test__${Date.now()}`;
+      const { data, error } = await supabase
+        .from('campaigns')
+        .insert({ title: '__DEBUG_TEST__', slug: testSlug, status: 'draft' })
+        .select()
+        .single();
       
-      // Clean up
-      const { error: deleteError } = await supabase.from('campaigns').delete().eq('id', data.id);
-      dbTests.push({
-        name: 'DELETE campaign (cleanup)',
-        success: !deleteError,
-        message: deleteError ? deleteError.message : 'Cleaned up test record'
-      });
+      if (error) {
+        dbTests.push({
+          name: 'INSERT campaign',
+          success: false,
+          message: `FAILED: ${error.message} (code: ${error.code})`
+        });
+      } else {
+        dbTests.push({
+          name: 'INSERT campaign',
+          success: true,
+          message: `Success! Created ID: ${data.id}`
+        });
+        
+        // Clean up
+        const { error: deleteError } = await supabase.from('campaigns').delete().eq('id', data.id);
+        dbTests.push({
+          name: 'DELETE campaign (cleanup)',
+          success: !deleteError,
+          message: deleteError ? deleteError.message : 'Cleaned up test record'
+        });
+      }
+    } catch (e: any) {
+      dbTests.push({ name: 'INSERT campaign', success: false, message: `Exception: ${e.message}` });
     }
-  } catch (e: any) {
-    dbTests.push({ name: 'INSERT campaign', success: false, message: `Exception: ${e.message}` });
-  }
 
-  // Test 4: Insert community
-  try {
-    const testSlug = `__test__${Date.now()}`;
-    const { data, error } = await supabase
-      .from('communities')
-      .insert({ name: '__DEBUG_TEST__', slug: testSlug })
-      .select()
-      .single();
-    
-    if (error) {
-      dbTests.push({
-        name: 'INSERT community',
-        success: false,
-        message: `FAILED: ${error.message} (code: ${error.code})`
-      });
-    } else {
-      dbTests.push({
-        name: 'INSERT community',
-        success: true,
-        message: `Success! Created ID: ${data.id}`
-      });
-      await supabase.from('communities').delete().eq('id', data.id);
+    // Test 4: Insert community
+    try {
+      const testSlug = `__test__${Date.now()}`;
+      const { data, error } = await supabase
+        .from('communities')
+        .insert({ name: '__DEBUG_TEST__', slug: testSlug })
+        .select()
+        .single();
+      
+      if (error) {
+        dbTests.push({
+          name: 'INSERT community',
+          success: false,
+          message: `FAILED: ${error.message} (code: ${error.code})`
+        });
+      } else {
+        dbTests.push({
+          name: 'INSERT community',
+          success: true,
+          message: `Success! Created ID: ${data.id}`
+        });
+        await supabase.from('communities').delete().eq('id', data.id);
+      }
+    } catch (e: any) {
+      dbTests.push({ name: 'INSERT community', success: false, message: `Exception: ${e.message}` });
     }
-  } catch (e: any) {
-    dbTests.push({ name: 'INSERT community', success: false, message: `Exception: ${e.message}` });
+
+    // Test 5: Insert post
+    try {
+      const { data, error } = await supabase
+        .from('posts')
+        .insert({ title: '__DEBUG_TEST__', status: 'pending' })
+        .select()
+        .single();
+      
+      if (error) {
+        dbTests.push({
+          name: 'INSERT post',
+          success: false,
+          message: `FAILED: ${error.message} (code: ${error.code})`
+        });
+      } else {
+        dbTests.push({
+          name: 'INSERT post',
+          success: true,
+          message: `Success! Created ID: ${data.id}`
+        });
+        await supabase.from('posts').delete().eq('id', data.id);
+      }
+    } catch (e: any) {
+      dbTests.push({ name: 'INSERT post', success: false, message: `Exception: ${e.message}` });
+    }
   }
 }
 
@@ -213,6 +245,19 @@ const sessionInfo = {
       ) : (
         <p class="error">Cannot run tests - SUPABASE_SERVICE_KEY not set</p>
       )}
+      
+      {!runWriteTests && (
+        <div class="write-test-prompt">
+          <p>Read tests completed. Click below to run write tests (INSERT/DELETE):</p>
+          <a href="/admin/debug?test=true" class="btn btn-primary">🧪 Run Write Tests</a>
+        </div>
+      )}
+      
+      {runWriteTests && (
+        <div class="write-test-done">
+          <p>✅ Write tests completed. <a href="/admin/debug">Reset</a></p>
+        </div>
+      )}
     </div>
 
     <!-- Diagnosis -->
@@ -289,5 +334,14 @@ const sessionInfo = {
     .issue h3 { margin: 0 0 0.5rem 0; font-size: 1rem; }
     .issue p { margin: 0.25rem 0; font-size: 0.875rem; }
     .issue ul { margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.875rem; }
+    
+    .write-test-prompt { margin-top: 1rem; padding: 1rem; background: #dbeafe; border-radius: 8px; }
+    .write-test-prompt p { margin: 0 0 0.75rem 0; font-size: 0.875rem; }
+    .write-test-done { margin-top: 1rem; padding: 1rem; background: #d1fae5; border-radius: 8px; }
+    .write-test-done p { margin: 0; font-size: 0.875rem; }
+    
+    .btn { display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; text-decoration: none; font-weight: 500; font-size: 0.875rem; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-primary:hover { background: #1d4ed8; }
   </style>
 </AdminLayout>
