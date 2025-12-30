@@ -1,0 +1,327 @@
+---
+// src/pages/admin/debug.astro
+export const prerender = false;
+
+import AdminLayout from "../../layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+// Check environment variables
+const checks = {
+  SUPABASE_URL: !!import.meta.env.SUPABASE_URL,
+  PUBLIC_SUPABASE_ANON_KEY: !!import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  SUPABASE_SERVICE_KEY: !!import.meta.env.SUPABASE_SERVICE_KEY,
+  ADMIN_MASTER_KEY: !!import.meta.env.ADMIN_MASTER_KEY,
+};
+
+const hasServiceKey = checks.SUPABASE_SERVICE_KEY;
+
+// Test database connection with service key
+let dbTest = { success: false, message: '', canWrite: false };
+
+if (hasServiceKey) {
+  const supabase = createClient(
+    import.meta.env.SUPABASE_URL,
+    import.meta.env.SUPABASE_SERVICE_KEY,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
+
+  // Test read
+  const { data, error } = await supabase.from('profiles').select('id').limit(1);
+  if (error) {
+    dbTest.message = `Read failed: ${error.message}`;
+  } else {
+    dbTest.success = true;
+    dbTest.message = 'Database read successful';
+    
+    // Test write to campaigns (then rollback)
+    const { data: testCampaign, error: writeError } = await supabase
+      .from('campaigns')
+      .insert({ title: '__TEST__', slug: '__test__' + Date.now(), status: 'draft' })
+      .select()
+      .single();
+    
+    if (writeError) {
+      dbTest.message += ` | Write failed: ${writeError.message}`;
+    } else {
+      dbTest.canWrite = true;
+      dbTest.message += ' | Write successful';
+      // Clean up test record
+      await supabase.from('campaigns').delete().eq('id', testCampaign.id);
+      dbTest.message += ' | Cleanup done';
+    }
+  }
+} else {
+  dbTest.message = 'Cannot test - SUPABASE_SERVICE_KEY not configured';
+}
+
+// Session info
+const sessionInfo = {
+  isMasterKeySession,
+  hasAuthSession: !!session,
+  userId: session?.user?.id || 'N/A',
+  userEmail: session?.user?.email || 'N/A',
+};
+---
+
+<AdminLayout title="Debug Info">
+  <div class="debug-page">
+    <h1>🔧 Admin Debug Info</h1>
+    <p class="subtitle">Check your configuration and diagnose issues</p>
+
+    <!-- Environment Variables -->
+    <div class="panel">
+      <h2>Environment Variables</h2>
+      <table class="debug-table">
+        <thead>
+          <tr>
+            <th>Variable</th>
+            <th>Status</th>
+            <th>Required For</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>SUPABASE_URL</code></td>
+            <td class={checks.SUPABASE_URL ? 'success' : 'error'}>
+              {checks.SUPABASE_URL ? '✅ Set' : '❌ Missing'}
+            </td>
+            <td>All database operations</td>
+          </tr>
+          <tr>
+            <td><code>PUBLIC_SUPABASE_ANON_KEY</code></td>
+            <td class={checks.PUBLIC_SUPABASE_ANON_KEY ? 'success' : 'error'}>
+              {checks.PUBLIC_SUPABASE_ANON_KEY ? '✅ Set' : '❌ Missing'}
+            </td>
+            <td>Public database access</td>
+          </tr>
+          <tr class="highlight">
+            <td><code>SUPABASE_SERVICE_KEY</code></td>
+            <td class={checks.SUPABASE_SERVICE_KEY ? 'success' : 'error'}>
+              {checks.SUPABASE_SERVICE_KEY ? '✅ Set' : '❌ MISSING - REQUIRED!'}
+            </td>
+            <td><strong>Admin operations (create/edit/delete)</strong></td>
+          </tr>
+          <tr>
+            <td><code>ADMIN_MASTER_KEY</code></td>
+            <td class={checks.ADMIN_MASTER_KEY ? 'success' : 'error'}>
+              {checks.ADMIN_MASTER_KEY ? '✅ Set' : '❌ Missing'}
+            </td>
+            <td>Master key login</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Database Test -->
+    <div class="panel">
+      <h2>Database Connection Test</h2>
+      <div class={`test-result ${dbTest.success ? 'success' : 'error'}`}>
+        <span class="test-icon">{dbTest.success ? '✅' : '❌'}</span>
+        <span class="test-message">{dbTest.message}</span>
+      </div>
+      {dbTest.canWrite && (
+        <div class="test-result success">
+          <span class="test-icon">✅</span>
+          <span class="test-message">Can create campaigns (RLS bypassed)</span>
+        </div>
+      )}
+    </div>
+
+    <!-- Session Info -->
+    <div class="panel">
+      <h2>Session Info</h2>
+      <table class="debug-table">
+        <tbody>
+          <tr>
+            <td>Login Type</td>
+            <td>{sessionInfo.isMasterKeySession ? '🔑 Master Key' : '👤 Email/Password'}</td>
+          </tr>
+          <tr>
+            <td>Has Auth Session</td>
+            <td>{sessionInfo.hasAuthSession ? 'Yes' : 'No'}</td>
+          </tr>
+          <tr>
+            <td>User ID</td>
+            <td><code>{sessionInfo.userId}</code></td>
+          </tr>
+          <tr>
+            <td>User Email</td>
+            <td>{sessionInfo.userEmail}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Instructions -->
+    {!hasServiceKey && (
+      <div class="panel warning">
+        <h2>⚠️ Action Required</h2>
+        <p><strong>SUPABASE_SERVICE_KEY is not configured.</strong> This is why you're getting RLS policy errors.</p>
+        
+        <h3>How to fix:</h3>
+        <ol>
+          <li>Go to your <strong>Supabase Dashboard</strong></li>
+          <li>Navigate to <strong>Project Settings → API</strong></li>
+          <li>Copy the <strong>service_role</strong> key (NOT the anon key)</li>
+          <li>Add it to your <code>.env</code> file:
+            <pre>SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</pre>
+          </li>
+          <li>Restart your development server or redeploy</li>
+        </ol>
+
+        <div class="warning-box">
+          <strong>⚠️ Security Note:</strong> The service_role key has full database access. Never expose it in client-side code or commit it to version control.
+        </div>
+      </div>
+    )}
+
+    {hasServiceKey && dbTest.canWrite && (
+      <div class="panel success-panel">
+        <h2>✅ Everything looks good!</h2>
+        <p>Your configuration is correct. Database read and write operations should work.</p>
+      </div>
+    )}
+  </div>
+
+  <style>
+    .debug-page {
+      max-width: 800px;
+    }
+
+    .debug-page h1 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin-bottom: 0.25rem;
+    }
+
+    .subtitle {
+      color: #6b7280;
+      margin-bottom: 2rem;
+    }
+
+    .panel {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .panel h2 {
+      font-size: 1.125rem;
+      color: #1a1a2e;
+      margin-bottom: 1rem;
+    }
+
+    .panel h3 {
+      font-size: 1rem;
+      color: #374151;
+      margin: 1rem 0 0.5rem;
+    }
+
+    .panel.warning {
+      background: #fef3c7;
+      border: 2px solid #f59e0b;
+    }
+
+    .panel.success-panel {
+      background: #d1fae5;
+      border: 2px solid #10b981;
+    }
+
+    .debug-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .debug-table th,
+    .debug-table td {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .debug-table th {
+      font-size: 0.75rem;
+      color: #6b7280;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .debug-table tr.highlight {
+      background: #fef3c7;
+    }
+
+    .debug-table code {
+      background: #f3f4f6;
+      padding: 0.125rem 0.375rem;
+      border-radius: 4px;
+      font-size: 0.8125rem;
+    }
+
+    .debug-table .success {
+      color: #065f46;
+    }
+
+    .debug-table .error {
+      color: #991b1b;
+      font-weight: 600;
+    }
+
+    .test-result {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 0.5rem;
+    }
+
+    .test-result.success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .test-result.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .test-icon {
+      font-size: 1.25rem;
+    }
+
+    ol {
+      margin: 1rem 0;
+      padding-left: 1.5rem;
+    }
+
+    ol li {
+      margin-bottom: 0.5rem;
+    }
+
+    pre {
+      background: #1a1a2e;
+      color: #10b981;
+      padding: 1rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 0.8125rem;
+      margin: 0.5rem 0;
+    }
+
+    .warning-box {
+      background: rgba(0,0,0,0.1);
+      padding: 1rem;
+      border-radius: 8px;
+      margin-top: 1rem;
+      font-size: 0.875rem;
+    }
+  </style>
+</AdminLayout>
