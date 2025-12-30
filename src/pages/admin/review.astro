@@ -3,7 +3,7 @@
 export const prerender = false;
 
 import AdminLayout from "../../layouts/AdminLayout.astro";
-import { supabase } from "../../lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
 const session = Astro.locals.session;
@@ -11,6 +11,19 @@ const session = Astro.locals.session;
 if (!isMasterKeySession && !session) {
   return Astro.redirect('/admin/login');
 }
+
+// Create admin client with service role - REQUIRED for bypassing RLS
+const supabaseUrl = import.meta.env.SUPABASE_URL;
+const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_KEY;
+
+// Check if service key is available
+const hasServiceKey = !!supabaseServiceKey;
+
+const supabase = createClient(
+  supabaseUrl,
+  supabaseServiceKey || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
 
 let successMessage = '';
 let errorMessage = '';
@@ -34,7 +47,9 @@ if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const formAction = form.get('action') as string;
 
-  if (formAction === 'create') {
+  if (!hasServiceKey) {
+    errorMessage = 'Cannot save: SUPABASE_SERVICE_KEY is not configured. Add it to your environment variables.';
+  } else if (formAction === 'create') {
     const title = (form.get('title') as string)?.trim();
     
     if (!title) {
@@ -66,6 +81,8 @@ if (Astro.request.method === 'POST') {
           tableExists = false;
         } else if (error.code === '23503') {
           errorMessage = 'Invalid creator or campaign selection.';
+        } else if (error.message.includes('row-level security')) {
+          errorMessage = `RLS Policy Error: ${error.message}. Run fix-rls-complete.sql in Supabase.`;
         } else {
           errorMessage = error.message;
         }
@@ -200,6 +217,12 @@ const showForm = action === 'new';
 <AdminLayout title="Review Queue">
   {successMessage && <div class="alert success">{successMessage}</div>}
   {errorMessage && <div class="alert error">{errorMessage}</div>}
+  {!hasServiceKey && (
+    <div class="alert warning">
+      ⚠️ <strong>SUPABASE_SERVICE_KEY not configured.</strong> Creating and updating tasks will fail.
+      Add this environment variable to enable full admin functionality.
+    </div>
+  )}
 
   {!tableExists ? (
     <div class="empty">
@@ -460,6 +483,7 @@ const showForm = action === 'new';
     .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
     .alert.success { background: #d1fae5; color: #065f46; }
     .alert.error { background: #fee2e2; color: #991b1b; }
+    .alert.warning { background: #fef3c7; color: #92400e; }
     
     .empty { text-align: center; padding: 4rem 2rem; background: white; border-radius: 12px; }
     .empty span { font-size: 3rem; display: block; margin-bottom: 1rem; }
