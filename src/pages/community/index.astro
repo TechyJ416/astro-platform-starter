@@ -7,172 +7,218 @@ import { supabase } from "../../lib/supabase";
 
 const session = Astro.locals.session;
 const profile = Astro.locals.profile;
+const user = session?.user;
 
-const isApproved = profile?.status === 'active' && profile?.is_active;
-
-// Fetch communities
+// Fetch all public communities
 const { data: communities } = await supabase
   .from('communities')
-  .select('id, name, slug, description, member_count, is_private')
-  .order('member_count', { ascending: false });
+  .select('*')
+  .eq('is_public', true)
+  .order('name');
+
+// Get member counts for each community
+const communitiesWithStats = await Promise.all((communities || []).map(async (community) => {
+  let memberCount = 0;
+  let topicCount = 0;
+  
+  try {
+    const { count: members } = await supabase
+      .from('community_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('community_id', community.id);
+    memberCount = members || 0;
+  } catch (e) { /* table may not exist */ }
+
+  try {
+    const { count: topics } = await supabase
+      .from('forum_topics')
+      .select('*', { count: 'exact', head: true })
+      .eq('community_id', community.id);
+    topicCount = topics || 0;
+  } catch (e) { /* table may not exist */ }
+
+  return { ...community, memberCount, topicCount };
+}));
+
+// Stats
+const totalCommunities = communitiesWithStats.length;
+let totalMembers = 0;
+let totalTopics = 0;
+
+try {
+  const { count } = await supabase.from('community_members').select('*', { count: 'exact', head: true });
+  totalMembers = count || 0;
+} catch (e) {}
+
+try {
+  const { count } = await supabase.from('forum_topics').select('*', { count: 'exact', head: true });
+  totalTopics = count || 0;
+} catch (e) {}
 ---
 
 <Layout title="Communities">
   <div class="communities-page">
-    <div class="page-header">
-      <div class="header-content">
+    <!-- Hero -->
+    <section class="hero">
+      <div class="container">
+        <span class="hero-badge">💬 Communities</span>
         <h1>Creator Communities</h1>
-        <p>Connect, share, and grow with fellow creators</p>
-      </div>
-      {!session && (
-        <a href="/signup" class="btn btn-primary">Join to Participate</a>
-      )}
-    </div>
-
-    {!session && (
-      <div class="login-banner">
-        <div class="banner-icon">🔐</div>
-        <div class="banner-content">
-          <h3>Join Our Creator Community</h3>
-          <p>Create an account to join communities, post content, and connect with other creators.</p>
-        </div>
-        <div class="banner-actions">
-          <a href="/signup" class="btn btn-primary">Sign Up</a>
-          <a href="/login" class="btn btn-secondary">Log In</a>
+        <p>Connect with fellow creators, share knowledge, and grow together in our vibrant community spaces.</p>
+        
+        <div class="hero-stats">
+          <div class="stat">
+            <span class="stat-value">{totalCommunities}</span>
+            <span class="stat-label">Communities</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">{totalMembers}</span>
+            <span class="stat-label">Members</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">{totalTopics}</span>
+            <span class="stat-label">Discussions</span>
+          </div>
         </div>
       </div>
-    )}
+    </section>
 
-    {session && !isApproved && (
-      <div class="pending-banner">
-        <div class="banner-icon">⏳</div>
-        <div class="banner-content">
-          <h3>Account Pending Approval</h3>
-          <p>You can browse communities, but you'll need an approved account to join and participate.</p>
-        </div>
-      </div>
-    )}
-
-    {communities && communities.length > 0 ? (
-      <div class="communities-grid">
-        {communities.map(community => (
-          <div class="community-card">
-            <div class="community-header">
-              <div class="community-icon">
-                {community.is_private ? '🔒' : '💬'}
+    <!-- Communities Grid -->
+    <section class="communities-section">
+      <div class="container">
+        {communitiesWithStats.length > 0 ? (
+          <div class="communities-grid">
+            {communitiesWithStats.map(community => (
+              <div class="community-card">
+                <div class="community-icon">{community.icon || '💬'}</div>
+                <div class="community-content">
+                  <h3>{community.name}</h3>
+                  {community.description && (
+                    <p>{community.description}</p>
+                  )}
+                  <div class="community-stats">
+                    <span>👥 {community.memberCount} members</span>
+                    <span>💬 {community.topicCount} topics</span>
+                  </div>
+                </div>
+                <div class="community-actions">
+                  <a href={`/forum?category=${community.slug}`} class="btn btn-primary">
+                    View Discussions
+                  </a>
+                  {user && (
+                    <a href={`/community/${community.slug}`} class="btn btn-secondary">
+                      Community Page
+                    </a>
+                  )}
+                </div>
               </div>
-              <div class="community-info">
-                <h2>{community.name}</h2>
-                <span class="member-count">{community.member_count || 0} members</span>
-              </div>
-            </div>
-            
-            {community.description && (
-              <p class="community-desc">{community.description}</p>
-            )}
-            
-            <div class="community-footer">
-              {isApproved ? (
-                <a href={`/community/${community.slug}`} class="btn btn-primary">
-                  View Community
-                </a>
-              ) : session ? (
-                <button class="btn btn-disabled" disabled>
-                  Account Pending
-                </button>
-              ) : (
-                <a href="/signup" class="btn btn-secondary">
-                  Sign Up to Join
-                </a>
-              )}
-              
-              {community.is_private && (
-                <span class="private-badge">Private</span>
-              )}
+            ))}
+          </div>
+        ) : (
+          <div class="empty-state">
+            <span>💬</span>
+            <h3>No communities yet</h3>
+            <p>Communities will appear here once they're created.</p>
+          </div>
+        )}
+
+        {!user && (
+          <div class="cta-box">
+            <h3>Join Our Community</h3>
+            <p>Sign up to participate in discussions, connect with other creators, and grow together.</p>
+            <div class="cta-actions">
+              <a href="/signup" class="btn btn-primary btn-lg">Create Account</a>
+              <a href="/login" class="btn btn-secondary btn-lg">Log In</a>
             </div>
           </div>
-        ))}
+        )}
       </div>
-    ) : (
-      <div class="empty-state">
-        <div class="empty-icon">💬</div>
-        <h2>No Communities Yet</h2>
-        <p>Communities will appear here once they're created.</p>
+    </section>
+
+    <!-- Forum CTA -->
+    <section class="forum-cta">
+      <div class="container">
+        <div class="forum-cta-content">
+          <div class="forum-cta-text">
+            <h2>💬 Join the Conversation</h2>
+            <p>Visit our community forum to discuss, share tips, and connect with creators.</p>
+          </div>
+          <a href="/forum" class="btn btn-primary btn-lg">Go to Forum →</a>
+        </div>
       </div>
-    )}
+    </section>
   </div>
 
   <style>
     .communities-page {
+      min-height: 100vh;
+      background: #f8fafc;
+    }
+
+    .container {
       max-width: 1200px;
       margin: 0 auto;
-      padding: 2rem;
+      padding: 0 1.5rem;
     }
 
-    .page-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 2rem;
+    /* Hero */
+    .hero {
+      background: linear-gradient(135deg, #1a1a2e, #2d2d4a);
+      padding: 4rem 0 3rem;
+      text-align: center;
+      color: white;
     }
 
-    .header-content h1 {
-      font-size: 2rem;
-      color: #1a1a2e;
-      margin-bottom: 0.5rem;
+    .hero-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      padding: 0.5rem 1.5rem;
+      border-radius: 100px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
     }
 
-    .header-content p {
-      color: #6b7280;
-      font-size: 1.125rem;
-    }
-
-    .login-banner, .pending-banner {
-      display: flex;
-      align-items: center;
-      gap: 1.5rem;
-      padding: 1.5rem;
-      border-radius: 16px;
-      margin-bottom: 2rem;
-    }
-
-    .login-banner {
-      background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%);
-      border: 2px solid #3b82f6;
-    }
-
-    .pending-banner {
-      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-      border: 2px solid #f59e0b;
-    }
-
-    .banner-icon {
+    .hero h1 {
       font-size: 2.5rem;
+      margin-bottom: 1rem;
     }
 
-    .banner-content {
-      flex: 1;
-    }
-
-    .banner-content h3 {
+    .hero > .container > p {
       font-size: 1.125rem;
-      color: #1a1a2e;
-      margin-bottom: 0.25rem;
+      color: rgba(255,255,255,0.8);
+      max-width: 600px;
+      margin: 0 auto 2rem;
     }
 
-    .banner-content p {
-      color: #6b7280;
-      margin: 0;
-    }
-
-    .banner-actions {
+    .hero-stats {
       display: flex;
-      gap: 0.75rem;
+      justify-content: center;
+      gap: 3rem;
+    }
+
+    .hero-stats .stat {
+      text-align: center;
+    }
+
+    .hero-stats .stat-value {
+      display: block;
+      font-size: 2rem;
+      font-weight: 700;
+    }
+
+    .hero-stats .stat-label {
+      font-size: 0.875rem;
+      color: rgba(255,255,255,0.7);
+    }
+
+    /* Communities Section */
+    .communities-section {
+      padding: 3rem 0;
     }
 
     .communities-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
       gap: 1.5rem;
     }
 
@@ -180,81 +226,77 @@ const { data: communities } = await supabase
       background: white;
       border-radius: 16px;
       padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
       box-shadow: 0 2px 8px rgba(0,0,0,0.06);
       transition: all 0.2s;
     }
 
     .community-card:hover {
-      transform: translateY(-2px);
+      transform: translateY(-4px);
       box-shadow: 0 8px 24px rgba(0,0,0,0.1);
     }
 
-    .community-header {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      margin-bottom: 1rem;
-    }
-
     .community-icon {
-      width: 56px;
-      height: 56px;
-      background: linear-gradient(135deg, #dbeafe 0%, #c7d2fe 100%);
-      border-radius: 14px;
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, #dbeafe, #c7d2fe);
+      border-radius: 16px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1.75rem;
+      font-size: 2rem;
     }
 
-    .community-info h2 {
-      font-size: 1.125rem;
+    .community-content h3 {
+      font-size: 1.25rem;
       color: #1a1a2e;
-      margin-bottom: 0.25rem;
+      margin-bottom: 0.5rem;
     }
 
-    .member-count {
-      font-size: 0.875rem;
-      color: #6b7280;
-    }
-
-    .community-desc {
+    .community-content p {
       color: #6b7280;
       font-size: 0.9375rem;
-      margin-bottom: 1.25rem;
-      line-height: 1.5;
+      line-height: 1.6;
+      margin-bottom: 0.75rem;
     }
 
-    .community-footer {
+    .community-stats {
       display: flex;
-      align-items: center;
       gap: 1rem;
+      font-size: 0.8125rem;
+      color: #9ca3af;
+    }
+
+    .community-actions {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: auto;
       padding-top: 1rem;
-      border-top: 1px solid #f0f0f0;
+      border-top: 1px solid #e5e7eb;
     }
 
-    .private-badge {
-      font-size: 0.6875rem;
-      padding: 0.25rem 0.75rem;
-      background: #fef3c7;
-      color: #92400e;
-      border-radius: 999px;
-      font-weight: 600;
-      text-transform: uppercase;
+    .community-actions .btn {
+      flex: 1;
+      text-align: center;
     }
 
+    /* Buttons */
     .btn {
       padding: 0.75rem 1.5rem;
-      border-radius: 10px;
+      border-radius: 8px;
       font-weight: 600;
-      font-size: 0.9375rem;
       text-decoration: none;
       border: none;
       cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
+      font-size: 0.9375rem;
       transition: all 0.2s;
+    }
+
+    .btn-lg {
+      padding: 1rem 2rem;
+      font-size: 1rem;
     }
 
     .btn-primary {
@@ -275,50 +317,106 @@ const { data: communities } = await supabase
       background: #e5e7eb;
     }
 
-    .btn-disabled {
-      background: #e5e7eb;
-      color: #9ca3af;
-      cursor: not-allowed;
-    }
-
+    /* Empty State */
     .empty-state {
       text-align: center;
       padding: 4rem 2rem;
+      background: white;
+      border-radius: 16px;
     }
 
-    .empty-icon {
-      font-size: 4rem;
+    .empty-state span {
+      font-size: 3rem;
+      display: block;
       margin-bottom: 1rem;
     }
 
-    .empty-state h2 {
-      color: #374151;
+    .empty-state h3 {
+      color: #1a1a2e;
       margin-bottom: 0.5rem;
     }
 
     .empty-state p {
-      color: #9ca3af;
+      color: #6b7280;
     }
 
+    /* CTA Box */
+    .cta-box {
+      background: linear-gradient(135deg, #dbeafe, #ede9fe);
+      border-radius: 16px;
+      padding: 2.5rem;
+      text-align: center;
+      margin-top: 2rem;
+    }
+
+    .cta-box h3 {
+      font-size: 1.5rem;
+      color: #1a1a2e;
+      margin-bottom: 0.5rem;
+    }
+
+    .cta-box p {
+      color: #4b5563;
+      margin-bottom: 1.5rem;
+    }
+
+    .cta-actions {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+    }
+
+    /* Forum CTA */
+    .forum-cta {
+      padding: 3rem 0;
+      background: white;
+    }
+
+    .forum-cta-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(135deg, #1a1a2e, #2d2d4a);
+      border-radius: 16px;
+      padding: 2rem 2.5rem;
+      color: white;
+    }
+
+    .forum-cta-text h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .forum-cta-text p {
+      color: rgba(255,255,255,0.8);
+    }
+
+    /* Responsive */
     @media (max-width: 768px) {
-      .page-header {
-        flex-direction: column;
-        gap: 1rem;
+      .hero h1 {
+        font-size: 1.75rem;
       }
 
-      .login-banner, .pending-banner {
+      .hero-stats {
+        gap: 1.5rem;
+      }
+
+      .hero-stats .stat-value {
+        font-size: 1.5rem;
+      }
+
+      .communities-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .cta-actions {
+        flex-direction: column;
+      }
+
+      .forum-cta-content {
         flex-direction: column;
         text-align: center;
-      }
-
-      .banner-actions {
-        flex-direction: column;
-        width: 100%;
-      }
-
-      .banner-actions .btn {
-        width: 100%;
-        justify-content: center;
+        gap: 1.5rem;
       }
     }
   </style>
