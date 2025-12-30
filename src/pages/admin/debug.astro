@@ -13,315 +13,281 @@ if (!isMasterKeySession && !session) {
 }
 
 // Check environment variables
+const supabaseUrl = import.meta.env.SUPABASE_URL;
+const anonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+const serviceKey = import.meta.env.SUPABASE_SERVICE_KEY;
+
 const checks = {
-  SUPABASE_URL: !!import.meta.env.SUPABASE_URL,
-  PUBLIC_SUPABASE_ANON_KEY: !!import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
-  SUPABASE_SERVICE_KEY: !!import.meta.env.SUPABASE_SERVICE_KEY,
+  SUPABASE_URL: !!supabaseUrl,
+  SUPABASE_URL_VALUE: supabaseUrl ? `${supabaseUrl.substring(0, 30)}...` : 'NOT SET',
+  PUBLIC_SUPABASE_ANON_KEY: !!anonKey,
+  ANON_KEY_PREFIX: anonKey ? `${anonKey.substring(0, 20)}...` : 'NOT SET',
+  SUPABASE_SERVICE_KEY: !!serviceKey,
+  SERVICE_KEY_PREFIX: serviceKey ? `${serviceKey.substring(0, 20)}...` : 'NOT SET',
+  SERVICE_KEY_LENGTH: serviceKey ? serviceKey.length : 0,
   ADMIN_MASTER_KEY: !!import.meta.env.ADMIN_MASTER_KEY,
 };
 
-const hasServiceKey = checks.SUPABASE_SERVICE_KEY;
+// Check if service key looks valid (should be longer than anon key and start with eyJ)
+const serviceKeyValid = serviceKey && serviceKey.startsWith('eyJ') && serviceKey.length > 200;
+const keysAreDifferent = serviceKey !== anonKey;
 
 // Test database connection with service key
-let dbTest = { success: false, message: '', canWrite: false };
+let dbTests: any[] = [];
 
-if (hasServiceKey) {
+if (serviceKey) {
   const supabase = createClient(
-    import.meta.env.SUPABASE_URL,
-    import.meta.env.SUPABASE_SERVICE_KEY,
+    supabaseUrl,
+    serviceKey,
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 
-  // Test read
-  const { data, error } = await supabase.from('profiles').select('id').limit(1);
-  if (error) {
-    dbTest.message = `Read failed: ${error.message}`;
-  } else {
-    dbTest.success = true;
-    dbTest.message = 'Database read successful';
-    
-    // Test write to campaigns (then rollback)
-    const { data: testCampaign, error: writeError } = await supabase
+  // Test 1: Read profiles
+  try {
+    const { data, error } = await supabase.from('profiles').select('id').limit(1);
+    dbTests.push({
+      name: 'Read profiles',
+      success: !error,
+      message: error ? error.message : `Success (${data?.length || 0} rows)`
+    });
+  } catch (e: any) {
+    dbTests.push({ name: 'Read profiles', success: false, message: e.message });
+  }
+
+  // Test 2: Read all campaigns (including drafts - tests admin access)
+  try {
+    const { data, error } = await supabase.from('campaigns').select('id, status').limit(5);
+    dbTests.push({
+      name: 'Read campaigns (all statuses)',
+      success: !error,
+      message: error ? error.message : `Success (${data?.length || 0} rows: ${data?.map(c => c.status).join(', ') || 'none'})`
+    });
+  } catch (e: any) {
+    dbTests.push({ name: 'Read campaigns', success: false, message: e.message });
+  }
+
+  // Test 3: Insert campaign
+  try {
+    const testSlug = `__test__${Date.now()}`;
+    const { data, error } = await supabase
       .from('campaigns')
-      .insert({ title: '__TEST__', slug: '__test__' + Date.now(), status: 'draft' })
+      .insert({ title: '__DEBUG_TEST__', slug: testSlug, status: 'draft' })
       .select()
       .single();
     
-    if (writeError) {
-      dbTest.message += ` | Write failed: ${writeError.message}`;
+    if (error) {
+      dbTests.push({
+        name: 'INSERT campaign',
+        success: false,
+        message: `FAILED: ${error.message} (code: ${error.code})`
+      });
     } else {
-      dbTest.canWrite = true;
-      dbTest.message += ' | Write successful';
-      // Clean up test record
-      await supabase.from('campaigns').delete().eq('id', testCampaign.id);
-      dbTest.message += ' | Cleanup done';
+      dbTests.push({
+        name: 'INSERT campaign',
+        success: true,
+        message: `Success! Created ID: ${data.id}`
+      });
+      
+      // Clean up
+      const { error: deleteError } = await supabase.from('campaigns').delete().eq('id', data.id);
+      dbTests.push({
+        name: 'DELETE campaign (cleanup)',
+        success: !deleteError,
+        message: deleteError ? deleteError.message : 'Cleaned up test record'
+      });
     }
+  } catch (e: any) {
+    dbTests.push({ name: 'INSERT campaign', success: false, message: `Exception: ${e.message}` });
   }
-} else {
-  dbTest.message = 'Cannot test - SUPABASE_SERVICE_KEY not configured';
+
+  // Test 4: Insert community
+  try {
+    const testSlug = `__test__${Date.now()}`;
+    const { data, error } = await supabase
+      .from('communities')
+      .insert({ name: '__DEBUG_TEST__', slug: testSlug })
+      .select()
+      .single();
+    
+    if (error) {
+      dbTests.push({
+        name: 'INSERT community',
+        success: false,
+        message: `FAILED: ${error.message} (code: ${error.code})`
+      });
+    } else {
+      dbTests.push({
+        name: 'INSERT community',
+        success: true,
+        message: `Success! Created ID: ${data.id}`
+      });
+      await supabase.from('communities').delete().eq('id', data.id);
+    }
+  } catch (e: any) {
+    dbTests.push({ name: 'INSERT community', success: false, message: `Exception: ${e.message}` });
+  }
 }
 
 // Session info
 const sessionInfo = {
   isMasterKeySession,
   hasAuthSession: !!session,
-  userId: session?.user?.id || 'N/A',
-  userEmail: session?.user?.email || 'N/A',
+  userId: session?.user?.id || 'N/A (Master Key Login)',
+  userEmail: session?.user?.email || 'N/A (Master Key Login)',
 };
 ---
 
 <AdminLayout title="Debug Info">
   <div class="debug-page">
     <h1>🔧 Admin Debug Info</h1>
-    <p class="subtitle">Check your configuration and diagnose issues</p>
+    <p class="subtitle">Diagnosing RLS and configuration issues</p>
 
     <!-- Environment Variables -->
     <div class="panel">
       <h2>Environment Variables</h2>
       <table class="debug-table">
-        <thead>
-          <tr>
-            <th>Variable</th>
-            <th>Status</th>
-            <th>Required For</th>
-          </tr>
-        </thead>
         <tbody>
           <tr>
             <td><code>SUPABASE_URL</code></td>
             <td class={checks.SUPABASE_URL ? 'success' : 'error'}>
-              {checks.SUPABASE_URL ? '✅ Set' : '❌ Missing'}
+              {checks.SUPABASE_URL ? '✅' : '❌'} {checks.SUPABASE_URL_VALUE}
             </td>
-            <td>All database operations</td>
           </tr>
           <tr>
             <td><code>PUBLIC_SUPABASE_ANON_KEY</code></td>
             <td class={checks.PUBLIC_SUPABASE_ANON_KEY ? 'success' : 'error'}>
-              {checks.PUBLIC_SUPABASE_ANON_KEY ? '✅ Set' : '❌ Missing'}
+              {checks.PUBLIC_SUPABASE_ANON_KEY ? '✅' : '❌'} {checks.ANON_KEY_PREFIX}
             </td>
-            <td>Public database access</td>
           </tr>
           <tr class="highlight">
             <td><code>SUPABASE_SERVICE_KEY</code></td>
             <td class={checks.SUPABASE_SERVICE_KEY ? 'success' : 'error'}>
-              {checks.SUPABASE_SERVICE_KEY ? '✅ Set' : '❌ MISSING - REQUIRED!'}
+              {checks.SUPABASE_SERVICE_KEY ? '✅' : '❌'} {checks.SERVICE_KEY_PREFIX} ({checks.SERVICE_KEY_LENGTH} chars)
             </td>
-            <td><strong>Admin operations (create/edit/delete)</strong></td>
-          </tr>
-          <tr>
-            <td><code>ADMIN_MASTER_KEY</code></td>
-            <td class={checks.ADMIN_MASTER_KEY ? 'success' : 'error'}>
-              {checks.ADMIN_MASTER_KEY ? '✅ Set' : '❌ Missing'}
-            </td>
-            <td>Master key login</td>
           </tr>
         </tbody>
       </table>
-    </div>
-
-    <!-- Database Test -->
-    <div class="panel">
-      <h2>Database Connection Test</h2>
-      <div class={`test-result ${dbTest.success ? 'success' : 'error'}`}>
-        <span class="test-icon">{dbTest.success ? '✅' : '❌'}</span>
-        <span class="test-message">{dbTest.message}</span>
+      
+      <div class="key-checks">
+        <p>Service key starts with 'eyJ': {serviceKeyValid ? '✅ Yes' : '❌ No'}</p>
+        <p>Service key ≠ Anon key: {keysAreDifferent ? '✅ Different' : '❌ SAME KEY - THIS IS THE PROBLEM!'}</p>
       </div>
-      {dbTest.canWrite && (
-        <div class="test-result success">
-          <span class="test-icon">✅</span>
-          <span class="test-message">Can create campaigns (RLS bypassed)</span>
-        </div>
-      )}
     </div>
 
     <!-- Session Info -->
     <div class="panel">
-      <h2>Session Info</h2>
+      <h2>Current Session</h2>
       <table class="debug-table">
         <tbody>
           <tr>
             <td>Login Type</td>
-            <td>{sessionInfo.isMasterKeySession ? '🔑 Master Key' : '👤 Email/Password'}</td>
+            <td><strong>{sessionInfo.isMasterKeySession ? '🔑 Master Key' : '👤 Email/Password'}</strong></td>
           </tr>
           <tr>
-            <td>Has Auth Session</td>
-            <td>{sessionInfo.hasAuthSession ? 'Yes' : 'No'}</td>
+            <td>auth.uid() available</td>
+            <td class={sessionInfo.hasAuthSession ? 'success' : 'error'}>
+              {sessionInfo.hasAuthSession ? '✅ Yes' : '❌ No - RLS policies using auth.uid() will FAIL'}
+            </td>
           </tr>
           <tr>
             <td>User ID</td>
             <td><code>{sessionInfo.userId}</code></td>
           </tr>
-          <tr>
-            <td>User Email</td>
-            <td>{sessionInfo.userEmail}</td>
-          </tr>
         </tbody>
       </table>
     </div>
 
-    <!-- Instructions -->
-    {!hasServiceKey && (
-      <div class="panel warning">
-        <h2>⚠️ Action Required</h2>
-        <p><strong>SUPABASE_SERVICE_KEY is not configured.</strong> This is why you're getting RLS policy errors.</p>
-        
-        <h3>How to fix:</h3>
-        <ol>
-          <li>Go to your <strong>Supabase Dashboard</strong></li>
-          <li>Navigate to <strong>Project Settings → API</strong></li>
-          <li>Copy the <strong>service_role</strong> key (NOT the anon key)</li>
-          <li>Add it to your <code>.env</code> file:
-            <pre>SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</pre>
-          </li>
-          <li>Restart your development server or redeploy</li>
-        </ol>
-
-        <div class="warning-box">
-          <strong>⚠️ Security Note:</strong> The service_role key has full database access. Never expose it in client-side code or commit it to version control.
+    <!-- Database Tests -->
+    <div class="panel">
+      <h2>Database Tests (using service_role key)</h2>
+      {dbTests.length > 0 ? (
+        <div class="test-results">
+          {dbTests.map(test => (
+            <div class={`test-result ${test.success ? 'success' : 'error'}`}>
+              <span class="test-name">{test.name}</span>
+              <span class="test-status">{test.success ? '✅' : '❌'}</span>
+              <span class="test-message">{test.message}</span>
+            </div>
+          ))}
         </div>
-      </div>
-    )}
+      ) : (
+        <p class="error">Cannot run tests - SUPABASE_SERVICE_KEY not set</p>
+      )}
+    </div>
 
-    {hasServiceKey && dbTest.canWrite && (
-      <div class="panel success-panel">
-        <h2>✅ Everything looks good!</h2>
-        <p>Your configuration is correct. Database read and write operations should work.</p>
-      </div>
-    )}
+    <!-- Diagnosis -->
+    <div class="panel diagnosis">
+      <h2>Diagnosis</h2>
+      {!keysAreDifferent && (
+        <div class="issue critical">
+          <h3>🚨 CRITICAL: Service key is same as anon key!</h3>
+          <p>You're using the <strong>anon</strong> key instead of the <strong>service_role</strong> key.</p>
+          <p>Go to Supabase Dashboard → Project Settings → API and copy the <strong>service_role</strong> secret key.</p>
+        </div>
+      )}
+      
+      {!serviceKeyValid && checks.SUPABASE_SERVICE_KEY && (
+        <div class="issue warning">
+          <h3>⚠️ Service key format looks wrong</h3>
+          <p>The key should start with 'eyJ' and be ~300+ characters. Current length: {checks.SERVICE_KEY_LENGTH}</p>
+        </div>
+      )}
+
+      {sessionInfo.isMasterKeySession && !sessionInfo.hasAuthSession && (
+        <div class="issue info">
+          <h3>ℹ️ Master Key Login = No auth.uid()</h3>
+          <p>This is expected. Master key login doesn't create a Supabase session, so <code>auth.uid()</code> is NULL.</p>
+          <p>The service_role key should bypass RLS entirely, making this irrelevant IF the service key is correct.</p>
+        </div>
+      )}
+
+      {dbTests.every(t => t.success) && (
+        <div class="issue success">
+          <h3>✅ All tests passed!</h3>
+          <p>Database operations work with the service key. If you're still seeing errors, check:</p>
+          <ul>
+            <li>Did you redeploy after adding the env var?</li>
+            <li>Is the env var set in your hosting provider (Vercel/Netlify)?</li>
+            <li>Try clearing browser cache and cookies</li>
+          </ul>
+        </div>
+      )}
+    </div>
   </div>
 
   <style>
-    .debug-page {
-      max-width: 800px;
-    }
-
-    .debug-page h1 {
-      font-size: 1.5rem;
-      color: #1a1a2e;
-      margin-bottom: 0.25rem;
-    }
-
-    .subtitle {
-      color: #6b7280;
-      margin-bottom: 2rem;
-    }
-
-    .panel {
-      background: white;
-      border-radius: 12px;
-      padding: 1.5rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .panel h2 {
-      font-size: 1.125rem;
-      color: #1a1a2e;
-      margin-bottom: 1rem;
-    }
-
-    .panel h3 {
-      font-size: 1rem;
-      color: #374151;
-      margin: 1rem 0 0.5rem;
-    }
-
-    .panel.warning {
-      background: #fef3c7;
-      border: 2px solid #f59e0b;
-    }
-
-    .panel.success-panel {
-      background: #d1fae5;
-      border: 2px solid #10b981;
-    }
-
-    .debug-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    .debug-table th,
-    .debug-table td {
-      padding: 0.75rem;
-      text-align: left;
-      border-bottom: 1px solid #e5e7eb;
-    }
-
-    .debug-table th {
-      font-size: 0.75rem;
-      color: #6b7280;
-      text-transform: uppercase;
-      font-weight: 600;
-    }
-
-    .debug-table tr.highlight {
-      background: #fef3c7;
-    }
-
-    .debug-table code {
-      background: #f3f4f6;
-      padding: 0.125rem 0.375rem;
-      border-radius: 4px;
-      font-size: 0.8125rem;
-    }
-
-    .debug-table .success {
-      color: #065f46;
-    }
-
-    .debug-table .error {
-      color: #991b1b;
-      font-weight: 600;
-    }
-
-    .test-result {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      padding: 1rem;
-      border-radius: 8px;
-      margin-bottom: 0.5rem;
-    }
-
-    .test-result.success {
-      background: #d1fae5;
-      color: #065f46;
-    }
-
-    .test-result.error {
-      background: #fee2e2;
-      color: #991b1b;
-    }
-
-    .test-icon {
-      font-size: 1.25rem;
-    }
-
-    ol {
-      margin: 1rem 0;
-      padding-left: 1.5rem;
-    }
-
-    ol li {
-      margin-bottom: 0.5rem;
-    }
-
-    pre {
-      background: #1a1a2e;
-      color: #10b981;
-      padding: 1rem;
-      border-radius: 8px;
-      overflow-x: auto;
-      font-size: 0.8125rem;
-      margin: 0.5rem 0;
-    }
-
-    .warning-box {
-      background: rgba(0,0,0,0.1);
-      padding: 1rem;
-      border-radius: 8px;
-      margin-top: 1rem;
-      font-size: 0.875rem;
-    }
+    .debug-page { max-width: 900px; }
+    .debug-page h1 { font-size: 1.5rem; color: #1a1a2e; margin-bottom: 0.25rem; }
+    .subtitle { color: #6b7280; margin-bottom: 2rem; }
+    
+    .panel { background: white; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .panel h2 { font-size: 1.125rem; color: #1a1a2e; margin-bottom: 1rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+    
+    .debug-table { width: 100%; border-collapse: collapse; }
+    .debug-table td { padding: 0.75rem; border-bottom: 1px solid #e5e7eb; }
+    .debug-table td:first-child { font-weight: 500; width: 250px; }
+    .debug-table tr.highlight { background: #fef3c7; }
+    .debug-table code { background: #f3f4f6; padding: 0.125rem 0.375rem; border-radius: 4px; font-size: 0.8125rem; }
+    .debug-table .success { color: #065f46; }
+    .debug-table .error { color: #991b1b; font-weight: 600; }
+    
+    .key-checks { margin-top: 1rem; padding: 1rem; background: #f9fafb; border-radius: 8px; }
+    .key-checks p { margin: 0.25rem 0; font-size: 0.875rem; }
+    
+    .test-results { display: flex; flex-direction: column; gap: 0.5rem; }
+    .test-result { display: grid; grid-template-columns: 200px 30px 1fr; gap: 0.5rem; padding: 0.75rem; border-radius: 8px; align-items: center; }
+    .test-result.success { background: #d1fae5; }
+    .test-result.error { background: #fee2e2; }
+    .test-name { font-weight: 600; }
+    .test-message { font-size: 0.875rem; color: #4b5563; }
+    
+    .diagnosis .issue { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    .issue.critical { background: #fee2e2; border: 2px solid #ef4444; }
+    .issue.warning { background: #fef3c7; border: 2px solid #f59e0b; }
+    .issue.info { background: #dbeafe; border: 2px solid #3b82f6; }
+    .issue.success { background: #d1fae5; border: 2px solid #10b981; }
+    .issue h3 { margin: 0 0 0.5rem 0; font-size: 1rem; }
+    .issue p { margin: 0.25rem 0; font-size: 0.875rem; }
+    .issue ul { margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.875rem; }
   </style>
 </AdminLayout>
