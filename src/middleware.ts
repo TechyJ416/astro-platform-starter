@@ -49,6 +49,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
     path === '/contact' ||
     path === '/creators' ||
     path === '/premium' ||
+    path === '/communities' ||
+    path === '/forum' ||
+    path.startsWith('/forum/') ||
     path === '/privacy' ||
     path === '/terms' ||
     path === '/'
