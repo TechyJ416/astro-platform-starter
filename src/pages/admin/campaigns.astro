@@ -3,7 +3,7 @@
 export const prerender = false;
 
 import AdminLayout from "../../layouts/AdminLayout.astro";
-import { supabase } from "../../lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
 const session = Astro.locals.session;
@@ -12,8 +12,27 @@ if (!isMasterKeySession && !session) {
   return Astro.redirect('/admin/login');
 }
 
+// Create admin client with service role - REQUIRED for bypassing RLS
+const supabaseUrl = import.meta.env.SUPABASE_URL;
+const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_KEY;
+
+// Check if service key is available
+const hasServiceKey = !!supabaseServiceKey;
+
+const supabase = createClient(
+  supabaseUrl,
+  supabaseServiceKey || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
 let successMessage = '';
 let errorMessage = '';
+
+// Show warning if no service key
+if (!hasServiceKey) {
+  errorMessage = '⚠️ SUPABASE_SERVICE_KEY not configured. Campaign creation/editing will fail. Add it to your environment variables.';
+}
+
 const action = Astro.url.searchParams.get('action');
 const editId = Astro.url.searchParams.get('edit');
 
@@ -28,7 +47,9 @@ if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const formAction = form.get('action') as string;
 
-  if (formAction === 'create' || formAction === 'update') {
+  if (!hasServiceKey) {
+    errorMessage = 'Cannot save: SUPABASE_SERVICE_KEY is not configured.';
+  } else if (formAction === 'create' || formAction === 'update') {
     const title = (form.get('title') as string)?.trim();
     
     // Validation
@@ -66,25 +87,17 @@ if (Astro.request.method === 'POST') {
         const campaignId = form.get('campaignId') as string;
         const { error } = await supabase.from('campaigns').update(campaignData).eq('id', campaignId);
         if (error) {
-          errorMessage = error.code === '23505' ? 'A campaign with this slug already exists.' : error.message;
+          errorMessage = error.code === '23505' ? 'A campaign with this slug already exists.' : `Update failed: ${error.message}`;
         } else {
-          return Astro.redirect('/admin/campaigns?updated=true');
+          successMessage = 'Campaign updated successfully!';
+          editCampaign = null;
         }
       } else {
-        const { data: newCampaign, error } = await supabase.from('campaigns').insert(campaignData).select().single();
+        const { error } = await supabase.from('campaigns').insert(campaignData);
         if (error) {
-          errorMessage = error.code === '23505' ? 'A campaign with this slug already exists.' : error.message;
+          errorMessage = error.code === '23505' ? 'A campaign with this slug already exists.' : `Create failed: ${error.message}`;
         } else {
-          // Create a review task for admins to review the new campaign
-          await supabase.from('posts').insert({
-            title: `Review New Campaign: ${title}`,
-            caption: `A new campaign "${title}" has been created and needs admin review.\n\nStatus: ${status}\nBudget: $${budget || 0}\nPayment per post: $${paymentPerPost || 0}\n\nPlease review the campaign details and approve or request changes.`,
-            campaign_id: newCampaign.id,
-            status: 'pending',
-            media_type: 'image',
-          });
-          
-          return Astro.redirect('/admin/campaigns?created=true');
+          successMessage = 'Campaign created successfully!';
         }
       }
     }
@@ -148,6 +161,12 @@ const showForm = action === 'new' || editId;
 <AdminLayout title="Campaigns">
   {successMessage && <div class="alert success">{successMessage}</div>}
   {errorMessage && <div class="alert error">{errorMessage}</div>}
+  {!hasServiceKey && (
+    <div class="alert warning">
+      ⚠️ <strong>SUPABASE_SERVICE_KEY not configured.</strong> Campaign creation and editing will fail. 
+      Add this environment variable to enable full admin functionality.
+    </div>
+  )}
 
   {showForm ? (
     <div class="panel">
@@ -322,6 +341,7 @@ const showForm = action === 'new' || editId;
     .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
     .alert.success { background: #d1fae5; color: #065f46; }
     .alert.error { background: #fee2e2; color: #991b1b; }
+    .alert.warning { background: #fef3c7; color: #92400e; }
     
     .empty { text-align: center; padding: 4rem 2rem; background: white; border-radius: 12px; }
     .empty span { font-size: 3rem; display: block; margin-bottom: 1rem; }
