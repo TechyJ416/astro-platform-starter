@@ -24,6 +24,11 @@ if (Astro.request.method === 'POST') {
     const fullName = formData.get('fullName') as string;
     const bio = formData.get('bio') as string;
     const avatarUrl = formData.get('avatarUrl') as string;
+    const website = formData.get('website') as string;
+    const socialInstagram = formData.get('social_instagram') as string;
+    const socialTiktok = formData.get('social_tiktok') as string;
+    const socialYoutube = formData.get('social_youtube') as string;
+    const socialTwitter = formData.get('social_twitter') as string;
 
     const { error } = await supabase
       .from('profiles')
@@ -31,6 +36,11 @@ if (Astro.request.method === 'POST') {
         full_name: fullName,
         bio: bio,
         avatar_url: avatarUrl || null,
+        website: website || null,
+        social_instagram: socialInstagram || null,
+        social_tiktok: socialTiktok || null,
+        social_youtube: socialYoutube || null,
+        social_twitter: socialTwitter || null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', session.user.id);
@@ -115,7 +125,12 @@ const totalEarned = earningsData?.reduce((sum, p) => sum + (p.amount || 0), 0) |
       <!-- Header -->
       <div class="page-header">
         <a href="/dashboard" class="back-link">← Back to Dashboard</a>
-        <h1>My Profile</h1>
+        <div class="header-row">
+          <h1>My Profile</h1>
+          <a href={`/profile/${session.user.id}`} target="_blank" class="btn btn-secondary">
+            👁️ View Public Profile
+          </a>
+        </div>
       </div>
 
       {successMessage && <div class="alert success">{successMessage}</div>}
@@ -187,6 +202,59 @@ const totalEarned = earningsData?.reduce((sum, p) => sum + (p.amount || 0), 0) |
                 rows="4"
                 placeholder="Tell us about yourself, your content style, and your audience..."
               >{profile?.bio || ''}</textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="website">Website</label>
+              <input 
+                type="url" 
+                id="website" 
+                name="website" 
+                value={profile?.website || ''}
+                placeholder="https://yourwebsite.com"
+              />
+            </div>
+
+            <div class="social-links-section">
+              <label>Social Media</label>
+              <div class="social-inputs">
+                <div class="social-input">
+                  <span class="social-icon">📷</span>
+                  <input 
+                    type="text" 
+                    name="social_instagram" 
+                    value={profile?.social_instagram || ''}
+                    placeholder="Instagram username"
+                  />
+                </div>
+                <div class="social-input">
+                  <span class="social-icon">🎵</span>
+                  <input 
+                    type="text" 
+                    name="social_tiktok" 
+                    value={profile?.social_tiktok || ''}
+                    placeholder="TikTok username"
+                  />
+                </div>
+                <div class="social-input">
+                  <span class="social-icon">▶️</span>
+                  <input 
+                    type="text" 
+                    name="social_youtube" 
+                    value={profile?.social_youtube || ''}
+                    placeholder="YouTube channel"
+                  />
+                </div>
+                <div class="social-input">
+                  <span class="social-icon">🐦</span>
+                  <input 
+                    type="text" 
+                    name="social_twitter" 
+                    value={profile?.social_twitter || ''}
+                    placeholder="Twitter/X username"
+                  />
+                </div>
+              </div>
             </div>
 
             <div class="form-actions">
@@ -304,6 +372,33 @@ const totalEarned = earningsData?.reduce((sum, p) => sum + (p.amount || 0), 0) |
       font-size: 1.5rem;
       color: #1a1a2e;
       margin: 0;
+    }
+
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .btn {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-weight: 500;
+      text-decoration: none;
+      font-size: 0.875rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .btn-secondary:hover {
+      background: #e5e7eb;
     }
 
     .alert {
@@ -435,6 +530,48 @@ const totalEarned = earningsData?.reduce((sum, p) => sum + (p.amount || 0), 0) |
 
     .form-actions {
       padding-top: 0.5rem;
+    }
+
+    .social-links-section {
+      margin-bottom: 1rem;
+    }
+
+    .social-links-section > label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: #374151;
+      margin-bottom: 0.75rem;
+    }
+
+    .social-inputs {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.75rem;
+    }
+
+    .social-input {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .social-input .social-icon {
+      font-size: 1.25rem;
+      flex-shrink: 0;
+    }
+
+    .social-input input {
+      flex: 1;
+      padding: 0.625rem 0.875rem;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 0.875rem;
+    }
+
+    .social-input input:focus {
+      outline: none;
+      border-color: #2563eb;
     }
 
     /* Sidebar */
