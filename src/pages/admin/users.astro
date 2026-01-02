@@ -217,7 +217,7 @@ if (Astro.url.searchParams.get('updated')) actionMessage = 'User updated success
 // Fetch all users
 const { data: users, error } = await supabase
   .from("profiles")
-  .select("id, email, full_name, role, status, is_active, is_verified, avatar_url, bio, created_at")
+  .select("id, email, full_name, role, status, is_active, is_verified, avatar_url, bio, created_at, level, completed_campaigns, is_premium")
   .order("created_at", { ascending: false });
 
 // Stats
@@ -242,6 +242,8 @@ const filteredUsers = allUsers.filter(user => {
   else if (filter === 'admin') matchesFilter = user.role === 'admin';
   else if (filter === 'moderator') matchesFilter = user.role === 'moderator';
   else if (filter === 'creator') matchesFilter = user.role === 'creator';
+  else if (filter === 'manager') matchesFilter = user.role === 'manager';
+  else if (filter === 'verified') matchesFilter = user.is_verified === true;
 
   if (searchQuery) {
     const matchesSearch = 
@@ -251,6 +253,9 @@ const filteredUsers = allUsers.filter(user => {
   }
   return matchesFilter;
 });
+
+const managerCount = allUsers.filter(u => u.role === 'manager').length;
+const verifiedCount = allUsers.filter(u => u.is_verified).length;
 
 const showForm = action === 'new' || editUserId;
 ---
@@ -301,6 +306,7 @@ const showForm = action === 'new' || editUserId;
               <label>Role</label>
               <select name="role">
                 <option value="creator">Creator</option>
+                <option value="manager">Campaign Manager</option>
                 <option value="moderator">Moderator</option>
                 <option value="admin">Admin</option>
               </select>
@@ -341,6 +347,7 @@ const showForm = action === 'new' || editUserId;
                 <label>Role</label>
                 <select name="role">
                   <option value="creator" selected={editUser.role === 'creator'}>Creator</option>
+                  <option value="manager" selected={editUser.role === 'manager'}>Campaign Manager</option>
                   <option value="moderator" selected={editUser.role === 'moderator'}>Moderator</option>
                   <option value="admin" selected={editUser.role === 'admin'}>Admin</option>
                 </select>
@@ -364,9 +371,14 @@ const showForm = action === 'new' || editUserId;
                 </label>
                 <label class="checkbox-label">
                   <input type="checkbox" name="isVerified" checked={editUser.is_verified} />
-                  <span>Email Verified</span>
+                  <span>Verified Creator/Manager</span>
                 </label>
               </div>
+            </div>
+
+            <div class="quick-links">
+              <a href={`/profile/${editUser.id}`} target="_blank" class="btn btn-secondary">👤 View Public Profile</a>
+              <a href={`/admin/badges?user=${editUser.id}`} class="btn btn-secondary">🏆 Manage Badges</a>
             </div>
 
             <div class="form-actions">
@@ -444,8 +456,10 @@ const showForm = action === 'new' || editUserId;
           </a>
           <a href="?filter=all" class:list={["filter-tab", { active: filter === 'all' }]}>All</a>
           <a href="?filter=active" class:list={["filter-tab", { active: filter === 'active' }]}>Active</a>
+          <a href="?filter=verified" class:list={["filter-tab", { active: filter === 'verified' }]}>✓ Verified</a>
           <a href="?filter=admin" class:list={["filter-tab", { active: filter === 'admin' }]}>Admins</a>
           <a href="?filter=moderator" class:list={["filter-tab", { active: filter === 'moderator' }]}>Mods</a>
+          <a href="?filter=manager" class:list={["filter-tab", { active: filter === 'manager' }]}>Managers</a>
           <a href="?filter=creator" class:list={["filter-tab", { active: filter === 'creator' }]}>Creators</a>
           <a href="?filter=denied" class:list={["filter-tab", { active: filter === 'denied' }]}>Denied</a>
         </div>
@@ -486,18 +500,25 @@ const showForm = action === 'new' || editUserId;
                   <div class="user-info">
                     <div class="user-name">
                       {user.full_name || 'No name'}
+                      {user.is_verified && <span class="verified-check" title="Verified">✓</span>}
+                      {user.is_premium && <span class="premium-star" title="Premium">⭐</span>}
                       {user.status === 'pending' && <span class="status-tag pending">Pending</span>}
                       {user.status === 'denied' && <span class="status-tag denied">Denied</span>}
                       {user.status === 'suspended' && <span class="status-tag suspended">Suspended</span>}
                       {!user.is_active && user.status === 'active' && <span class="status-tag suspended">Inactive</span>}
                     </div>
                     <div class="user-email">{user.email}</div>
-                    <div class="user-date">Signed up {new Date(user.created_at).toLocaleDateString()}</div>
+                    <div class="user-date">
+                      Signed up {new Date(user.created_at).toLocaleDateString()} • 
+                      Level {user.level || 1} • 
+                      {user.completed_campaigns || 0} campaigns
+                    </div>
                   </div>
                 </div>
 
                 <div class="user-meta">
                   <span class={`role-badge ${user.role || 'creator'}`}>{user.role || 'creator'}</span>
+                  <span class="level-badge">Lvl {user.level || 1}</span>
                 </div>
 
                 <div class="user-actions">
@@ -515,31 +536,37 @@ const showForm = action === 'new' || editUserId;
                     </div>
                   ) : (
                     <>
+                      <a href={`/profile/${user.id}`} target="_blank" class="btn btn-sm btn-secondary" title="View Public Profile">
+                        👤
+                      </a>
+                      <a href={`/admin/badges?user=${user.id}`} class="btn btn-sm btn-secondary" title="Manage Badges">
+                        🏆
+                      </a>
                       <a href={`/admin/preview/${user.id}`} class="btn btn-sm btn-primary" title="Preview as this user">
                         👁️
                       </a>
-                      <a href={`/admin/users/${user.id}`} class="btn btn-sm btn-secondary">Details</a>
                       <a href={`?edit=${user.id}`} class="btn btn-sm btn-secondary">Edit</a>
                       <div class="dropdown">
-                        <button class="btn btn-sm btn-secondary dropdown-trigger">Role ▾</button>
+                        <button class="btn btn-sm btn-secondary dropdown-trigger">⋯</button>
                         <div class="dropdown-menu">
-                          {['admin', 'moderator', 'creator'].map(role => (
+                          <a href={`/admin/users/${user.id}`} class="dropdown-item">📋 Details</a>
+                          {['admin', 'moderator', 'creator', 'manager'].map(role => (
                             <form method="POST">
                               <input type="hidden" name="userId" value={user.id} />
                               <input type="hidden" name="action" value="set_role" />
                               <button type="submit" name="newRole" value={role} class="dropdown-item" disabled={user.role === role}>
-                                {role === 'admin' ? '👑' : role === 'moderator' ? '🛡️' : '🎨'} {role}
+                                Set {role}
                               </button>
                             </form>
                           ))}
+                          <form method="POST" class="inline">
+                            <input type="hidden" name="userId" value={user.id} />
+                            <button type="submit" name="action" value="toggle_active" class="dropdown-item">
+                              {user.is_active ? '🚫 Suspend' : '✅ Activate'}
+                            </button>
+                          </form>
                         </div>
                       </div>
-                      <form method="POST" class="inline">
-                        <input type="hidden" name="userId" value={user.id} />
-                        <button type="submit" name="action" value="toggle_active" class={`btn btn-sm ${user.is_active ? 'btn-warning' : 'btn-success'}`}>
-                          {user.is_active ? '🚫' : '✅'}
-                        </button>
-                      </form>
                     </>
                   )}
                 </div>
@@ -615,6 +642,12 @@ const showForm = action === 'new' || editUserId;
     .role-badge.admin { background: #fee2e2; color: #dc2626; }
     .role-badge.moderator { background: #fef3c7; color: #d97706; }
     .role-badge.creator { background: #d1fae5; color: #059669; }
+    .role-badge.manager { background: #dbeafe; color: #2563eb; }
+
+    .level-badge { font-size: 0.6875rem; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; background: #f3f4f6; color: #6b7280; }
+
+    .verified-check { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; background: #10b981; color: white; border-radius: 50%; font-size: 0.625rem; margin-left: 0.25rem; }
+    .premium-star { font-size: 0.875rem; margin-left: 0.25rem; }
 
     .user-actions { display: flex; gap: 0.5rem; align-items: center; }
     .waitlist-actions { display: flex; gap: 0.5rem; }
@@ -639,6 +672,7 @@ const showForm = action === 'new' || editUserId;
     .checkbox-label input { width: 18px; height: 18px; }
     .form-input { padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 1rem; flex: 1; }
     .form-actions { display: flex; gap: 1rem; margin-top: 0.5rem; }
+    .quick-links { display: flex; gap: 0.5rem; margin: 1rem 0; padding: 1rem; background: #f9fafb; border-radius: 8px; }
     
     .user-header { display: flex; align-items: center; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb; margin-bottom: 0.5rem; }
 
