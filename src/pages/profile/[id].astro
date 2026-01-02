@@ -1,0 +1,760 @@
+---
+// src/pages/profile/[id].astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { supabase } from "../../lib/supabase";
+
+const { id } = Astro.params;
+const session = Astro.locals.session;
+const currentUser = session?.user;
+
+// Fetch profile
+const { data: profile, error } = await supabase
+  .from('profiles')
+  .select('*')
+  .eq('id', id)
+  .single();
+
+if (error || !profile) {
+  return Astro.redirect('/404');
+}
+
+// Check if profile is public or if viewer is the owner/admin
+const isOwner = currentUser?.id === profile.id;
+const isAdmin = Astro.locals.isAdmin;
+const canView = profile.is_public_profile || isOwner || isAdmin;
+
+if (!canView) {
+  return Astro.redirect('/404');
+}
+
+// Fetch user's badges
+const { data: userBadges } = await supabase
+  .from('user_badges')
+  .select(`
+    id, awarded_at, notes,
+    badge:badges(id, name, slug, description, icon, color, category)
+  `)
+  .eq('user_id', id)
+  .order('awarded_at', { ascending: false });
+
+// Fetch user's recent achievements
+const { data: achievements } = await supabase
+  .from('achievements')
+  .select('*')
+  .eq('user_id', id)
+  .order('achieved_at', { ascending: false })
+  .limit(10);
+
+// Increment profile views (if not owner viewing)
+if (!isOwner) {
+  await supabase
+    .from('profiles')
+    .update({ profile_views: (profile.profile_views || 0) + 1 })
+    .eq('id', id);
+}
+
+// Group badges by category
+const badgesByCategory: Record<string, any[]> = {};
+(userBadges || []).forEach(ub => {
+  const cat = ub.badge?.category || 'other';
+  if (!badgesByCategory[cat]) badgesByCategory[cat] = [];
+  badgesByCategory[cat].push(ub);
+});
+
+// Level info
+const levelInfo = {
+  1: { name: 'Newcomer', color: '#6b7280', nextAt: 10 },
+  2: { name: 'Rising Star', color: '#f59e0b', nextAt: 20 },
+  3: { name: 'Expert', color: '#8b5cf6', nextAt: null },
+};
+
+const currentLevel = levelInfo[profile.level as keyof typeof levelInfo] || levelInfo[1];
+const progress = profile.level < 3 
+  ? Math.round((profile.completed_campaigns / (currentLevel.nextAt || 1)) * 100)
+  : 100;
+
+// Format date
+function formatDate(date: string) {
+  return new Date(date).toLocaleDateString('en-US', { 
+    year: 'numeric', 
+    month: 'long' 
+  });
+}
+
+// Role display
+const roleDisplay = {
+  creator: 'Content Creator',
+  manager: 'Campaign Manager',
+  admin: 'Administrator',
+  moderator: 'Moderator',
+};
+---
+
+<Layout title={profile.full_name || 'Profile'}>
+  <div class="profile-page">
+    <!-- Header -->
+    <div class="profile-header">
+      <div class="profile-header-content">
+        <div class="profile-avatar-section">
+          <div class="profile-avatar">
+            {profile.avatar_url ? (
+              <img src={profile.avatar_url} alt={profile.full_name} />
+            ) : (
+              <span>{(profile.full_name || profile.email || '?').charAt(0).toUpperCase()}</span>
+            )}
+          </div>
+          
+          <div class="profile-info">
+            <div class="profile-name-row">
+              <h1>{profile.full_name || 'Anonymous'}</h1>
+              {profile.is_verified && (
+                <span class="verified-badge" title="Verified">✓</span>
+              )}
+              {profile.is_premium && (
+                <span class="premium-badge" title="Premium Member">⭐</span>
+              )}
+            </div>
+            
+            <p class="profile-role">{roleDisplay[profile.role as keyof typeof roleDisplay] || profile.role}</p>
+            
+            <div class="profile-meta">
+              <span>📅 Joined {formatDate(profile.created_at)}</span>
+              {profile.profile_views > 0 && (
+                <span>👁️ {profile.profile_views} views</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <!-- Level Progress -->
+        <div class="level-section">
+          <div class="level-badge" style={`background: ${currentLevel.color}`}>
+            <span class="level-number">Lvl {profile.level}</span>
+            <span class="level-name">{currentLevel.name}</span>
+          </div>
+          
+          {profile.level < 3 && (
+            <div class="level-progress">
+              <div class="progress-bar">
+                <div class="progress-fill" style={`width: ${progress}%`}></div>
+              </div>
+              <p class="progress-text">
+                {profile.completed_campaigns} / {currentLevel.nextAt} campaigns to Level {profile.level + 1}
+              </p>
+            </div>
+          )}
+          
+          {profile.level === 3 && (
+            <p class="max-level">🌟 Maximum level reached!</p>
+          )}
+        </div>
+      </div>
+    </div>
+
+    <div class="profile-content">
+      <div class="profile-main">
+        <!-- Bio Section -->
+        {profile.bio && (
+          <section class="profile-section">
+            <h2>About</h2>
+            <p class="bio-text">{profile.bio}</p>
+          </section>
+        )}
+
+        <!-- Stats -->
+        <section class="profile-section">
+          <h2>Stats</h2>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <span class="stat-value">{profile.completed_campaigns || 0}</span>
+              <span class="stat-label">Campaigns</span>
+            </div>
+            {(profile.role === 'creator' && profile.is_verified) && (
+              <div class="stat-card">
+                <span class="stat-value">${profile.total_earnings?.toLocaleString() || '0'}</span>
+                <span class="stat-label">Total Earned</span>
+              </div>
+            )}
+            <div class="stat-card">
+              <span class="stat-value">{userBadges?.length || 0}</span>
+              <span class="stat-label">Badges</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-value">Level {profile.level}</span>
+              <span class="stat-label">{profile.is_verified ? 'Verified' : 'Unverified'}</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Badges Section -->
+        {userBadges && userBadges.length > 0 && (
+          <section class="profile-section">
+            <h2>Badges & Achievements</h2>
+            
+            {/* Verification Badge */}
+            {badgesByCategory['verified']?.length > 0 && (
+              <div class="badge-category">
+                <h3>Verification</h3>
+                <div class="badges-grid">
+                  {badgesByCategory['verified'].map(ub => (
+                    <div class="badge-card" style={`border-color: ${ub.badge.color}`}>
+                      <span class="badge-icon" style={`background: ${ub.badge.color}`}>{ub.badge.icon}</span>
+                      <div class="badge-info">
+                        <span class="badge-name">{ub.badge.name}</span>
+                        <span class="badge-desc">{ub.badge.description}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Level Badges */}
+            {badgesByCategory['level']?.length > 0 && (
+              <div class="badge-category">
+                <h3>Level Achievements</h3>
+                <div class="badges-grid">
+                  {badgesByCategory['level'].map(ub => (
+                    <div class="badge-card" style={`border-color: ${ub.badge.color}`}>
+                      <span class="badge-icon" style={`background: ${ub.badge.color}`}>{ub.badge.icon}</span>
+                      <div class="badge-info">
+                        <span class="badge-name">{ub.badge.name}</span>
+                        <span class="badge-desc">{ub.badge.description}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Milestone Badges */}
+            {badgesByCategory['milestone']?.length > 0 && (
+              <div class="badge-category">
+                <h3>Milestones</h3>
+                <div class="badges-grid">
+                  {badgesByCategory['milestone'].map(ub => (
+                    <div class="badge-card" style={`border-color: ${ub.badge.color}`}>
+                      <span class="badge-icon" style={`background: ${ub.badge.color}`}>{ub.badge.icon}</span>
+                      <div class="badge-info">
+                        <span class="badge-name">{ub.badge.name}</span>
+                        <span class="badge-desc">{ub.badge.description}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Special Badges */}
+            {badgesByCategory['special']?.length > 0 && (
+              <div class="badge-category">
+                <h3>Special Recognition</h3>
+                <div class="badges-grid">
+                  {badgesByCategory['special'].map(ub => (
+                    <div class="badge-card special" style={`border-color: ${ub.badge.color}`}>
+                      <span class="badge-icon" style={`background: ${ub.badge.color}`}>{ub.badge.icon}</span>
+                      <div class="badge-info">
+                        <span class="badge-name">{ub.badge.name}</span>
+                        <span class="badge-desc">{ub.badge.description}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Achievement Badges */}
+            {badgesByCategory['achievement']?.length > 0 && (
+              <div class="badge-category">
+                <h3>Achievements</h3>
+                <div class="badges-grid">
+                  {badgesByCategory['achievement'].map(ub => (
+                    <div class="badge-card" style={`border-color: ${ub.badge.color}`}>
+                      <span class="badge-icon" style={`background: ${ub.badge.color}`}>{ub.badge.icon}</span>
+                      <div class="badge-info">
+                        <span class="badge-name">{ub.badge.name}</span>
+                        <span class="badge-desc">{ub.badge.description}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* No badges yet */}
+        {(!userBadges || userBadges.length === 0) && (
+          <section class="profile-section">
+            <h2>Badges & Achievements</h2>
+            <div class="empty-badges">
+              <span>🏆</span>
+              <p>No badges earned yet</p>
+              {isOwner && (
+                <p class="empty-hint">Complete campaigns and achievements to earn badges!</p>
+              )}
+            </div>
+          </section>
+        )}
+      </div>
+
+      <!-- Sidebar -->
+      <aside class="profile-sidebar">
+        {/* Social Links */}
+        {(profile.website || profile.social_instagram || profile.social_tiktok || profile.social_youtube || profile.social_twitter) && (
+          <div class="sidebar-card">
+            <h3>Links</h3>
+            <div class="social-links">
+              {profile.website && (
+                <a href={profile.website} target="_blank" rel="noopener" class="social-link">
+                  🌐 Website
+                </a>
+              )}
+              {profile.social_instagram && (
+                <a href={`https://instagram.com/${profile.social_instagram}`} target="_blank" rel="noopener" class="social-link instagram">
+                  📷 Instagram
+                </a>
+              )}
+              {profile.social_tiktok && (
+                <a href={`https://tiktok.com/@${profile.social_tiktok}`} target="_blank" rel="noopener" class="social-link tiktok">
+                  🎵 TikTok
+                </a>
+              )}
+              {profile.social_youtube && (
+                <a href={`https://youtube.com/@${profile.social_youtube}`} target="_blank" rel="noopener" class="social-link youtube">
+                  ▶️ YouTube
+                </a>
+              )}
+              {profile.social_twitter && (
+                <a href={`https://twitter.com/${profile.social_twitter}`} target="_blank" rel="noopener" class="social-link twitter">
+                  🐦 Twitter
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Actions */}
+        {isOwner && (
+          <div class="sidebar-card">
+            <h3>Actions</h3>
+            <div class="sidebar-actions">
+              <a href="/settings" class="btn btn-secondary">✏️ Edit Profile</a>
+            </div>
+          </div>
+        )}
+
+        {isAdmin && !isOwner && (
+          <div class="sidebar-card admin-card">
+            <h3>🔧 Admin</h3>
+            <div class="sidebar-actions">
+              <a href={`/admin/users?edit=${profile.id}`} class="btn btn-secondary">Edit User</a>
+              <a href={`/admin/badges?user=${profile.id}`} class="btn btn-secondary">Manage Badges</a>
+            </div>
+          </div>
+        )}
+      </aside>
+    </div>
+  </div>
+
+  <style>
+    .profile-page {
+      min-height: 100vh;
+      background: #f8fafc;
+    }
+
+    .profile-header {
+      background: linear-gradient(135deg, #1a1a2e, #2d2d4a);
+      padding: 3rem 0;
+    }
+
+    .profile-header-content {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 2rem;
+    }
+
+    .profile-avatar-section {
+      display: flex;
+      gap: 1.5rem;
+      align-items: center;
+    }
+
+    .profile-avatar {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 3rem;
+      font-weight: 700;
+      color: white;
+      overflow: hidden;
+      border: 4px solid rgba(255,255,255,0.2);
+    }
+
+    .profile-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .profile-info {
+      color: white;
+    }
+
+    .profile-name-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .profile-name-row h1 {
+      font-size: 1.75rem;
+      margin: 0;
+    }
+
+    .verified-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      background: #10b981;
+      color: white;
+      border-radius: 50%;
+      font-size: 0.875rem;
+      font-weight: 700;
+    }
+
+    .premium-badge {
+      font-size: 1.25rem;
+    }
+
+    .profile-role {
+      color: rgba(255,255,255,0.8);
+      font-size: 1rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .profile-meta {
+      display: flex;
+      gap: 1.5rem;
+      font-size: 0.875rem;
+      color: rgba(255,255,255,0.6);
+    }
+
+    /* Level Section */
+    .level-section {
+      text-align: right;
+    }
+
+    .level-badge {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1rem 1.5rem;
+      border-radius: 12px;
+      color: white;
+      margin-bottom: 0.75rem;
+    }
+
+    .level-number {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    .level-name {
+      font-size: 0.875rem;
+      opacity: 0.9;
+    }
+
+    .level-progress {
+      text-align: center;
+    }
+
+    .progress-bar {
+      width: 200px;
+      height: 8px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 0.5rem;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #10b981, #34d399);
+      border-radius: 4px;
+      transition: width 0.3s;
+    }
+
+    .progress-text {
+      font-size: 0.75rem;
+      color: rgba(255,255,255,0.6);
+    }
+
+    .max-level {
+      font-size: 0.875rem;
+      color: #fbbf24;
+    }
+
+    /* Content */
+    .profile-content {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 2rem;
+    }
+
+    .profile-section {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .profile-section h2 {
+      font-size: 1.125rem;
+      color: #1a1a2e;
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .bio-text {
+      color: #4b5563;
+      line-height: 1.7;
+    }
+
+    /* Stats */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1rem;
+    }
+
+    .stat-card {
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 1rem;
+      text-align: center;
+    }
+
+    .stat-value {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .stat-label {
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    /* Badges */
+    .badge-category {
+      margin-bottom: 1.5rem;
+    }
+
+    .badge-category:last-child {
+      margin-bottom: 0;
+    }
+
+    .badge-category h3 {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin-bottom: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .badges-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .badge-card {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 8px;
+      border-left: 3px solid;
+    }
+
+    .badge-card.special {
+      background: linear-gradient(135deg, #fef3c7, #fde68a);
+    }
+
+    .badge-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+      color: white;
+      flex-shrink: 0;
+    }
+
+    .badge-info {
+      min-width: 0;
+    }
+
+    .badge-name {
+      display: block;
+      font-weight: 600;
+      color: #1a1a2e;
+      font-size: 0.875rem;
+    }
+
+    .badge-desc {
+      display: block;
+      font-size: 0.75rem;
+      color: #6b7280;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .empty-badges {
+      text-align: center;
+      padding: 2rem;
+      color: #9ca3af;
+    }
+
+    .empty-badges span {
+      font-size: 2.5rem;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+
+    .empty-hint {
+      font-size: 0.8125rem;
+      margin-top: 0.5rem;
+    }
+
+    /* Sidebar */
+    .profile-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .sidebar-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+
+    .sidebar-card h3 {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin-bottom: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .sidebar-card.admin-card {
+      background: #fef3c7;
+      border: 1px solid #f59e0b;
+    }
+
+    .social-links {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .social-link {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.625rem 0.875rem;
+      background: #f3f4f6;
+      border-radius: 6px;
+      text-decoration: none;
+      color: #374151;
+      font-size: 0.875rem;
+      transition: all 0.2s;
+    }
+
+    .social-link:hover {
+      background: #e5e7eb;
+    }
+
+    .sidebar-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .btn {
+      padding: 0.625rem 1rem;
+      border-radius: 6px;
+      font-weight: 500;
+      text-decoration: none;
+      text-align: center;
+      font-size: 0.875rem;
+      transition: all 0.2s;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .btn-secondary:hover {
+      background: #e5e7eb;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .profile-header-content {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+
+      .profile-avatar-section {
+        flex-direction: column;
+      }
+
+      .profile-meta {
+        justify-content: center;
+      }
+
+      .level-section {
+        text-align: center;
+      }
+
+      .profile-content {
+        grid-template-columns: 1fr;
+      }
+
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .badges-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</Layout>
