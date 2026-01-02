@@ -1,0 +1,538 @@
+---
+// src/pages/admin/badges.astro
+export const prerender = false;
+
+import AdminLayout from "../../layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+let successMessage = '';
+let errorMessage = '';
+
+// Get user to manage (from query param)
+const userId = Astro.url.searchParams.get('user');
+let targetUser: any = null;
+let userBadges: any[] = [];
+
+if (userId) {
+  const { data } = await supabase
+    .from('profiles')
+    .select('id, full_name, email, role, is_verified, level')
+    .eq('id', userId)
+    .single();
+  targetUser = data;
+
+  if (targetUser) {
+    const { data: badges } = await supabase
+      .from('user_badges')
+      .select(`
+        id, awarded_at, notes,
+        badge:badges(id, name, slug, icon, color, category)
+      `)
+      .eq('user_id', userId)
+      .order('awarded_at', { ascending: false });
+    userBadges = badges || [];
+  }
+}
+
+// Handle form submission
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action') as string;
+
+  if (action === 'award_badge') {
+    const badgeId = form.get('badge_id') as string;
+    const targetUserId = form.get('user_id') as string;
+    const notes = form.get('notes') as string;
+
+    const { error } = await supabase.from('user_badges').insert({
+      user_id: targetUserId,
+      badge_id: badgeId,
+      notes: notes || null,
+      awarded_by: session?.user?.id || null,
+    });
+
+    if (error) {
+      if (error.code === '23505') {
+        errorMessage = 'User already has this badge.';
+      } else {
+        errorMessage = error.message;
+      }
+    } else {
+      successMessage = 'Badge awarded successfully!';
+      // Refresh user badges
+      if (targetUserId === userId) {
+        const { data } = await supabase
+          .from('user_badges')
+          .select(`id, awarded_at, notes, badge:badges(id, name, slug, icon, color, category)`)
+          .eq('user_id', userId)
+          .order('awarded_at', { ascending: false });
+        userBadges = data || [];
+      }
+    }
+  }
+
+  if (action === 'remove_badge') {
+    const userBadgeId = form.get('user_badge_id') as string;
+    const { error } = await supabase.from('user_badges').delete().eq('id', userBadgeId);
+    
+    if (error) {
+      errorMessage = error.message;
+    } else {
+      successMessage = 'Badge removed.';
+      userBadges = userBadges.filter(ub => ub.id !== userBadgeId);
+    }
+  }
+
+  if (action === 'verify_user') {
+    const targetUserId = form.get('user_id') as string;
+    const { error } = await supabase.from('profiles').update({
+      is_verified: true,
+      verified_at: new Date().toISOString(),
+      verified_by: session?.user?.id || null,
+    }).eq('id', targetUserId);
+
+    if (error) {
+      errorMessage = error.message;
+    } else {
+      successMessage = 'User verified!';
+      if (targetUser) targetUser.is_verified = true;
+
+      // Award verified badge
+      const { data: verifiedBadge } = await supabase
+        .from('badges')
+        .select('id')
+        .eq('slug', targetUser?.role === 'manager' ? 'verified-manager' : 'verified-creator')
+        .single();
+
+      if (verifiedBadge) {
+        await supabase.from('user_badges').insert({
+          user_id: targetUserId,
+          badge_id: verifiedBadge.id,
+          awarded_by: session?.user?.id || null,
+        }).select();
+      }
+    }
+  }
+
+  if (action === 'unverify_user') {
+    const targetUserId = form.get('user_id') as string;
+    const { error } = await supabase.from('profiles').update({
+      is_verified: false,
+      verified_at: null,
+      verified_by: null,
+    }).eq('id', targetUserId);
+
+    if (error) {
+      errorMessage = error.message;
+    } else {
+      successMessage = 'Verification removed.';
+      if (targetUser) targetUser.is_verified = false;
+    }
+  }
+
+  if (action === 'set_level') {
+    const targetUserId = form.get('user_id') as string;
+    const level = parseInt(form.get('level') as string);
+    
+    const { error } = await supabase.from('profiles').update({ level }).eq('id', targetUserId);
+
+    if (error) {
+      errorMessage = error.message;
+    } else {
+      successMessage = `Level set to ${level}!`;
+      if (targetUser) targetUser.level = level;
+
+      // Award level badge if applicable
+      if (level >= 2) {
+        const { data: levelBadge } = await supabase
+          .from('badges')
+          .select('id')
+          .eq('slug', `level-${level}`)
+          .single();
+
+        if (levelBadge) {
+          await supabase.from('user_badges').upsert({
+            user_id: targetUserId,
+            badge_id: levelBadge.id,
+            awarded_by: session?.user?.id || null,
+          }, { onConflict: 'user_id,badge_id' });
+        }
+      }
+    }
+  }
+
+  if (action === 'create_badge') {
+    const name = form.get('name') as string;
+    const slug = (form.get('slug') as string) || name.toLowerCase().replace(/\s+/g, '-');
+    const description = form.get('description') as string;
+    const icon = form.get('icon') as string || '🏆';
+    const color = form.get('color') as string || '#f59e0b';
+    const category = form.get('category') as string || 'special';
+
+    const { error } = await supabase.from('badges').insert({
+      name, slug, description, icon, color, category,
+      requirement_type: 'manual',
+    });
+
+    if (error) {
+      if (error.code === '23505') {
+        errorMessage = 'Badge with this slug already exists.';
+      } else {
+        errorMessage = error.message;
+      }
+    } else {
+      successMessage = 'Badge created!';
+    }
+  }
+}
+
+// Fetch all badges
+const { data: allBadges } = await supabase
+  .from('badges')
+  .select('*')
+  .order('sort_order', { ascending: true });
+
+// Fetch all users for dropdown
+const { data: allUsers } = await supabase
+  .from('profiles')
+  .select('id, full_name, email, role')
+  .order('full_name', { ascending: true, nullsFirst: false });
+
+// Get recent badge awards
+const { data: recentAwards } = await supabase
+  .from('user_badges')
+  .select(`
+    id, awarded_at,
+    user:profiles!user_badges_user_id_fkey(id, full_name, email),
+    badge:badges(name, icon, color)
+  `)
+  .order('awarded_at', { ascending: false })
+  .limit(20);
+
+const tab = Astro.url.searchParams.get('tab') || (userId ? 'user' : 'badges');
+---
+
+<AdminLayout title="Badges Management">
+  {successMessage && <div class="alert success">{successMessage}</div>}
+  {errorMessage && <div class="alert error">{errorMessage}</div>}
+
+  <div class="badges-page">
+    <div class="page-header">
+      <div>
+        <h1>🏆 Badges & Achievements</h1>
+        <p class="subtitle">Manage badges, verify users, and set levels</p>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <a href="/admin/badges?tab=badges" class={`tab ${tab === 'badges' ? 'active' : ''}`}>All Badges</a>
+      <a href="/admin/badges?tab=award" class={`tab ${tab === 'award' ? 'active' : ''}`}>Award Badge</a>
+      <a href="/admin/badges?tab=create" class={`tab ${tab === 'create' ? 'active' : ''}`}>Create Badge</a>
+      {userId && (
+        <a href={`/admin/badges?user=${userId}&tab=user`} class={`tab ${tab === 'user' ? 'active' : ''}`}>
+          User: {targetUser?.full_name || 'Unknown'}
+        </a>
+      )}
+    </div>
+
+    <!-- User Management Tab -->
+    {tab === 'user' && targetUser && (
+      <div class="panel">
+        <div class="user-header">
+          <div>
+            <h2>{targetUser.full_name || targetUser.email}</h2>
+            <p class="user-meta">
+              {targetUser.role} • Level {targetUser.level} • 
+              {targetUser.is_verified ? '✓ Verified' : 'Not Verified'}
+            </p>
+          </div>
+          <a href={`/profile/${targetUser.id}`} target="_blank" class="btn btn-secondary">
+            👁️ View Public Profile
+          </a>
+        </div>
+
+        <!-- Verification -->
+        <div class="section">
+          <h3>Verification Status</h3>
+          <div class="verification-controls">
+            {targetUser.is_verified ? (
+              <form method="POST" style="display: inline;">
+                <input type="hidden" name="action" value="unverify_user" />
+                <input type="hidden" name="user_id" value={targetUser.id} />
+                <button type="submit" class="btn btn-danger">Remove Verification</button>
+              </form>
+            ) : (
+              <form method="POST" style="display: inline;">
+                <input type="hidden" name="action" value="verify_user" />
+                <input type="hidden" name="user_id" value={targetUser.id} />
+                <button type="submit" class="btn btn-success">✓ Verify User</button>
+              </form>
+            )}
+          </div>
+        </div>
+
+        <!-- Level -->
+        <div class="section">
+          <h3>User Level</h3>
+          <form method="POST" class="level-form">
+            <input type="hidden" name="action" value="set_level" />
+            <input type="hidden" name="user_id" value={targetUser.id} />
+            <select name="level">
+              <option value="1" selected={targetUser.level === 1}>Level 1 - Newcomer</option>
+              <option value="2" selected={targetUser.level === 2}>Level 2 - Rising Star (10 campaigns)</option>
+              <option value="3" selected={targetUser.level === 3}>Level 3 - Expert (20 campaigns)</option>
+            </select>
+            <button type="submit" class="btn btn-primary">Set Level</button>
+          </form>
+        </div>
+
+        <!-- User's Badges -->
+        <div class="section">
+          <h3>Badges ({userBadges.length})</h3>
+          {userBadges.length > 0 ? (
+            <div class="user-badges-list">
+              {userBadges.map(ub => (
+                <div class="user-badge-item">
+                  <span class="badge-icon-small" style={`background: ${ub.badge.color}`}>{ub.badge.icon}</span>
+                  <div class="badge-details">
+                    <strong>{ub.badge.name}</strong>
+                    <span class="badge-date">Awarded {new Date(ub.awarded_at).toLocaleDateString()}</span>
+                  </div>
+                  <form method="POST" class="remove-form">
+                    <input type="hidden" name="action" value="remove_badge" />
+                    <input type="hidden" name="user_badge_id" value={ub.id} />
+                    <button type="submit" class="btn btn-small btn-danger">Remove</button>
+                  </form>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p class="empty-text">No badges awarded yet.</p>
+          )}
+        </div>
+
+        <!-- Award Badge -->
+        <div class="section">
+          <h3>Award New Badge</h3>
+          <form method="POST" class="award-form">
+            <input type="hidden" name="action" value="award_badge" />
+            <input type="hidden" name="user_id" value={targetUser.id} />
+            <div class="form-row">
+              <select name="badge_id" required>
+                <option value="">Select Badge...</option>
+                {allBadges?.filter(b => !userBadges.some(ub => ub.badge.id === b.id)).map(badge => (
+                  <option value={badge.id}>{badge.icon} {badge.name}</option>
+                ))}
+              </select>
+              <input type="text" name="notes" placeholder="Notes (optional)" />
+              <button type="submit" class="btn btn-primary">Award</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
+
+    <!-- All Badges Tab -->
+    {tab === 'badges' && (
+      <div class="panel">
+        <h2>All Badges ({allBadges?.length || 0})</h2>
+        <div class="badges-grid">
+          {allBadges?.map(badge => (
+            <div class="badge-card">
+              <span class="badge-icon-large" style={`background: ${badge.color}`}>{badge.icon}</span>
+              <div class="badge-info">
+                <strong>{badge.name}</strong>
+                <span class="badge-category">{badge.category}</span>
+                <p>{badge.description}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+    <!-- Award Badge Tab -->
+    {tab === 'award' && (
+      <div class="panel">
+        <h2>Award Badge to User</h2>
+        <form method="POST" class="award-form-large">
+          <input type="hidden" name="action" value="award_badge" />
+          
+          <div class="form-group">
+            <label>User</label>
+            <select name="user_id" required>
+              <option value="">Select User...</option>
+              {allUsers?.map(user => (
+                <option value={user.id}>{user.full_name || user.email} ({user.role})</option>
+              ))}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Badge</label>
+            <select name="badge_id" required>
+              <option value="">Select Badge...</option>
+              {allBadges?.map(badge => (
+                <option value={badge.id}>{badge.icon} {badge.name} ({badge.category})</option>
+              ))}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Notes (optional)</label>
+            <input type="text" name="notes" placeholder="Reason for awarding..." />
+          </div>
+
+          <button type="submit" class="btn btn-primary">🏆 Award Badge</button>
+        </form>
+
+        <h3 style="margin-top: 2rem;">Recent Awards</h3>
+        <div class="recent-awards">
+          {recentAwards?.map(award => (
+            <div class="award-item">
+              <span class="badge-icon-small" style={`background: ${award.badge?.color}`}>{award.badge?.icon}</span>
+              <div>
+                <strong>{award.badge?.name}</strong> → {award.user?.full_name || award.user?.email}
+                <span class="award-date">{new Date(award.awarded_at).toLocaleDateString()}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+    <!-- Create Badge Tab -->
+    {tab === 'create' && (
+      <div class="panel">
+        <h2>Create New Badge</h2>
+        <form method="POST" class="create-form">
+          <input type="hidden" name="action" value="create_badge" />
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label>Name *</label>
+              <input type="text" name="name" required placeholder="Badge Name" />
+            </div>
+            <div class="form-group">
+              <label>Slug</label>
+              <input type="text" name="slug" placeholder="badge-slug (auto-generated)" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Description</label>
+            <input type="text" name="description" placeholder="What this badge represents..." />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Icon (emoji)</label>
+              <input type="text" name="icon" placeholder="🏆" maxlength="4" />
+            </div>
+            <div class="form-group">
+              <label>Color</label>
+              <input type="color" name="color" value="#f59e0b" />
+            </div>
+            <div class="form-group">
+              <label>Category</label>
+              <select name="category">
+                <option value="special">Special</option>
+                <option value="achievement">Achievement</option>
+                <option value="milestone">Milestone</option>
+              </select>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary">Create Badge</button>
+        </form>
+      </div>
+    )}
+  </div>
+
+  <style>
+    .badges-page { max-width: 1000px; }
+
+    .page-header { margin-bottom: 1.5rem; }
+    .page-header h1 { font-size: 1.5rem; color: #1a1a2e; margin-bottom: 0.25rem; }
+    .subtitle { color: #6b7280; }
+
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .tab { padding: 0.625rem 1rem; background: #f3f4f6; border-radius: 6px; text-decoration: none; color: #374151; font-size: 0.875rem; }
+    .tab.active { background: #2563eb; color: white; }
+    .tab:hover:not(.active) { background: #e5e7eb; }
+
+    .panel { background: white; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .panel h2 { font-size: 1.125rem; color: #1a1a2e; margin-bottom: 1rem; }
+    .panel h3 { font-size: 1rem; color: #374151; margin-bottom: 0.75rem; }
+
+    .user-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb; }
+    .user-meta { color: #6b7280; font-size: 0.875rem; }
+
+    .section { margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #e5e7eb; }
+    .section:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+
+    .verification-controls { display: flex; gap: 0.5rem; }
+
+    .level-form { display: flex; gap: 0.5rem; align-items: center; }
+    .level-form select { padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; }
+
+    .user-badges-list { display: flex; flex-direction: column; gap: 0.5rem; }
+    .user-badge-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 8px; }
+    .badge-details { flex: 1; }
+    .badge-details strong { display: block; font-size: 0.875rem; }
+    .badge-date { font-size: 0.75rem; color: #6b7280; }
+
+    .badge-icon-small { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 1rem; }
+    .badge-icon-large { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.5rem; flex-shrink: 0; }
+
+    .badges-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+    .badge-card { display: flex; gap: 1rem; padding: 1rem; background: #f9fafb; border-radius: 8px; }
+    .badge-info strong { display: block; margin-bottom: 0.25rem; }
+    .badge-info p { font-size: 0.8125rem; color: #6b7280; margin: 0; }
+    .badge-category { font-size: 0.6875rem; text-transform: uppercase; color: #9ca3af; background: #e5e7eb; padding: 0.125rem 0.375rem; border-radius: 4px; }
+
+    .award-form, .award-form-large, .create-form { margin-top: 1rem; }
+    .form-row { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; }
+    .form-group { display: flex; flex-direction: column; gap: 0.375rem; margin-bottom: 1rem; flex: 1; min-width: 150px; }
+    .form-group label { font-size: 0.8125rem; font-weight: 500; color: #374151; }
+    .form-group input, .form-group select { padding: 0.625rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.875rem; }
+    .form-group input[type="color"] { height: 38px; padding: 0.25rem; }
+
+    .recent-awards { display: flex; flex-direction: column; gap: 0.5rem; }
+    .award-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem; background: #f9fafb; border-radius: 6px; font-size: 0.875rem; }
+    .award-date { font-size: 0.75rem; color: #9ca3af; margin-left: 0.5rem; }
+
+    .empty-text { color: #9ca3af; font-size: 0.875rem; }
+
+    .btn { padding: 0.5rem 1rem; border-radius: 6px; font-weight: 500; border: none; cursor: pointer; text-decoration: none; font-size: 0.875rem; display: inline-flex; align-items: center; gap: 0.375rem; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+    .btn-secondary:hover { background: #e5e7eb; }
+    .btn-success { background: #10b981; color: white; }
+    .btn-success:hover { background: #059669; }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-small { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+
+    .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+
+    .remove-form { margin: 0; }
+  </style>
+</AdminLayout>
