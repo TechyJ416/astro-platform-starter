@@ -10,14 +10,12 @@ const profile = Astro.locals.profile;
 
 const isApproved = profile?.status === 'active' && profile?.is_active;
 
-// Fetch active campaigns
 const { data: campaignsRaw } = await supabase
   .from('campaigns')
   .select('id, title, slug, description, budget, payment_per_post, deadline, status')
   .eq('status', 'active')
   .order('created_at', { ascending: false });
 
-// Process campaigns with computed fields
 const campaigns = (campaignsRaw || []).map(campaign => {
   let daysRemaining = null;
   let isUrgent = false;
@@ -31,12 +29,7 @@ const campaigns = (campaignsRaw || []).map(campaign => {
     isExpired = daysRemaining < 1;
   }
   
-  return {
-    ...campaign,
-    daysRemaining,
-    isUrgent,
-    isExpired
-  };
+  return { ...campaign, daysRemaining, isUrgent, isExpired };
 });
 ---
 
@@ -44,8 +37,9 @@ const campaigns = (campaignsRaw || []).map(campaign => {
   <div class="campaigns-page">
     <div class="page-header">
       <div class="header-content">
+        <span class="header-label"><span class="label-line"></span> Browse Opportunities</span>
         <h1>Active Campaigns</h1>
-        <p>Browse and apply to brand campaigns that match your style</p>
+        <p>Find brand collaborations that match your style and start earning</p>
       </div>
       {!session && (
         <a href="/signup" class="btn btn-primary">Join to Apply</a>
@@ -70,69 +64,64 @@ const campaigns = (campaignsRaw || []).map(campaign => {
         <div class="banner-icon">⏳</div>
         <div class="banner-content">
           <h3>Account Pending Approval</h3>
-          <p>You can browse campaigns, but you'll need an approved account to apply. We'll notify you once your account is approved.</p>
+          <p>You can browse campaigns, but you'll need an approved account to apply. We'll notify you once approved.</p>
         </div>
       </div>
     )}
 
     {campaigns && campaigns.length > 0 ? (
       <div class="campaigns-grid">
-        {campaigns.map(campaign => (
-            <div class={`campaign-card ${campaign.isUrgent ? 'urgent' : ''} ${campaign.isExpired ? 'expired' : ''}`}>
-              <div class="campaign-header">
-                <h2>{campaign.title}</h2>
-                <span class="status-badge active">Active</span>
+        {campaigns.map((campaign, index) => (
+          <div class={`campaign-card ${campaign.isUrgent ? 'urgent' : ''} ${campaign.isExpired ? 'expired' : ''}`} style={`--delay: ${index * 0.1}s`}>
+            <div class="card-glow"></div>
+            <div class="card-content">
+              <div class="card-header">
+                <span class="status-badge">● Active</span>
+                {campaign.payment_per_post && (
+                  <span class="card-payout">${campaign.payment_per_post}</span>
+                )}
               </div>
               
+              <h2 class="card-title">{campaign.title}</h2>
+              
               {campaign.description && (
-                <p class="campaign-desc">
+                <p class="card-desc">
                   {campaign.description.substring(0, 150)}{campaign.description.length > 150 ? '...' : ''}
                 </p>
               )}
               
-              <div class="campaign-meta">
-                {campaign.payment_per_post && (
-                  <div class="meta-item payment">
-                    <span class="meta-icon">💰</span>
-                    <span class="meta-value">${campaign.payment_per_post}</span>
-                    <span class="meta-label">per post</span>
-                  </div>
-                )}
-                
+              <div class="card-meta">
                 {campaign.budget && (
-                  <div class="meta-item">
-                    <span class="meta-icon">💵</span>
-                    <span class="meta-value">${campaign.budget}</span>
-                    <span class="meta-label">budget</span>
-                  </div>
+                  <span class="meta-item">
+                    <span class="meta-icon">◇</span>
+                    ${campaign.budget} budget
+                  </span>
                 )}
                 
                 {campaign.deadline && (
-                  <div class={`meta-item ${campaign.isUrgent ? 'urgent' : ''} ${campaign.isExpired ? 'expired' : ''}`}>
-                    <span class="meta-icon">📅</span>
+                  <span class={`meta-item ${campaign.isUrgent ? 'urgent' : ''} ${campaign.isExpired ? 'expired' : ''}`}>
+                    <span class="meta-icon">◇</span>
                     {campaign.isExpired ? (
-                      <span class="meta-value expired">Ended</span>
+                      <span class="expired-text">Ended</span>
                     ) : campaign.isUrgent ? (
-                      <span class="meta-value urgent">{campaign.daysRemaining} days left!</span>
+                      <span class="urgent-text">{campaign.daysRemaining} days left!</span>
                     ) : (
-                      <span class="meta-value">{new Date(campaign.deadline).toLocaleDateString()}</span>
+                      <span>Ends {new Date(campaign.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                     )}
-                  </div>
+                  </span>
                 )}
               </div>
               
-              <div class="campaign-footer">
+              <div class="card-footer">
                 {isApproved ? (
-                  <a href={`/campaigns/${campaign.slug}`} class="btn btn-primary">
-                    View & Apply
+                  <a href={`/campaigns/${campaign.slug}`} class="card-btn">
+                    View & Apply →
                   </a>
                 ) : session ? (
-                  <button class="btn btn-disabled" disabled>
-                    Account Pending
-                  </button>
+                  <span class="card-btn disabled">Account Pending</span>
                 ) : (
-                  <a href="/signup" class="btn btn-secondary">
-                    Sign Up to Apply
+                  <a href="/signup" class="card-btn">
+                    Sign Up to Apply →
                   </a>
                 )}
                 
@@ -141,6 +130,7 @@ const campaigns = (campaignsRaw || []).map(campaign => {
                 )}
               </div>
             </div>
+          </div>
         ))}
       </div>
     ) : (
@@ -154,28 +144,30 @@ const campaigns = (campaignsRaw || []).map(campaign => {
       </div>
     )}
 
-    {/* How it works section for logged out users */}
     {!session && (
       <section class="how-it-works">
-        <h2>Start Earning as a Creator</h2>
+        <div class="section-header">
+          <span class="header-label"><span class="label-line"></span> The Process <span class="label-line"></span></span>
+          <h2>Start Earning as a Creator</h2>
+        </div>
         <div class="steps">
           <div class="step">
-            <div class="step-number">1</div>
+            <div class="step-number">01</div>
             <h3>Create Account</h3>
             <p>Sign up and join our waitlist for approval.</p>
           </div>
           <div class="step">
-            <div class="step-number">2</div>
+            <div class="step-number">02</div>
             <h3>Get Approved</h3>
             <p>Our team reviews your application.</p>
           </div>
           <div class="step">
-            <div class="step-number">3</div>
+            <div class="step-number">03</div>
             <h3>Apply to Campaigns</h3>
             <p>Browse and apply to campaigns that fit your style.</p>
           </div>
           <div class="step">
-            <div class="step-number">4</div>
+            <div class="step-number">04</div>
             <h3>Create & Earn</h3>
             <p>Submit your content and get paid!</p>
           </div>
@@ -195,17 +187,38 @@ const campaigns = (campaignsRaw || []).map(campaign => {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      margin-bottom: 2rem;
+      margin-bottom: 3rem;
+      gap: 2rem;
+    }
+
+    .header-label {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      font-size: 0.8125rem;
+      color: var(--cosmic-blue);
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      font-weight: 600;
+    }
+
+    .label-line {
+      width: 30px;
+      height: 1px;
+      background: var(--cosmic-blue);
     }
 
     .header-content h1 {
-      font-size: 2rem;
-      color: #1a1a2e;
+      font-size: 2.5rem;
+      font-weight: 800;
+      color: var(--star-white);
       margin-bottom: 0.5rem;
+      letter-spacing: -0.02em;
     }
 
     .header-content p {
-      color: #6b7280;
+      color: var(--star-dim);
       font-size: 1.125rem;
     }
 
@@ -216,16 +229,17 @@ const campaigns = (campaignsRaw || []).map(campaign => {
       padding: 1.5rem;
       border-radius: 16px;
       margin-bottom: 2rem;
+      backdrop-filter: blur(10px);
     }
 
     .info-banner {
-      background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-      border: 2px solid #10b981;
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(16, 185, 129, 0.05));
+      border: 1px solid rgba(16, 185, 129, 0.3);
     }
 
     .pending-banner {
-      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-      border: 2px solid #f59e0b;
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(245, 158, 11, 0.05));
+      border: 1px solid rgba(245, 158, 11, 0.3);
     }
 
     .banner-icon {
@@ -238,18 +252,13 @@ const campaigns = (campaignsRaw || []).map(campaign => {
 
     .banner-content h3 {
       font-size: 1.125rem;
-      color: #1a1a2e;
+      color: var(--star-white);
       margin-bottom: 0.25rem;
     }
 
     .banner-content p {
-      color: #6b7280;
+      color: var(--star-dim);
       margin: 0;
-    }
-
-    .banner-actions {
-      display: flex;
-      gap: 0.75rem;
     }
 
     .campaigns-grid {
@@ -259,171 +268,174 @@ const campaigns = (campaignsRaw || []).map(campaign => {
     }
 
     .campaign-card {
-      background: white;
-      border-radius: 16px;
-      padding: 1.5rem;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      transition: all 0.2s;
-      display: flex;
-      flex-direction: column;
+      position: relative;
+      background: linear-gradient(135deg, rgba(26, 26, 46, 0.8), rgba(8, 8, 18, 0.8));
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 20px;
+      overflow: hidden;
+      animation: card-in 0.6s ease-out var(--delay) backwards;
+      transition: all 0.4s;
+    }
+
+    @keyframes card-in {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     .campaign-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+      transform: translateY(-6px);
+      border-color: rgba(79, 139, 255, 0.3);
     }
 
     .campaign-card.urgent {
-      border: 2px solid #f59e0b;
+      border-color: rgba(245, 158, 11, 0.4);
     }
 
     .campaign-card.expired {
-      opacity: 0.7;
+      opacity: 0.6;
     }
 
-    .campaign-header {
+    .card-glow {
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle, var(--glow-blue) 0%, transparent 70%);
+      opacity: 0;
+      transition: opacity 0.4s;
+      pointer-events: none;
+    }
+
+    .campaign-card:hover .card-glow {
+      opacity: 0.08;
+    }
+
+    .card-content {
+      position: relative;
+      padding: 1.5rem;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    .card-header {
       display: flex;
       justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 0.75rem;
-    }
-
-    .campaign-header h2 {
-      font-size: 1.25rem;
-      color: #1a1a2e;
+      align-items: center;
+      margin-bottom: 1rem;
     }
 
     .status-badge {
-      font-size: 0.6875rem;
-      padding: 0.25rem 0.75rem;
-      border-radius: 999px;
+      font-size: 0.75rem;
       font-weight: 600;
+      color: var(--success);
       text-transform: uppercase;
+      letter-spacing: 0.1em;
     }
 
-    .status-badge.active {
-      background: #d1fae5;
-      color: #059669;
+    .card-payout {
+      font-family: var(--font-mono);
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--cosmic-cyan);
     }
 
-    .campaign-desc {
-      color: #6b7280;
+    .card-title {
+      font-size: 1.375rem;
+      font-weight: 700;
+      color: var(--star-white);
+      margin-bottom: 0.75rem;
+      line-height: 1.3;
+    }
+
+    .card-desc {
+      color: var(--star-dim);
       font-size: 0.9375rem;
-      margin-bottom: 1.25rem;
       line-height: 1.6;
+      margin-bottom: 1.25rem;
       flex: 1;
     }
 
-    .campaign-meta {
+    .card-meta {
       display: flex;
       flex-wrap: wrap;
       gap: 1rem;
-      margin-bottom: 1.25rem;
+      margin-bottom: 1.5rem;
     }
 
     .meta-item {
       display: flex;
       align-items: center;
       gap: 0.5rem;
-      padding: 0.5rem 0.75rem;
-      background: #f9fafb;
-      border-radius: 8px;
-    }
-
-    .meta-item.payment {
-      background: #d1fae5;
-    }
-
-    .meta-item.urgent {
-      background: #fef3c7;
-    }
-
-    .meta-item.expired {
-      background: #fee2e2;
+      font-size: 0.8125rem;
+      color: var(--star-dim);
     }
 
     .meta-icon {
-      font-size: 1rem;
+      color: var(--cosmic-purple);
+      font-size: 0.625rem;
     }
 
-    .meta-value {
-      font-weight: 600;
-      color: #1a1a2e;
-    }
+    .meta-item.urgent .meta-icon { color: var(--warning); }
+    .meta-item.expired .meta-icon { color: var(--danger); }
+    .urgent-text { color: var(--warning); font-weight: 600; }
+    .expired-text { color: var(--danger); font-weight: 600; }
 
-    .meta-value.urgent {
-      color: #d97706;
-    }
-
-    .meta-value.expired {
-      color: #dc2626;
-    }
-
-    .meta-label {
-      font-size: 0.75rem;
-      color: #6b7280;
-    }
-
-    .campaign-footer {
+    .card-footer {
       display: flex;
       align-items: center;
       gap: 1rem;
       padding-top: 1.25rem;
-      border-top: 1px solid #f0f0f0;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .card-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      padding: 0.875rem 1.25rem;
+      background: linear-gradient(135deg, rgba(79, 139, 255, 0.2), rgba(168, 85, 247, 0.2));
+      border: 1px solid rgba(79, 139, 255, 0.3);
+      border-radius: 12px;
+      color: var(--star-white);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.9375rem;
+      transition: all 0.3s;
+    }
+
+    .card-btn:hover {
+      background: linear-gradient(135deg, var(--cosmic-blue), var(--cosmic-purple));
+      border-color: transparent;
+    }
+
+    .card-btn.disabled {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.1);
+      color: var(--star-muted);
+      cursor: not-allowed;
     }
 
     .urgency-badge {
       font-size: 0.75rem;
       padding: 0.375rem 0.75rem;
-      background: linear-gradient(135deg, #fef3c7, #fde68a);
-      color: #92400e;
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(245, 158, 11, 0.1));
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: var(--warning);
       border-radius: 999px;
       font-weight: 600;
-    }
-
-    .btn {
-      padding: 0.75rem 1.5rem;
-      border-radius: 10px;
-      font-weight: 600;
-      font-size: 0.9375rem;
-      text-decoration: none;
-      border: none;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s;
-    }
-
-    .btn-primary {
-      background: #2563eb;
-      color: white;
-    }
-
-    .btn-primary:hover {
-      background: #1d4ed8;
-    }
-
-    .btn-secondary {
-      background: #f3f4f6;
-      color: #374151;
-    }
-
-    .btn-secondary:hover {
-      background: #e5e7eb;
-    }
-
-    .btn-disabled {
-      background: #e5e7eb;
-      color: #9ca3af;
-      cursor: not-allowed;
+      white-space: nowrap;
     }
 
     .empty-state {
       text-align: center;
       padding: 4rem 2rem;
-      background: white;
-      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(26, 26, 46, 0.6), rgba(8, 8, 18, 0.6));
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 20px;
     }
 
     .empty-icon {
@@ -432,28 +444,39 @@ const campaigns = (campaignsRaw || []).map(campaign => {
     }
 
     .empty-state h2 {
-      color: #374151;
+      color: var(--star-white);
       margin-bottom: 0.5rem;
     }
 
     .empty-state p {
-      color: #9ca3af;
+      color: var(--star-dim);
       margin-bottom: 1.5rem;
     }
 
     /* How it works */
     .how-it-works {
-      margin-top: 4rem;
-      text-align: center;
+      margin-top: 5rem;
       padding: 3rem;
-      background: linear-gradient(135deg, #f8fafc, #e2e8f0);
-      border-radius: 20px;
+      background: linear-gradient(135deg, rgba(26, 26, 46, 0.5), rgba(8, 8, 18, 0.5));
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 24px;
+      backdrop-filter: blur(10px);
+    }
+
+    .how-it-works .section-header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .how-it-works .section-header .header-label {
+      justify-content: center;
     }
 
     .how-it-works h2 {
       font-size: 1.75rem;
-      color: #1a1a2e;
-      margin-bottom: 2rem;
+      color: var(--star-white);
+      font-weight: 800;
+      letter-spacing: -0.02em;
     }
 
     .steps {
@@ -467,34 +490,30 @@ const campaigns = (campaignsRaw || []).map(campaign => {
     }
 
     .step-number {
-      width: 48px;
-      height: 48px;
-      background: linear-gradient(135deg, #2563eb, #3b82f6);
-      color: white;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.25rem;
+      font-family: var(--font-mono);
+      font-size: 0.875rem;
       font-weight: 700;
-      margin: 0 auto 1rem;
+      color: var(--cosmic-blue);
+      margin-bottom: 1rem;
+      letter-spacing: 0.1em;
     }
 
     .step h3 {
       font-size: 1rem;
-      color: #1a1a2e;
+      color: var(--star-white);
       margin-bottom: 0.5rem;
+      font-weight: 700;
     }
 
     .step p {
       font-size: 0.875rem;
-      color: #6b7280;
+      color: var(--star-dim);
+      line-height: 1.6;
     }
 
     @media (max-width: 768px) {
       .page-header {
         flex-direction: column;
-        gap: 1rem;
       }
 
       .info-banner, .pending-banner {
