@@ -1,0 +1,485 @@
+ ---
+// src/pages/manager/campaigns/index.astro
+export const prerender = false;
+
+import Layout from "../../../layouts/Layout.astro";
+import { supabase } from "../../../lib/supabase";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!session) {
+  return Astro.redirect('/login?redirect=/manager/campaigns');
+}
+
+if (profile?.role !== 'manager' && profile?.role !== 'admin') {
+  return Astro.redirect('/dashboard');
+}
+
+// Fetch campaigns
+const { data: campaigns } = await supabase
+  .from('campaigns')
+  .select('*')
+  .eq('manager_id', session.user.id)
+  .order('created_at', { ascending: false });
+
+// Fetch applications and submissions for stats
+const campaignIds = campaigns?.map(c => c.id) || [];
+const { data: applications } = campaignIds.length > 0
+  ? await supabase
+      .from('campaign_applications')
+      .select('id, status, campaign_id')
+      .in('campaign_id', campaignIds)
+  : { data: [] };
+
+const { data: submissions } = campaignIds.length > 0
+  ? await supabase
+      .from('posts')
+      .select('id, status, campaign_id')
+      .in('campaign_id', campaignIds)
+  : { data: [] };
+
+// Filter
+const filter = Astro.url.searchParams.get('filter') || 'all';
+const filteredCampaigns = campaigns?.filter(c => {
+  if (filter === 'all') return true;
+  return c.status === filter;
+}) || [];
+
+const statusCounts = {
+  all: campaigns?.length || 0,
+  active: campaigns?.filter(c => c.status === 'active').length || 0,
+  draft: campaigns?.filter(c => c.status === 'draft').length || 0,
+  paused: campaigns?.filter(c => c.status === 'paused').length || 0,
+  completed: campaigns?.filter(c => c.status === 'completed').length || 0,
+};
+
+function getCampaignStats(campaignId: string) {
+  const apps = applications?.filter(a => a.campaign_id === campaignId) || [];
+  const subs = submissions?.filter(s => s.campaign_id === campaignId) || [];
+  return {
+    totalApps: apps.length,
+    pendingApps: apps.filter(a => a.status === 'pending').length,
+    approvedApps: apps.filter(a => a.status === 'approved').length,
+    totalSubs: subs.length,
+    pendingSubs: subs.filter(s => s.status === 'pending').length,
+    approvedSubs: subs.filter(s => s.status === 'approved').length,
+  };
+}
+---
+
+<Layout title="My Campaigns">
+  <div class="campaigns-page">
+    <!-- Header -->
+    <div class="page-header">
+      <div class="header-content">
+        <div>
+          <a href="/manager" class="back-link">← Back to Dashboard</a>
+          <h1>My Campaigns</h1>
+          <p>Manage your creator campaigns</p>
+        </div>
+        <a href="/manager/campaigns/new" class="btn btn-primary">+ Create Campaign</a>
+      </div>
+    </div>
+
+    <div class="page-content">
+      <!-- Filter Tabs -->
+      <div class="filter-tabs">
+        <a href="?filter=all" class={`tab ${filter === 'all' ? 'active' : ''}`}>
+          All ({statusCounts.all})
+        </a>
+        <a href="?filter=active" class={`tab ${filter === 'active' ? 'active' : ''}`}>
+          Active ({statusCounts.active})
+        </a>
+        <a href="?filter=draft" class={`tab ${filter === 'draft' ? 'active' : ''}`}>
+          Draft ({statusCounts.draft})
+        </a>
+        <a href="?filter=paused" class={`tab ${filter === 'paused' ? 'active' : ''}`}>
+          Paused ({statusCounts.paused})
+        </a>
+        <a href="?filter=completed" class={`tab ${filter === 'completed' ? 'active' : ''}`}>
+          Completed ({statusCounts.completed})
+        </a>
+      </div>
+
+      <!-- Campaigns Grid -->
+      {filteredCampaigns.length > 0 ? (
+        <div class="campaigns-grid">
+          {filteredCampaigns.map(campaign => {
+            const stats = getCampaignStats(campaign.id);
+            const budgetUsed = campaign.budget > 0 
+              ? Math.round(((campaign.amount_spent || 0) / campaign.budget) * 100) 
+              : 0;
+            
+            return (
+              <div class="campaign-card">
+                <div class="campaign-header">
+                  <div class="campaign-title-row">
+                    <h3>{campaign.title}</h3>
+                    <span class={`status-badge ${campaign.status}`}>{campaign.status}</span>
+                  </div>
+                  <p class="campaign-description">
+                    {campaign.description?.substring(0, 100)}{campaign.description?.length > 100 ? '...' : ''}
+                  </p>
+                </div>
+
+                <div class="campaign-stats">
+                  <div class="stat">
+                    <span class="stat-value">{stats.totalApps}</span>
+                    <span class="stat-label">Applications</span>
+                    {stats.pendingApps > 0 && (
+                      <span class="stat-pending">{stats.pendingApps} pending</span>
+                    )}
+                  </div>
+                  <div class="stat">
+                    <span class="stat-value">{stats.totalSubs}</span>
+                    <span class="stat-label">Submissions</span>
+                    {stats.pendingSubs > 0 && (
+                      <span class="stat-pending">{stats.pendingSubs} pending</span>
+                    )}
+                  </div>
+                  <div class="stat">
+                    <span class="stat-value">{stats.approvedApps}</span>
+                    <span class="stat-label">Creators</span>
+                  </div>
+                </div>
+
+                <div class="campaign-budget">
+                  <div class="budget-header">
+                    <span>Budget</span>
+                    <span>${(campaign.amount_spent || 0).toLocaleString()} / ${campaign.budget?.toLocaleString() || 0}</span>
+                  </div>
+                  <div class="budget-bar">
+                    <div class="budget-fill" style={`width: ${Math.min(budgetUsed, 100)}%`}></div>
+                  </div>
+                  <span class="budget-percent">{budgetUsed}% used</span>
+                </div>
+
+                <div class="campaign-meta">
+                  <span>💰 ${campaign.payout_per_post || 0}/post</span>
+                  <span>📅 {new Date(campaign.created_at).toLocaleDateString()}</span>
+                </div>
+
+                <div class="campaign-actions">
+                  <a href={`/manager/campaigns/${campaign.id}`} class="btn btn-secondary">View Details</a>
+                  <a href={`/manager/campaigns/${campaign.id}/edit`} class="btn btn-outline">Edit</a>
+                  <a href={`/campaigns/${campaign.slug}`} target="_blank" class="btn btn-outline">Preview</a>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div class="empty-state">
+          <span class="empty-icon">📢</span>
+          <h2>No campaigns found</h2>
+          {filter === 'all' ? (
+            <>
+              <p>Create your first campaign to start connecting with creators.</p>
+              <a href="/manager/campaigns/new" class="btn btn-primary">Create Campaign</a>
+            </>
+          ) : (
+            <>
+              <p>No {filter} campaigns at the moment.</p>
+              <a href="?filter=all" class="btn btn-secondary">View All Campaigns</a>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  </div>
+
+  <style>
+    .campaigns-page {
+      min-height: 100vh;
+      background: #f8fafc;
+    }
+
+    .page-header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%);
+      padding: 2rem 0;
+    }
+
+    .header-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .back-link {
+      color: rgba(255,255,255,0.7);
+      text-decoration: none;
+      font-size: 0.875rem;
+      display: inline-block;
+      margin-bottom: 0.5rem;
+    }
+
+    .back-link:hover {
+      color: white;
+    }
+
+    .page-header h1 {
+      font-size: 1.75rem;
+      color: white;
+      margin: 0 0 0.25rem 0;
+    }
+
+    .page-header p {
+      color: rgba(255,255,255,0.7);
+      margin: 0;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.625rem 1rem;
+      border-radius: 8px;
+      font-weight: 500;
+      text-decoration: none;
+      font-size: 0.875rem;
+      transition: all 0.2s;
+      border: none;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    }
+
+    .btn-secondary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-outline {
+      background: white;
+      color: #374151;
+      border: 1px solid #e5e7eb;
+    }
+
+    .btn-outline:hover {
+      background: #f9fafb;
+    }
+
+    .page-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    .filter-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+
+    .tab {
+      padding: 0.5rem 1rem;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #6b7280;
+      font-size: 0.875rem;
+      transition: all 0.2s;
+    }
+
+    .tab:hover {
+      border-color: #2563eb;
+      color: #2563eb;
+    }
+
+    .tab.active {
+      background: #2563eb;
+      border-color: #2563eb;
+      color: white;
+    }
+
+    .campaigns-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .campaign-card {
+      background: white;
+      border-radius: 16px;
+      padding: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      transition: all 0.2s;
+    }
+
+    .campaign-card:hover {
+      box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+      transform: translateY(-2px);
+    }
+
+    .campaign-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .campaign-title-row h3 {
+      margin: 0;
+      font-size: 1.125rem;
+      color: #1a1a2e;
+    }
+
+    .status-badge {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.625rem;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.active { background: #d1fae5; color: #059669; }
+    .status-badge.draft { background: #f3f4f6; color: #6b7280; }
+    .status-badge.paused { background: #fef3c7; color: #d97706; }
+    .status-badge.completed { background: #dbeafe; color: #2563eb; }
+
+    .campaign-description {
+      margin: 0.5rem 0 0;
+      font-size: 0.875rem;
+      color: #6b7280;
+      line-height: 1.5;
+    }
+
+    .campaign-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      padding: 1rem;
+      background: #f9fafb;
+      border-radius: 12px;
+    }
+
+    .stat {
+      text-align: center;
+    }
+
+    .stat-value {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .stat-label {
+      display: block;
+      font-size: 0.75rem;
+      color: #6b7280;
+      margin-top: 0.125rem;
+    }
+
+    .stat-pending {
+      display: block;
+      font-size: 0.6875rem;
+      color: #f59e0b;
+      margin-top: 0.25rem;
+    }
+
+    .campaign-budget {
+      padding: 1rem;
+      background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
+      border-radius: 12px;
+    }
+
+    .budget-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8125rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .budget-bar {
+      height: 8px;
+      background: rgba(255,255,255,0.8);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .budget-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #2563eb, #3b82f6);
+      border-radius: 4px;
+    }
+
+    .budget-percent {
+      display: block;
+      font-size: 0.75rem;
+      color: #6b7280;
+      margin-top: 0.375rem;
+    }
+
+    .campaign-meta {
+      display: flex;
+      gap: 1.5rem;
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    .campaign-actions {
+      display: flex;
+      gap: 0.5rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .campaign-actions .btn {
+      flex: 1;
+      justify-content: center;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      background: white;
+      border-radius: 16px;
+    }
+
+    .empty-icon {
+      font-size: 4rem;
+      display: block;
+      margin-bottom: 1rem;
+    }
+
+    .empty-state h2 {
+      margin: 0 0 0.5rem 0;
+      color: #1a1a2e;
+    }
+
+    .empty-state p {
+      color: #6b7280;
+      margin: 0 0 1.5rem 0;
+    }
+
+    @media (max-width: 768px) {
+      .header-content {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+
+      .campaigns-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</Layout>
