@@ -58,9 +58,9 @@ try {
   if (data) announcements = data;
 } catch (e) {}
 
-// Load active campaigns - only for approved users or public preview
+// Load active campaigns
 let campaigns: any[] = [];
-const showCampaigns = !user || isApproved; // Show if not logged in (public preview) or approved
+const showCampaigns = !user || isApproved;
 if (showCampaigns) {
   const { data } = await supabase
     .from('campaigns')
@@ -71,786 +71,1593 @@ if (showCampaigns) {
   if (data) campaigns = data;
 }
 
-// Load communities
-let communities: any[] = [];
-const { data: communityData } = await supabase
-  .from('communities')
-  .select('id, name, slug, description')
-  .order('created_at', { ascending: false })
-  .limit(4);
-if (communityData) communities = communityData;
-
-// Load recent forum topics
-let forumTopics: any[] = [];
-try {
-  const { data: topicData } = await supabase
-    .from('forum_topics')
-    .select(`
-      id, title, content, created_at, reply_count, view_count,
-      author:profiles!forum_topics_user_id_fkey(full_name, avatar_url, is_premium, role)
-    `)
-    .order('last_reply_at', { ascending: false })
-    .limit(5);
-  if (topicData) forumTopics = topicData;
-} catch (e) { /* table may not exist */ }
-
 // Stats
 const { count: creatorCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'creator').eq('status', 'active');
 const { count: campaignCount } = await supabase.from('campaigns').select('*', { count: 'exact', head: true }).eq('status', 'active');
 ---
 
-<Layout>
-  {/* Announcements Bar */}
-  {announcements.length > 0 && (
-    <div class="announcements-bar">
-      <div class="announcements-container">
-        {announcements.map((a, i) => (
-          <div class="announcement" data-index={i} style={i > 0 ? 'display: none;' : ''}>
-            <span class="announcement-icon">📢</span>
-            <div class="announcement-content">
-              <strong>{a.subject}</strong>
-              {a.body && <span class="announcement-body">{a.body.substring(0, 100)}{a.body.length > 100 ? '...' : ''}</span>}
-            </div>
-          </div>
-        ))}
-        {announcements.length > 1 && (
-          <div class="announcement-nav">
-            <button class="nav-btn prev" aria-label="Previous">‹</button>
-            <span class="announcement-count"><span class="current">1</span> / {announcements.length}</span>
-            <button class="nav-btn next" aria-label="Next">›</button>
-          </div>
-        )}
-      </div>
-    </div>
-  )}
-
-  {/* Pending Account Notice */}
-  {isPending && (
-    <div class="pending-notice">
-      <div class="pending-content">
-        <span class="pending-icon">⏳</span>
-        <div>
-          <h3>Your account is pending approval</h3>
-          <p>We're reviewing your application. You'll receive an email once approved. In the meantime, feel free to explore!</p>
-        </div>
-      </div>
-    </div>
-  )}
-
-  {/* Hero Section */}
-  <section class="hero" style={`--primary: ${appearance.primaryColor}; --accent: ${appearance.accentColor};`}>
-    <div class="hero-content">
-      {content.hero?.badge && <span class="hero-badge">{content.hero.badge}</span>}
-      <h1>{content.hero?.title || general.tagline}</h1>
-      <p class="hero-desc">{content.hero?.subtitle || general.description}</p>
-      <div class="hero-buttons">
-        {user ? (
-          isApproved ? (
-            <a href="/dashboard" class="btn btn-primary">Go to Dashboard</a>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{general.siteName} - {general.tagline}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Galaxy Canvas -->
+  <canvas id="galaxy-canvas"></canvas>
+  
+  <!-- Main Content -->
+  <div class="page-wrapper">
+    <!-- Navigation -->
+    <nav class="main-nav">
+      <div class="nav-content">
+        <a href="/" class="nav-logo">
+          <span class="logo-icon">✦</span>
+          <span class="logo-text">{general.siteName}</span>
+        </a>
+        <div class="nav-links">
+          <a href="/campaigns">Campaigns</a>
+          <a href="/community">Community</a>
+          {user ? (
+            isApproved ? (
+              <a href="/dashboard" class="nav-btn">Dashboard</a>
+            ) : (
+              <span class="nav-btn pending">Pending</span>
+            )
           ) : (
-            <span class="btn btn-disabled">Awaiting Approval</span>
-          )
-        ) : (
-          <>
-            <a href={content.hero?.cta_primary?.link || "/signup"} class="btn btn-primary">
-              {content.hero?.cta_primary?.text || "Join as Creator"}
-            </a>
-            <a href={content.hero?.cta_secondary?.link || "/campaigns"} class="btn btn-secondary">
-              {content.hero?.cta_secondary?.text || "Browse Campaigns"}
-            </a>
-          </>
-        )}
-      </div>
-    </div>
-    
-    <div class="stats-container">
-      <div class="stat">
-        <span class="stat-value">{content.stats?.creators || `${creatorCount || 0}+`}</span>
-        <span class="stat-label">Creators</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value">{content.stats?.campaigns || campaignCount || 0}</span>
-        <span class="stat-label">Active Campaigns</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value">{content.stats?.paid_out || "$50k+"}</span>
-        <span class="stat-label">Paid Out</span>
-      </div>
-    </div>
-  </section>
-
-  {/* Active Campaigns Section */}
-  {showCampaigns && campaigns.length > 0 && (
-    <section class="section campaigns-section">
-      <div class="section-header">
-        <div>
-          <h2>🔥 Active Campaigns</h2>
-          <p>Join these campaigns and start earning</p>
+            <>
+              <a href="/login" class="nav-link-subtle">Sign In</a>
+              <a href="/signup" class="nav-btn">Join Now</a>
+            </>
+          )}
         </div>
-        {isApproved && <a href="/campaigns" class="btn btn-secondary">View All →</a>}
       </div>
-      
-      <div class="campaigns-grid">
-        {campaigns.map(campaign => (
-          <div class="campaign-card">
-            <div class="campaign-header">
-              <h3>{campaign.title}</h3>
-              <span class="campaign-badge">Active</span>
-            </div>
-            {campaign.description && (
-              <p class="campaign-desc">{campaign.description.substring(0, 100)}{campaign.description.length > 100 ? '...' : ''}</p>
-            )}
-            <div class="campaign-meta">
-              {campaign.payment_per_post && (
-                <span class="meta-item">💰 ${campaign.payment_per_post}/post</span>
-              )}
-              {campaign.deadline && (
-                <span class="meta-item">📅 {new Date(campaign.deadline).toLocaleDateString()}</span>
-              )}
-            </div>
-            <div class="campaign-footer">
-              {isApproved ? (
-                <a href={`/campaigns/${campaign.slug}`} class="btn btn-primary btn-sm">Apply Now</a>
-              ) : user ? (
-                <span class="btn btn-disabled btn-sm">Account Pending</span>
-              ) : (
-                <a href="/signup" class="btn btn-primary btn-sm">Join to Apply</a>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
+    </nav>
 
-      {!user && (
-        <div class="login-prompt">
-          <p>🔐 <a href="/signup">Create an account</a> to apply for campaigns and start earning.</p>
-        </div>
-      )}
-    </section>
-  )}
-
-  {/* Community Forum Section */}
-  <section class="section forum-section">
-    <div class="section-header">
-      <div>
-        <h2>💬 Community Forum</h2>
-        <p>Connect, share tips, and grow with fellow creators</p>
-      </div>
-      <a href="/forum" class="btn btn-secondary">View All Discussions →</a>
-    </div>
-    
-    <div class="forum-preview">
-      {forumTopics.length > 0 ? (
-        <div class="forum-topics-list">
-          {forumTopics.map(topic => (
-            <a href={`/forum/topic/${topic.id}`} class="forum-topic-card">
-              <div class="topic-avatar">
-                {topic.author?.avatar_url ? (
-                  <img src={topic.author.avatar_url} alt="" />
-                ) : (
-                  <span>{(topic.author?.full_name || '?').charAt(0).toUpperCase()}</span>
-                )}
-              </div>
-              <div class="topic-content">
-                <h4>{topic.title}</h4>
-                <p>{topic.content.substring(0, 100)}{topic.content.length > 100 ? '...' : ''}</p>
-                <div class="topic-meta">
-                  <span class="topic-author">
-                    {topic.author?.full_name || 'Anonymous'}
-                    {topic.author?.is_premium && <span class="premium-star">⭐</span>}
-                    {topic.author?.role === 'admin' && <span class="admin-badge">Admin</span>}
-                  </span>
-                  <span class="topic-stats">
-                    💬 {topic.reply_count || 0} replies • 👁️ {topic.view_count || 0} views
-                  </span>
-                </div>
-              </div>
-            </a>
+    <!-- Announcements -->
+    {announcements.length > 0 && (
+      <div class="announcements-ticker">
+        <div class="ticker-content">
+          <span class="ticker-icon">◆</span>
+          {announcements.map((a, i) => (
+            <span class="ticker-item" data-index={i}>{a.subject}</span>
           ))}
         </div>
-      ) : (
-        <div class="forum-empty">
-          <span>💬</span>
-          <h4>No discussions yet</h4>
-          <p>Be the first to start a conversation!</p>
+      </div>
+    )}
+
+    <!-- Pending Notice -->
+    {isPending && (
+      <div class="pending-banner">
+        <span class="pending-icon">◇</span>
+        <span>Your application is under review. We'll notify you soon.</span>
+      </div>
+    )}
+
+    <!-- Hero Section -->
+    <section class="hero-section" id="hero">
+      <div class="hero-inner">
+        <div class="hero-badge">
+          <span class="badge-dot"></span>
+          <span>The Future of UGC</span>
         </div>
-      )}
+        
+        <h1 class="hero-title">
+          <span class="title-line">Create Content</span>
+          <span class="title-line accent">That Matters</span>
+        </h1>
+        
+        <p class="hero-subtitle">
+          Join the next generation of creators. Collaborate with brands. 
+          Build your legacy in the creator economy.
+        </p>
 
-      <div class="forum-cta">
-        {user ? (
-          <a href="/forum" class="btn btn-primary">Join the Discussion</a>
-        ) : (
-          <>
-            <p>Sign in to post and engage with the community</p>
-            <a href="/signup" class="btn btn-primary">Create Account</a>
-          </>
-        )}
-      </div>
-    </div>
-  </section>
+        <div class="hero-cta">
+          {user ? (
+            isApproved ? (
+              <a href="/dashboard" class="cta-primary">
+                <span>Enter Dashboard</span>
+                <span class="cta-arrow">→</span>
+              </a>
+            ) : (
+              <span class="cta-pending">Application Pending</span>
+            )
+          ) : (
+            <>
+              <a href="/signup" class="cta-primary">
+                <span>Start Creating</span>
+                <span class="cta-arrow">→</span>
+              </a>
+              <a href="/campaigns" class="cta-secondary">
+                <span>Explore Campaigns</span>
+              </a>
+            </>
+          )}
+        </div>
 
-  {/* How It Works */}
-  <section class="section how-it-works">
-    <h2>How {general.siteName} Works</h2>
-    <div class="features-grid">
-      <div class="feature">
-        <div class="feature-icon">1</div>
-        <h3>Join the Waitlist</h3>
-        <p>Sign up and get approved to access exclusive campaigns.</p>
+        <!-- Stats -->
+        <div class="hero-stats">
+          <div class="stat-item">
+            <span class="stat-number">{creatorCount || 0}+</span>
+            <span class="stat-label">Creators</span>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat-item">
+            <span class="stat-number">{campaignCount || 0}</span>
+            <span class="stat-label">Live Campaigns</span>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat-item">
+            <span class="stat-number">$50k+</span>
+            <span class="stat-label">Paid to Creators</span>
+          </div>
+        </div>
       </div>
-      <div class="feature">
-        <div class="feature-icon">2</div>
-        <h3>Browse Campaigns</h3>
-        <p>Find brands looking for authentic content creators like you.</p>
-      </div>
-      <div class="feature">
-        <div class="feature-icon">3</div>
-        <h3>Create & Submit</h3>
-        <p>Create engaging UGC content and submit for review.</p>
-      </div>
-      <div class="feature">
-        <div class="feature-icon">4</div>
-        <h3>Get Paid</h3>
-        <p>Receive payment directly to your account upon approval.</p>
-      </div>
-    </div>
-  </section>
 
-  {/* CTA Section */}
-  {!user && (
-    <section class="cta-section" style={`background: linear-gradient(135deg, ${appearance.primaryColor}, ${appearance.accentColor});`}>
-      <h2>Ready to Start Creating?</h2>
-      <p>Join our waitlist and be among the first to access new campaigns.</p>
-      <a href="/signup" class="btn btn-white">Join the Waitlist</a>
+      <div class="scroll-indicator">
+        <span class="scroll-text">Scroll to explore</span>
+        <div class="scroll-line"></div>
+      </div>
     </section>
-  )}
+
+    <!-- Campaigns Section -->
+    {showCampaigns && campaigns.length > 0 && (
+      <section class="campaigns-section" id="campaigns">
+        <div class="section-container">
+          <div class="section-header">
+            <div class="header-label">
+              <span class="label-line"></span>
+              <span>Active Opportunities</span>
+            </div>
+            <h2 class="section-title">Live Campaigns</h2>
+            <p class="section-desc">Premium brand collaborations waiting for creators like you</p>
+          </div>
+
+          <div class="campaigns-grid">
+            {campaigns.map((campaign, index) => (
+              <article class="campaign-card" style={`--delay: ${index * 0.1}s`}>
+                <div class="card-glow"></div>
+                <div class="card-content">
+                  <div class="card-header">
+                    <span class="card-status">● Active</span>
+                    {campaign.payment_per_post && (
+                      <span class="card-payout">${campaign.payment_per_post}</span>
+                    )}
+                  </div>
+                  
+                  <h3 class="card-title">{campaign.title}</h3>
+                  
+                  {campaign.description && (
+                    <p class="card-desc">{campaign.description.substring(0, 120)}{campaign.description.length > 120 ? '...' : ''}</p>
+                  )}
+
+                  <div class="card-meta">
+                    {campaign.deadline && (
+                      <span class="meta-item">
+                        <span class="meta-icon">◇</span>
+                        <span>Ends {new Date(campaign.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                      </span>
+                    )}
+                  </div>
+
+                  <div class="card-footer">
+                    {isApproved ? (
+                      <a href={`/campaigns/${campaign.slug}`} class="card-btn">
+                        <span>Apply Now</span>
+                        <span class="btn-arrow">→</span>
+                      </a>
+                    ) : user ? (
+                      <span class="card-btn disabled">Pending Approval</span>
+                    ) : (
+                      <a href="/signup" class="card-btn">
+                        <span>Join to Apply</span>
+                        <span class="btn-arrow">→</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+
+          {isApproved && (
+            <div class="section-footer">
+              <a href="/campaigns" class="view-all-btn">
+                <span>View All Campaigns</span>
+                <span class="btn-icon">→</span>
+              </a>
+            </div>
+          )}
+        </div>
+      </section>
+    )}
+
+    <!-- How It Works -->
+    <section class="process-section" id="process">
+      <div class="section-container">
+        <div class="section-header center">
+          <div class="header-label">
+            <span class="label-line"></span>
+            <span>The Process</span>
+            <span class="label-line"></span>
+          </div>
+          <h2 class="section-title">How It Works</h2>
+        </div>
+
+        <div class="process-timeline">
+          <div class="timeline-line"></div>
+          
+          <div class="process-step" data-step="01">
+            <div class="step-marker">
+              <span class="marker-number">01</span>
+              <span class="marker-dot"></span>
+            </div>
+            <div class="step-content">
+              <h3>Apply & Get Verified</h3>
+              <p>Submit your application and let us verify your creator profile. Quality creators get priority access.</p>
+            </div>
+          </div>
+
+          <div class="process-step" data-step="02">
+            <div class="step-marker">
+              <span class="marker-number">02</span>
+              <span class="marker-dot"></span>
+            </div>
+            <div class="step-content">
+              <h3>Discover Campaigns</h3>
+              <p>Browse curated brand collaborations that match your niche, audience, and content style.</p>
+            </div>
+          </div>
+
+          <div class="process-step" data-step="03">
+            <div class="step-marker">
+              <span class="marker-number">03</span>
+              <span class="marker-dot"></span>
+            </div>
+            <div class="step-content">
+              <h3>Create & Submit</h3>
+              <p>Produce authentic content that resonates. Submit for brand review and approval.</p>
+            </div>
+          </div>
+
+          <div class="process-step" data-step="04">
+            <div class="step-marker">
+              <span class="marker-number">04</span>
+              <span class="marker-dot"></span>
+            </div>
+            <div class="step-content">
+              <h3>Get Paid Fast</h3>
+              <p>Receive payment directly to your account. No delays, no hassle.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA Section -->
+    {!user && (
+      <section class="cta-section" id="cta">
+        <div class="cta-container">
+          <div class="cta-bg-orb"></div>
+          <div class="cta-content">
+            <h2>Ready to Launch<br/>Your Creator Journey?</h2>
+            <p>Join thousands of creators building their future with {general.siteName}</p>
+            <a href="/signup" class="cta-main-btn">
+              <span>Get Started Free</span>
+              <span class="cta-btn-icon">✦</span>
+            </a>
+          </div>
+        </div>
+      </section>
+    )}
+
+    <!-- Footer -->
+    <footer class="main-footer">
+      <div class="footer-content">
+        <div class="footer-brand">
+          <span class="footer-logo">✦ {general.siteName}</span>
+          <p>The premier platform for UGC creators</p>
+        </div>
+        <div class="footer-links">
+          <a href="/campaigns">Campaigns</a>
+          <a href="/community">Community</a>
+          <a href="/login">Sign In</a>
+        </div>
+        <div class="footer-copy">
+          <span>© 2024 {general.siteName}. All rights reserved.</span>
+        </div>
+      </div>
+    </footer>
+  </div>
 
   <style>
-    .hero {
-      background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-      padding: 5rem 2rem 4rem;
-      text-align: center;
-    }
-    
-    .hero-content {
-      max-width: 700px;
-      margin: 0 auto;
-    }
-
-    .hero-badge {
-      display: inline-block;
-      background: linear-gradient(135deg, var(--primary), var(--accent));
-      color: white;
-      padding: 0.5rem 1.25rem;
-      border-radius: 100px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      margin-bottom: 1.5rem;
-    }
-    
-    .hero h1 {
-      font-size: 3rem;
-      color: #1a1a2e;
-      margin-bottom: 1rem;
-      line-height: 1.2;
-    }
-    
-    .hero-desc {
-      font-size: 1.25rem;
-      color: #64748b;
-      margin-bottom: 2rem;
-    }
-    
-    .hero-buttons {
-      display: flex;
-      gap: 1rem;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    
-    .btn {
-      padding: 0.875rem 2rem;
-      border-radius: 10px;
-      font-weight: 600;
-      font-size: 1rem;
-      text-decoration: none;
-      transition: all 0.2s;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      border: none;
-      cursor: pointer;
-    }
-    
-    .btn-primary { background: var(--primary, #2563eb); color: white; }
-    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
-    .btn-secondary { background: white; color: #374151; border: 2px solid #e5e7eb; }
-    .btn-secondary:hover { border-color: #d1d5db; background: #f9fafb; }
-    .btn-white { background: white; color: #1a1a2e; }
-    .btn-white:hover { transform: translateY(-2px); }
-    .btn-disabled { background: #e5e7eb; color: #9ca3af; cursor: not-allowed; }
-    .btn-sm { padding: 0.5rem 1rem; font-size: 0.875rem; }
-    
-    .stats-container {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 2rem;
-      max-width: 600px;
-      margin: 3rem auto 0;
-    }
-    
-    .stat {
-      text-align: center;
-    }
-    
-    .stat-value {
-      display: block;
-      font-size: 2rem;
-      font-weight: 700;
-      color: var(--primary, #2563eb);
-    }
-    
-    .stat-label {
-      font-size: 0.875rem;
-      color: #64748b;
+    /* ============================================
+       COSMIC FOUNDATIONS
+       ============================================ */
+    :root {
+      --void: #030308;
+      --nebula: #0a0a1a;
+      --stardust: #1a1a2e;
+      --cosmic-blue: #4f8bff;
+      --cosmic-purple: #a855f7;
+      --cosmic-pink: #ec4899;
+      --cosmic-cyan: #22d3ee;
+      --star-white: #f8fafc;
+      --star-dim: #94a3b8;
+      --glow-blue: rgba(79, 139, 255, 0.5);
+      --glow-purple: rgba(168, 85, 247, 0.5);
+      
+      --font-display: 'Syne', sans-serif;
+      --font-mono: 'Space Mono', monospace;
     }
 
-    /* Sections */
-    .section {
-      padding: 4rem 2rem;
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-    
-    .section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 2rem;
-    }
-    
-    .section-header h2 {
-      font-size: 1.75rem;
-      color: #1a1a2e;
-      margin-bottom: 0.25rem;
-    }
-    
-    .section-header p {
-      color: #64748b;
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
     }
 
-    /* Campaigns */
-    .campaigns-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-      gap: 1.5rem;
-    }
-    
-    .campaign-card {
-      background: white;
-      border-radius: 16px;
-      padding: 1.5rem;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      display: flex;
-      flex-direction: column;
-    }
-    
-    .campaign-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 0.75rem;
-    }
-    
-    .campaign-header h3 {
-      font-size: 1.125rem;
-      color: #1a1a2e;
-    }
-    
-    .campaign-badge {
-      font-size: 0.6875rem;
-      padding: 0.25rem 0.5rem;
-      background: #d1fae5;
-      color: #059669;
-      border-radius: 6px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-    
-    .campaign-desc {
-      font-size: 0.9375rem;
-      color: #64748b;
-      margin-bottom: 1rem;
-      flex: 1;
-    }
-    
-    .campaign-meta {
-      display: flex;
-      gap: 1rem;
-      font-size: 0.8125rem;
-      color: #64748b;
-      margin-bottom: 1rem;
-    }
-    
-    .campaign-footer {
-      border-top: 1px solid #f0f0f0;
-      padding-top: 1rem;
+    html {
+      scroll-behavior: smooth;
     }
 
-    /* Forum Section */
-    .forum-section {
-      background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+    body {
+      font-family: var(--font-display);
+      background: var(--void);
+      color: var(--star-white);
+      overflow-x: hidden;
+      line-height: 1.6;
     }
 
-    .forum-preview {
-      background: white;
-      border-radius: 16px;
-      overflow: hidden;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    }
-
-    .forum-topics-list {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .forum-topic-card {
-      display: flex;
-      gap: 1rem;
-      padding: 1.25rem 1.5rem;
-      text-decoration: none;
-      border-bottom: 1px solid #e5e7eb;
-      transition: all 0.2s;
-    }
-
-    .forum-topic-card:hover {
-      background: #f9fafb;
-    }
-
-    .forum-topic-card:last-child {
-      border-bottom: none;
-    }
-
-    .topic-avatar {
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
-      background: #e5e7eb;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 600;
-      color: #6b7280;
-      flex-shrink: 0;
-      overflow: hidden;
-    }
-
-    .topic-avatar img {
+    /* Galaxy Canvas */
+    #galaxy-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      z-index: 0;
+      pointer-events: none;
     }
 
-    .topic-content {
-      flex: 1;
-      min-width: 0;
+    .page-wrapper {
+      position: relative;
+      z-index: 1;
     }
 
-    .topic-content h4 {
-      font-size: 1rem;
-      color: #1a1a2e;
-      margin-bottom: 0.375rem;
-      font-weight: 600;
+    /* ============================================
+       NAVIGATION
+       ============================================ */
+    .main-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      padding: 1.25rem 2rem;
+      background: linear-gradient(180deg, rgba(3, 3, 8, 0.9) 0%, transparent 100%);
+      backdrop-filter: blur(20px);
     }
 
-    .topic-content p {
-      font-size: 0.875rem;
-      color: #6b7280;
-      margin-bottom: 0.5rem;
-      line-height: 1.5;
-    }
-
-    .topic-meta {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      font-size: 0.75rem;
-    }
-
-    .topic-author {
-      color: #374151;
-      font-weight: 500;
-      display: flex;
-      align-items: center;
-      gap: 0.25rem;
-    }
-
-    .premium-star {
-      color: #f59e0b;
-    }
-
-    .admin-badge {
-      background: #fef3c7;
-      color: #92400e;
-      padding: 0.125rem 0.375rem;
-      border-radius: 4px;
-      font-size: 0.625rem;
-      font-weight: 600;
-    }
-
-    .topic-stats {
-      color: #9ca3af;
-    }
-
-    .forum-empty {
-      text-align: center;
-      padding: 3rem 2rem;
-    }
-
-    .forum-empty span {
-      font-size: 2.5rem;
-      display: block;
-      margin-bottom: 0.75rem;
-    }
-
-    .forum-empty h4 {
-      color: #1a1a2e;
-      margin-bottom: 0.25rem;
-    }
-
-    .forum-empty p {
-      color: #6b7280;
-    }
-
-    .forum-cta {
-      padding: 1.5rem;
-      background: linear-gradient(135deg, #dbeafe, #ede9fe);
-      text-align: center;
-    }
-
-    .forum-cta p {
-      color: #4b5563;
-      margin-bottom: 0.75rem;
-      font-size: 0.9375rem;
-    }
-
-    /* Login Prompt */
-    .login-prompt {
-      margin-top: 2rem;
-      padding: 1rem;
-      background: #f8fafc;
-      border-radius: 10px;
-      text-align: center;
-    }
-    
-    .login-prompt p {
-      color: #64748b;
-      margin: 0;
-    }
-    
-    .login-prompt a {
-      color: var(--primary, #2563eb);
-      font-weight: 600;
-    }
-
-    /* How It Works */
-    .how-it-works {
-      background: #f8fafc;
-      text-align: center;
-    }
-    
-    .how-it-works h2 {
-      font-size: 1.75rem;
-      color: #1a1a2e;
-      margin-bottom: 3rem;
-    }
-    
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 2rem;
-      max-width: 1000px;
-      margin: 0 auto;
-    }
-    
-    .feature {
-      text-align: center;
-    }
-    
-    .feature-icon {
-      width: 56px;
-      height: 56px;
-      background: linear-gradient(135deg, var(--primary, #2563eb), var(--accent, #059669));
-      color: white;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.5rem;
-      font-weight: 700;
-      margin: 0 auto 1rem;
-    }
-    
-    .feature h3 {
-      font-size: 1rem;
-      color: #1a1a2e;
-      margin-bottom: 0.5rem;
-    }
-    
-    .feature p {
-      font-size: 0.875rem;
-      color: #64748b;
-    }
-
-    /* CTA Section */
-    .cta-section {
-      text-align: center;
-      padding: 4rem 2rem;
-      color: white;
-    }
-    
-    .cta-section h2 {
-      font-size: 2rem;
-      margin-bottom: 0.5rem;
-    }
-    
-    .cta-section p {
-      opacity: 0.9;
-      margin-bottom: 1.5rem;
-    }
-
-    /* Pending Notice */
-    .pending-notice {
-      background: #fef3c7;
-      border-bottom: 2px solid #f59e0b;
-    }
-    
-    .pending-content {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 1rem 2rem;
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-    
-    .pending-icon {
-      font-size: 2rem;
-    }
-    
-    .pending-notice h3 {
-      color: #92400e;
-      font-size: 1rem;
-      margin-bottom: 0.25rem;
-    }
-    
-    .pending-notice p {
-      color: #78350f;
-      font-size: 0.875rem;
-      margin: 0;
-    }
-
-    /* Announcements Bar */
-    .announcements-bar {
-      background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-      color: white;
-      padding: 0.75rem 1rem;
-    }
-    
-    .announcements-container {
-      max-width: 1200px;
+    .nav-content {
+      max-width: 1400px;
       margin: 0 auto;
       display: flex;
+      justify-content: space-between;
       align-items: center;
-      justify-content: center;
-      gap: 1rem;
     }
-    
-    .announcement {
+
+    .nav-logo {
       display: flex;
       align-items: center;
       gap: 0.75rem;
-      text-align: center;
-      flex: 1;
-      justify-content: center;
+      text-decoration: none;
+      color: var(--star-white);
     }
-    
-    .announcement-icon { font-size: 1.25rem; }
-    
-    .announcement-content {
+
+    .logo-icon {
+      font-size: 1.5rem;
+      color: var(--cosmic-blue);
+      animation: pulse-glow 3s ease-in-out infinite;
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% { text-shadow: 0 0 20px var(--glow-blue); }
+      50% { text-shadow: 0 0 40px var(--glow-blue), 0 0 60px var(--glow-purple); }
+    }
+
+    .logo-text {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .nav-links {
       display: flex;
+      align-items: center;
+      gap: 2rem;
+    }
+
+    .nav-links a:not(.nav-btn) {
+      color: var(--star-dim);
+      text-decoration: none;
+      font-size: 0.9375rem;
+      font-weight: 500;
+      transition: color 0.3s;
+    }
+
+    .nav-links a:not(.nav-btn):hover {
+      color: var(--star-white);
+    }
+
+    .nav-link-subtle {
+      color: var(--star-dim) !important;
+    }
+
+    .nav-btn {
+      padding: 0.625rem 1.5rem;
+      background: linear-gradient(135deg, var(--cosmic-blue), var(--cosmic-purple));
+      border-radius: 100px;
+      color: white !important;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.875rem;
+      transition: all 0.3s;
+    }
+
+    .nav-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 40px var(--glow-blue);
+    }
+
+    .nav-btn.pending {
+      background: var(--stardust);
+      color: var(--star-dim) !important;
+      cursor: default;
+    }
+
+    /* ============================================
+       ANNOUNCEMENTS
+       ============================================ */
+    .announcements-ticker {
+      position: fixed;
+      top: 70px;
+      left: 0;
+      right: 0;
+      z-index: 999;
+      padding: 0.5rem 0;
+      background: linear-gradient(90deg, var(--cosmic-purple), var(--cosmic-blue));
+      overflow: hidden;
+    }
+
+    .ticker-content {
+      display: flex;
+      align-items: center;
+      gap: 3rem;
+      animation: ticker-scroll 30s linear infinite;
+      white-space: nowrap;
+    }
+
+    @keyframes ticker-scroll {
+      0% { transform: translateX(100%); }
+      100% { transform: translateX(-100%); }
+    }
+
+    .ticker-icon {
+      color: white;
+      font-size: 0.75rem;
+    }
+
+    .ticker-item {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: white;
+    }
+
+    /* Pending Banner */
+    .pending-banner {
+      position: fixed;
+      top: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 998;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1.5rem;
+      background: rgba(251, 191, 36, 0.1);
+      border: 1px solid rgba(251, 191, 36, 0.3);
+      border-radius: 100px;
+      backdrop-filter: blur(10px);
+    }
+
+    .pending-icon {
+      color: #fbbf24;
+    }
+
+    .pending-banner span:last-child {
+      font-size: 0.875rem;
+      color: #fbbf24;
+    }
+
+    /* ============================================
+       HERO SECTION
+       ============================================ */
+    .hero-section {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 8rem 2rem 4rem;
+      position: relative;
+    }
+
+    .hero-inner {
+      max-width: 900px;
+      text-align: center;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.5rem 1.25rem;
+      background: rgba(79, 139, 255, 0.1);
+      border: 1px solid rgba(79, 139, 255, 0.3);
+      border-radius: 100px;
+      margin-bottom: 2rem;
+      animation: fade-in-up 1s ease-out;
+    }
+
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--cosmic-blue);
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.5); opacity: 0.5; }
+    }
+
+    .hero-badge span:last-child {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--cosmic-blue);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .hero-title {
+      font-size: clamp(3rem, 10vw, 6rem);
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      margin-bottom: 1.5rem;
+    }
+
+    .title-line {
+      display: block;
+      animation: fade-in-up 1s ease-out;
+    }
+
+    .title-line:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .title-line.accent {
+      background: linear-gradient(135deg, var(--cosmic-blue), var(--cosmic-purple), var(--cosmic-pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    @keyframes fade-in-up {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .hero-subtitle {
+      font-size: 1.25rem;
+      color: var(--star-dim);
+      max-width: 600px;
+      margin: 0 auto 2.5rem;
+      animation: fade-in-up 1s ease-out 0.4s backwards;
+    }
+
+    .hero-cta {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
       flex-wrap: wrap;
+      margin-bottom: 4rem;
+      animation: fade-in-up 1s ease-out 0.6s backwards;
+    }
+
+    .cta-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1rem 2rem;
+      background: linear-gradient(135deg, var(--cosmic-blue), var(--cosmic-purple));
+      border-radius: 100px;
+      color: white;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 1rem;
+      transition: all 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cta-primary::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, var(--cosmic-purple), var(--cosmic-pink));
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .cta-primary:hover::before {
+      opacity: 1;
+    }
+
+    .cta-primary span {
+      position: relative;
+      z-index: 1;
+    }
+
+    .cta-primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 20px 60px var(--glow-purple);
+    }
+
+    .cta-arrow {
+      transition: transform 0.3s;
+    }
+
+    .cta-primary:hover .cta-arrow {
+      transform: translateX(4px);
+    }
+
+    .cta-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 1rem 2rem;
+      background: transparent;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-radius: 100px;
+      color: var(--star-white);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 1rem;
+      transition: all 0.3s;
+    }
+
+    .cta-secondary:hover {
+      border-color: var(--cosmic-blue);
+      background: rgba(79, 139, 255, 0.1);
+    }
+
+    .cta-pending {
+      padding: 1rem 2rem;
+      background: var(--stardust);
+      border-radius: 100px;
+      color: var(--star-dim);
+      font-weight: 600;
+    }
+
+    /* Hero Stats */
+    .hero-stats {
+      display: flex;
       align-items: center;
       justify-content: center;
+      gap: 3rem;
+      animation: fade-in-up 1s ease-out 0.8s backwards;
+    }
+
+    .stat-item {
+      text-align: center;
+    }
+
+    .stat-number {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--star-white);
+      letter-spacing: -0.02em;
+    }
+
+    .stat-label {
+      font-size: 0.8125rem;
+      color: var(--star-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .stat-divider {
+      width: 1px;
+      height: 40px;
+      background: linear-gradient(180deg, transparent, rgba(255,255,255,0.2), transparent);
+    }
+
+    /* Scroll Indicator */
+    .scroll-indicator {
+      position: absolute;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.75rem;
+      animation: fade-in 1s ease-out 1.2s backwards;
+    }
+
+    .scroll-text {
+      font-size: 0.75rem;
+      color: var(--star-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+    }
+
+    .scroll-line {
+      width: 1px;
+      height: 60px;
+      background: linear-gradient(180deg, var(--cosmic-blue), transparent);
+      animation: scroll-pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes scroll-pulse {
+      0%, 100% { transform: scaleY(1); opacity: 1; }
+      50% { transform: scaleY(0.5); opacity: 0.5; }
+    }
+
+    @keyframes fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    /* ============================================
+       CAMPAIGNS SECTION
+       ============================================ */
+    .campaigns-section {
+      padding: 8rem 2rem;
+      position: relative;
+    }
+
+    .section-container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .section-header {
+      margin-bottom: 4rem;
+    }
+
+    .section-header.center {
+      text-align: center;
+    }
+
+    .header-label {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .section-header.center .header-label {
+      justify-content: center;
+    }
+
+    .label-line {
+      width: 30px;
+      height: 1px;
+      background: var(--cosmic-blue);
+    }
+
+    .header-label span:not(.label-line) {
+      font-size: 0.8125rem;
+      color: var(--cosmic-blue);
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      font-weight: 600;
+    }
+
+    .section-title {
+      font-size: clamp(2rem, 5vw, 3rem);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.75rem;
+    }
+
+    .section-desc {
+      font-size: 1.125rem;
+      color: var(--star-dim);
+    }
+
+    /* Campaign Cards */
+    .campaigns-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .campaign-card {
+      position: relative;
+      background: linear-gradient(135deg, rgba(26, 26, 46, 0.8), rgba(10, 10, 26, 0.8));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 24px;
+      overflow: hidden;
+      animation: card-in 0.8s ease-out var(--delay) backwards;
+      transition: all 0.4s;
+    }
+
+    @keyframes card-in {
+      from {
+        opacity: 0;
+        transform: translateY(40px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .campaign-card:hover {
+      transform: translateY(-8px);
+      border-color: rgba(79, 139, 255, 0.3);
+    }
+
+    .card-glow {
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle, var(--glow-blue) 0%, transparent 70%);
+      opacity: 0;
+      transition: opacity 0.4s;
+      pointer-events: none;
+    }
+
+    .campaign-card:hover .card-glow {
+      opacity: 0.1;
+    }
+
+    .card-content {
+      position: relative;
+      padding: 1.75rem;
+      z-index: 1;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .card-status {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #10b981;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .card-payout {
+      font-family: var(--font-mono);
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--cosmic-cyan);
+    }
+
+    .card-title {
+      font-size: 1.375rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+      line-height: 1.3;
+    }
+
+    .card-desc {
+      font-size: 0.9375rem;
+      color: var(--star-dim);
+      line-height: 1.6;
+      margin-bottom: 1rem;
+    }
+
+    .card-meta {
+      margin-bottom: 1.5rem;
+    }
+
+    .meta-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.8125rem;
+      color: var(--star-dim);
+    }
+
+    .meta-icon {
+      color: var(--cosmic-purple);
+      font-size: 0.625rem;
+    }
+
+    .card-footer {
+      padding-top: 1.25rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .card-btn {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: 0.875rem 1.25rem;
+      background: linear-gradient(135deg, rgba(79, 139, 255, 0.2), rgba(168, 85, 247, 0.2));
+      border: 1px solid rgba(79, 139, 255, 0.3);
+      border-radius: 12px;
+      color: var(--star-white);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.9375rem;
+      transition: all 0.3s;
+    }
+
+    .card-btn:hover {
+      background: linear-gradient(135deg, var(--cosmic-blue), var(--cosmic-purple));
+      border-color: transparent;
+    }
+
+    .card-btn.disabled {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.1);
+      color: var(--star-dim);
+      cursor: default;
+    }
+
+    .btn-arrow {
+      transition: transform 0.3s;
+    }
+
+    .card-btn:hover .btn-arrow {
+      transform: translateX(4px);
+    }
+
+    /* Section Footer */
+    .section-footer {
+      margin-top: 3rem;
+      text-align: center;
+    }
+
+    .view-all-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.875rem 2rem;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-radius: 100px;
+      color: var(--star-white);
+      text-decoration: none;
+      font-weight: 600;
+      transition: all 0.3s;
+    }
+
+    .view-all-btn:hover {
+      border-color: var(--cosmic-blue);
+      background: rgba(79, 139, 255, 0.1);
+    }
+
+    /* ============================================
+       PROCESS SECTION
+       ============================================ */
+    .process-section {
+      padding: 8rem 2rem;
+      background: linear-gradient(180deg, transparent, rgba(79, 139, 255, 0.03), transparent);
+    }
+
+    .process-timeline {
+      position: relative;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .timeline-line {
+      position: absolute;
+      left: 28px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(180deg, var(--cosmic-blue), var(--cosmic-purple), var(--cosmic-pink), var(--cosmic-cyan));
+    }
+
+    .process-step {
+      position: relative;
+      display: flex;
+      gap: 2rem;
+      padding: 2rem 0;
+    }
+
+    .step-marker {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
       gap: 0.5rem;
     }
-    
-    .announcement-body { opacity: 0.9; font-size: 0.9375rem; }
-    
-    .announcement-nav { display: flex; align-items: center; gap: 0.5rem; }
-    
-    .nav-btn {
-      background: rgba(255,255,255,0.2);
-      border: none;
-      color: white;
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      cursor: pointer;
-      font-size: 1.25rem;
-    }
-    
-    .nav-btn:hover { background: rgba(255,255,255,0.3); }
-    
-    .announcement-count { font-size: 0.8125rem; opacity: 0.9; }
 
-    /* Responsive */
+    .marker-number {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--cosmic-blue);
+      letter-spacing: 0.1em;
+    }
+
+    .marker-dot {
+      width: 16px;
+      height: 16px;
+      background: var(--void);
+      border: 3px solid var(--cosmic-blue);
+      border-radius: 50%;
+      transition: all 0.3s;
+    }
+
+    .process-step:nth-child(3) .marker-dot { border-color: var(--cosmic-purple); }
+    .process-step:nth-child(4) .marker-dot { border-color: var(--cosmic-pink); }
+    .process-step:nth-child(5) .marker-dot { border-color: var(--cosmic-cyan); }
+
+    .process-step:hover .marker-dot {
+      background: currentColor;
+      transform: scale(1.3);
+    }
+
+    .step-content {
+      flex: 1;
+      padding-top: 0.25rem;
+    }
+
+    .step-content h3 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .step-content p {
+      color: var(--star-dim);
+      line-height: 1.7;
+    }
+
+    /* ============================================
+       CTA SECTION
+       ============================================ */
+    .cta-section {
+      padding: 8rem 2rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cta-container {
+      position: relative;
+      max-width: 800px;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .cta-bg-orb {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, var(--glow-purple) 0%, var(--glow-blue) 30%, transparent 70%);
+      opacity: 0.3;
+      filter: blur(80px);
+      pointer-events: none;
+    }
+
+    .cta-content {
+      position: relative;
+      z-index: 1;
+    }
+
+    .cta-content h2 {
+      font-size: clamp(2rem, 6vw, 3.5rem);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      margin-bottom: 1.5rem;
+    }
+
+    .cta-content p {
+      font-size: 1.125rem;
+      color: var(--star-dim);
+      margin-bottom: 2.5rem;
+    }
+
+    .cta-main-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1.25rem 3rem;
+      background: linear-gradient(135deg, var(--cosmic-blue), var(--cosmic-purple));
+      border-radius: 100px;
+      color: white;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 1.125rem;
+      transition: all 0.4s;
+    }
+
+    .cta-main-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 30px 80px var(--glow-purple);
+    }
+
+    .cta-btn-icon {
+      font-size: 1.25rem;
+      animation: spin 4s linear infinite;
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    /* ============================================
+       FOOTER
+       ============================================ */
+    .main-footer {
+      padding: 4rem 2rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .footer-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 2rem;
+    }
+
+    .footer-logo {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--star-white);
+    }
+
+    .footer-brand p {
+      margin-top: 0.5rem;
+      font-size: 0.875rem;
+      color: var(--star-dim);
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 2rem;
+    }
+
+    .footer-links a {
+      color: var(--star-dim);
+      text-decoration: none;
+      font-size: 0.9375rem;
+      transition: color 0.3s;
+    }
+
+    .footer-links a:hover {
+      color: var(--star-white);
+    }
+
+    .footer-copy {
+      width: 100%;
+      text-align: center;
+      padding-top: 2rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      margin-top: 1rem;
+    }
+
+    .footer-copy span {
+      font-size: 0.8125rem;
+      color: var(--star-dim);
+    }
+
+    /* ============================================
+       RESPONSIVE
+       ============================================ */
     @media (max-width: 768px) {
-      .hero h1 { font-size: 2rem; }
-      .hero-buttons { flex-direction: column; }
-      .stats-container { grid-template-columns: 1fr; gap: 1rem; }
-      .features-grid { grid-template-columns: 1fr; }
-      .section-header { flex-direction: column; gap: 1rem; }
-      .pending-content { flex-direction: column; text-align: center; }
-      .announcements-container { flex-direction: column; gap: 0.5rem; }
+      .nav-links {
+        gap: 1rem;
+      }
+
+      .nav-links a:not(.nav-btn):not(.nav-link-subtle) {
+        display: none;
+      }
+
+      .hero-stats {
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+
+      .stat-divider {
+        width: 40px;
+        height: 1px;
+      }
+
+      .campaigns-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .process-step {
+        padding-left: 0;
+      }
+
+      .timeline-line {
+        left: 20px;
+      }
+
+      .footer-content {
+        flex-direction: column;
+        text-align: center;
+      }
     }
   </style>
 
-  {announcements.length > 1 && (
-    <script>
-      document.addEventListener('DOMContentLoaded', () => {
-        const announcements = document.querySelectorAll('.announcement');
-        const currentSpan = document.querySelector('.announcement-count .current');
-        const prevBtn = document.querySelector('.nav-btn.prev');
-        const nextBtn = document.querySelector('.nav-btn.next');
+  <!-- Galaxy Particle System -->
+  <script is:inline>
+    class GalaxyParticleSystem {
+      constructor(canvas) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.particles = [];
+        this.stars = [];
+        this.nebulaParticles = [];
+        this.mouseX = 0;
+        this.mouseY = 0;
+        this.scrollY = 0;
+        this.time = 0;
         
-        if (!announcements.length || !prevBtn || !nextBtn) return;
+        // Galaxy parameters
+        this.centerX = 0;
+        this.centerY = 0;
+        this.baseRadius = 250;
+        this.expansionFactor = 1;
         
-        let current = 0;
-        const total = announcements.length;
+        // Particle counts
+        this.galaxyParticleCount = 4000;
+        this.starCount = 600;
+        this.nebulaParticleCount = 150;
         
-        function show(index: number) {
-          announcements.forEach((a, i) => {
-            (a as HTMLElement).style.display = i === index ? 'flex' : 'none';
+        this.init();
+        this.bindEvents();
+        this.animate();
+      }
+
+      init() {
+        this.resize();
+        this.createStars();
+        this.createGalaxyParticles();
+        this.createNebulaParticles();
+      }
+
+      resize() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+        this.centerX = this.canvas.width / 2;
+        this.centerY = this.canvas.height / 2;
+      }
+
+      createStars() {
+        this.stars = [];
+        for (let i = 0; i < this.starCount; i++) {
+          this.stars.push({
+            x: Math.random() * this.canvas.width,
+            y: Math.random() * this.canvas.height,
+            size: Math.random() * 1.5 + 0.5,
+            opacity: Math.random() * 0.8 + 0.2,
+            twinkleSpeed: Math.random() * 0.02 + 0.01,
+            twinkleOffset: Math.random() * Math.PI * 2
           });
-          if (currentSpan) currentSpan.textContent = String(index + 1);
+        }
+      }
+
+      createGalaxyParticles() {
+        this.particles = [];
+        
+        // Create spiral arms (croissant-like galaxy)
+        const numArms = 2;
+        const armSpread = 0.5;
+        const armTightness = 0.25;
+        
+        for (let i = 0; i < this.galaxyParticleCount; i++) {
+          // Choose which arm
+          const arm = i % numArms;
+          const armOffset = (arm / numArms) * Math.PI * 2;
+          
+          // Distance from center (exponential distribution for more particles near center)
+          const distanceRandom = Math.pow(Math.random(), 0.5);
+          const distance = distanceRandom * this.baseRadius;
+          
+          // Spiral angle
+          const spiralAngle = distance * armTightness + armOffset;
+          
+          // Add some spread to the arm
+          const spreadAngle = (Math.random() - 0.5) * armSpread * (1 + distanceRandom * 0.5);
+          const angle = spiralAngle + spreadAngle;
+          
+          // Particle color based on distance (core is brighter, edges more blue/purple)
+          const colorProgress = distanceRandom;
+          const colors = this.getParticleColor(colorProgress);
+          
+          // Z-depth for 3D effect
+          const z = (Math.random() - 0.5) * 80;
+          
+          this.particles.push({
+            baseAngle: angle,
+            baseDistance: distance,
+            angle: angle,
+            distance: distance,
+            x: 0,
+            y: 0,
+            z: z,
+            size: Math.random() * 2 + 0.5,
+            color: colors.color,
+            glow: colors.glow,
+            speed: Math.random() * 0.0003 + 0.0001,
+            opacity: Math.random() * 0.9 + 0.1,
+            pulseSpeed: Math.random() * 0.015 + 0.005,
+            pulseOffset: Math.random() * Math.PI * 2
+          });
         }
         
-        prevBtn.addEventListener('click', () => {
-          current = (current - 1 + total) % total;
-          show(current);
+        // Add core particles (brighter center)
+        for (let i = 0; i < 800; i++) {
+          const distance = Math.pow(Math.random(), 1.5) * 50;
+          const angle = Math.random() * Math.PI * 2;
+          
+          this.particles.push({
+            baseAngle: angle,
+            baseDistance: distance,
+            angle: angle,
+            distance: distance,
+            x: 0,
+            y: 0,
+            z: (Math.random() - 0.5) * 30,
+            size: Math.random() * 2.5 + 0.8,
+            color: 'rgba(255, 255, 255, 1)',
+            glow: 'rgba(255, 220, 180, 0.7)',
+            speed: Math.random() * 0.0008 + 0.0003,
+            opacity: Math.random() * 0.6 + 0.4,
+            pulseSpeed: Math.random() * 0.025 + 0.015,
+            pulseOffset: Math.random() * Math.PI * 2,
+            isCore: true
+          });
+        }
+      }
+
+      createNebulaParticles() {
+        this.nebulaParticles = [];
+        
+        const colors = [
+          'rgba(79, 139, 255, 0.04)',
+          'rgba(168, 85, 247, 0.04)',
+          'rgba(236, 72, 153, 0.03)',
+          'rgba(34, 211, 238, 0.03)'
+        ];
+        
+        for (let i = 0; i < this.nebulaParticleCount; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const distance = Math.random() * this.baseRadius * 1.8 + 50;
+          
+          this.nebulaParticles.push({
+            angle: angle,
+            distance: distance,
+            size: Math.random() * 150 + 80,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            speed: Math.random() * 0.00015 + 0.00005
+          });
+        }
+      }
+
+      getParticleColor(progress) {
+        // Colors transition from warm white/yellow at center to blue/purple at edges
+        if (progress < 0.15) {
+          return {
+            color: `rgba(255, ${230 + Math.random() * 25}, ${200 + Math.random() * 40}, 1)`,
+            glow: 'rgba(255, 230, 200, 0.5)'
+          };
+        } else if (progress < 0.4) {
+          return {
+            color: `rgba(${180 + Math.random() * 75}, ${200 + Math.random() * 55}, 255, 1)`,
+            glow: 'rgba(79, 139, 255, 0.4)'
+          };
+        } else if (progress < 0.7) {
+          return {
+            color: `rgba(${168 + Math.random() * 40}, ${85 + Math.random() * 40}, ${220 + Math.random() * 35}, 1)`,
+            glow: 'rgba(168, 85, 247, 0.35)'
+          };
+        } else {
+          return {
+            color: `rgba(${140 + Math.random() * 50}, ${100 + Math.random() * 50}, ${200 + Math.random() * 55}, 1)`,
+            glow: 'rgba(168, 85, 247, 0.25)'
+          };
+        }
+      }
+
+      bindEvents() {
+        window.addEventListener('resize', () => {
+          this.resize();
+          this.createStars();
         });
         
-        nextBtn.addEventListener('click', () => {
-          current = (current + 1) % total;
-          show(current);
+        window.addEventListener('scroll', () => {
+          this.scrollY = window.scrollY;
+          // Expansion increases as you scroll - creates dramatic expansion effect
+          const maxExpansion = 4;
+          const scrollRange = document.body.scrollHeight - window.innerHeight;
+          this.expansionFactor = 1 + (this.scrollY / scrollRange) * (maxExpansion - 1);
         });
+
+        window.addEventListener('mousemove', (e) => {
+          this.mouseX = e.clientX;
+          this.mouseY = e.clientY;
+        });
+      }
+
+      updateParticles() {
+        this.time += 0.016;
         
-        setInterval(() => {
-          current = (current + 1) % total;
-          show(current);
-        }, 8000);
-      });
-    </script>
-  )}
-</Layout>
+        const mouseInfluence = 30;
+        const mouseDx = (this.mouseX - this.centerX) / this.canvas.width;
+        const mouseDy = (this.mouseY - this.centerY) / this.canvas.height;
+        
+        this.particles.forEach(p => {
+          // Rotate around center
+          p.angle += p.speed;
+          
+          // Calculate expanded distance based on scroll
+          const expandedDistance = p.baseDistance * this.expansionFactor;
+          p.distance = expandedDistance;
+          
+          // Calculate position with slight tilt for 3D croissant effect
+          const tiltX = 0.35 + mouseDx * 0.15;
+          const tiltY = 0.15 + mouseDy * 0.1;
+          
+          const x = Math.cos(p.angle) * p.distance;
+          const y = Math.sin(p.angle) * p.distance * tiltX;
+          
+          // Apply z-depth perspective
+          const perspective = 800;
+          const scale = perspective / (perspective + p.z);
+          
+          p.x = this.centerX + x * scale + (mouseDx * mouseInfluence * scale);
+          p.y = this.centerY + y * scale + (p.z * tiltY * 0.5) + (mouseDy * mouseInfluence * scale);
+          
+          // Pulse effect
+          p.currentOpacity = p.opacity * (0.6 + 0.4 * Math.sin(this.time * p.pulseSpeed + p.pulseOffset));
+        });
+
+        // Update nebula particles
+        this.nebulaParticles.forEach(p => {
+          p.angle += p.speed;
+          const expandedDistance = p.distance * this.expansionFactor;
+          p.x = this.centerX + Math.cos(p.angle) * expandedDistance;
+          p.y = this.centerY + Math.sin(p.angle) * expandedDistance * 0.35;
+        });
+      }
+
+      render() {
+        // Clear canvas completely
+        this.ctx.fillStyle = 'rgba(3, 3, 8, 1)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Draw background stars
+        this.stars.forEach(star => {
+          const twinkle = 0.5 + 0.5 * Math.sin(this.time * star.twinkleSpeed + star.twinkleOffset);
+          this.ctx.beginPath();
+          this.ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+          this.ctx.fillStyle = `rgba(255, 255, 255, ${star.opacity * twinkle})`;
+          this.ctx.fill();
+        });
+
+        // Draw nebula (behind particles)
+        this.ctx.globalCompositeOperation = 'lighter';
+        this.nebulaParticles.forEach(p => {
+          const expandedSize = p.size * Math.pow(this.expansionFactor, 0.7);
+          const gradient = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, expandedSize);
+          gradient.addColorStop(0, p.color);
+          gradient.addColorStop(1, 'transparent');
+          this.ctx.fillStyle = gradient;
+          this.ctx.beginPath();
+          this.ctx.arc(p.x, p.y, expandedSize, 0, Math.PI * 2);
+          this.ctx.fill();
+        });
+        this.ctx.globalCompositeOperation = 'source-over';
+
+        // Sort particles by z for proper depth rendering
+        const sortedParticles = [...this.particles].sort((a, b) => a.z - b.z);
+
+        // Draw galaxy particles
+        sortedParticles.forEach(p => {
+          // Skip if way off screen
+          if (p.x < -100 || p.x > this.canvas.width + 100 || 
+              p.y < -100 || p.y > this.canvas.height + 100) return;
+
+          const size = p.size * (1 + (this.expansionFactor - 1) * 0.2);
+          
+          // Draw glow
+          if (p.glow && p.currentOpacity > 0.2) {
+            const glowSize = size * 4;
+            const gradient = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowSize);
+            gradient.addColorStop(0, p.glow);
+            gradient.addColorStop(1, 'transparent');
+            this.ctx.fillStyle = gradient;
+            this.ctx.globalAlpha = p.currentOpacity * 0.4;
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, glowSize, 0, Math.PI * 2);
+            this.ctx.fill();
+          }
+          
+          // Draw particle
+          this.ctx.beginPath();
+          this.ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+          this.ctx.fillStyle = p.color;
+          this.ctx.globalAlpha = p.currentOpacity;
+          this.ctx.fill();
+          
+          this.ctx.globalAlpha = 1;
+        });
+
+        // Draw bright core glow
+        const coreSize = 100 * Math.pow(this.expansionFactor, 0.5);
+        const coreGradient = this.ctx.createRadialGradient(
+          this.centerX, this.centerY, 0,
+          this.centerX, this.centerY, coreSize
+        );
+        coreGradient.addColorStop(0, 'rgba(255, 240, 220, 0.25)');
+        coreGradient.addColorStop(0.2, 'rgba(255, 220, 180, 0.15)');
+        coreGradient.addColorStop(0.5, 'rgba(200, 180, 255, 0.08)');
+        coreGradient.addColorStop(1, 'transparent');
+        this.ctx.fillStyle = coreGradient;
+        this.ctx.beginPath();
+        this.ctx.arc(this.centerX, this.centerY, coreSize, 0, Math.PI * 2);
+        this.ctx.fill();
+      }
+
+      animate() {
+        this.updateParticles();
+        this.render();
+        requestAnimationFrame(() => this.animate());
+      }
+    }
+
+    // Initialize when DOM is ready
+    document.addEventListener('DOMContentLoaded', () => {
+      const canvas = document.getElementById('galaxy-canvas');
+      if (canvas) {
+        new GalaxyParticleSystem(canvas);
+      }
+    });
+  </script>
+</body>
+</html>
