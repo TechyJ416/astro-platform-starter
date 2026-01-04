@@ -1,0 +1,65 @@
+---
+const PARTICLE_COUNT = 1200; // ~10x normal density
+---
+
+<canvas id="galaxy-canvas"></canvas>
+
+<script is:inline client:load>
+(() => {
+  const canvas = document.getElementById('galaxy-canvas');
+  const ctx = canvas.getContext('2d');
+
+  let width, height, particles;
+
+  const resize = () => {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+  };
+
+  window.addEventListener('resize', resize);
+  resize();
+
+  particles = Array.from({ length: ${PARTICLE_COUNT} }, () => ({
+    x: Math.random() * width,
+    y: Math.random() * height,
+    r: Math.random() * 1.6 + 0.4,
+    vx: (Math.random() - 0.5) * 0.6,
+    vy: (Math.random() - 0.5) * 0.6,
+    alpha: Math.random() * 0.8 + 0.2,
+  }));
+
+  const draw = () => {
+    ctx.clearRect(0, 0, width, height);
+
+    for (const p of particles) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(99, 102, 241, ${p.alpha})`;
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = 'rgba(99,102,241,0.9)';
+      ctx.fill();
+
+      p.x += p.vx;
+      p.y += p.vy;
+
+      if (p.x < 0) p.x = width;
+      if (p.x > width) p.x = 0;
+      if (p.y < 0) p.y = height;
+      if (p.y > height) p.y = 0;
+    }
+
+    requestAnimationFrame(draw);
+  };
+
+  draw();
+})();
+</script>
+
+<style>
+#galaxy-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+</style>
