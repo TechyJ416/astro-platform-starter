@@ -1,0 +1,590 @@
+---
+// src/pages/manager/applications.astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!session) {
+  return Astro.redirect('/login?redirect=/manager/applications');
+}
+
+if (profile?.role !== 'manager' && profile?.role !== 'admin') {
+  return Astro.redirect('/dashboard');
+}
+
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+let successMessage = '';
+let errorMessage = '';
+
+// Handle actions
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action') as string;
+  const applicationId = form.get('application_id') as string;
+
+  if (action === 'approve') {
+    const { error } = await supabase
+      .from('campaign_applications')
+      .update({ status: 'approved', reviewed_at: new Date().toISOString() })
+      .eq('id', applicationId);
+    
+    if (error) errorMessage = error.message;
+    else successMessage = 'Application approved! Creator has been notified.';
+  }
+
+  if (action === 'reject') {
+    const reason = form.get('reason') as string;
+    const { error } = await supabase
+      .from('campaign_applications')
+      .update({ 
+        status: 'rejected', 
+        reviewed_at: new Date().toISOString(),
+        rejection_reason: reason || null
+      })
+      .eq('id', applicationId);
+    
+    if (error) errorMessage = error.message;
+    else successMessage = 'Application rejected.';
+  }
+}
+
+// Fetch manager's campaigns
+const { data: campaigns } = await supabase
+  .from('campaigns')
+  .select('id, title')
+  .eq('manager_id', session.user.id);
+
+const campaignIds = campaigns?.map(c => c.id) || [];
+
+// Fetch applications
+const { data: applications } = campaignIds.length > 0
+  ? await supabase
+      .from('campaign_applications')
+      .select(`
+        *,
+        campaign:campaigns(id, title, payout_per_post),
+        creator:profiles!campaign_applications_creator_id_fkey(id, full_name, email, avatar_url, bio, level, is_verified, completed_campaigns)
+      `)
+      .in('campaign_id', campaignIds)
+      .order('created_at', { ascending: false })
+  : { data: [] };
+
+// Filter
+const filter = Astro.url.searchParams.get('filter') || 'pending';
+const campaignFilter = Astro.url.searchParams.get('campaign') || '';
+
+const filteredApps = (applications || []).filter(app => {
+  const statusMatch = filter === 'all' || app.status === filter;
+  const campaignMatch = !campaignFilter || app.campaign_id === campaignFilter;
+  return statusMatch && campaignMatch;
+});
+
+const statusCounts = {
+  all: applications?.length || 0,
+  pending: applications?.filter(a => a.status === 'pending').length || 0,
+  approved: applications?.filter(a => a.status === 'approved').length || 0,
+  rejected: applications?.filter(a => a.status === 'rejected').length || 0,
+};
+---
+
+<Layout title="Review Applications">
+  <div class="applications-page">
+    <!-- Header -->
+    <div class="page-header">
+      <div class="header-content">
+        <div>
+          <a href="/manager" class="back-link">← Back to Dashboard</a>
+          <h1>Review Applications</h1>
+          <p>Review and manage creator applications to your campaigns</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-content">
+      {successMessage && <div class="alert success">{successMessage}</div>}
+      {errorMessage && <div class="alert error">{errorMessage}</div>}
+
+      <!-- Filters -->
+      <div class="filters-bar">
+        <div class="filter-tabs">
+          <a href="?filter=pending" class={`tab ${filter === 'pending' ? 'active' : ''}`}>
+            Pending ({statusCounts.pending})
+          </a>
+          <a href="?filter=approved" class={`tab ${filter === 'approved' ? 'active' : ''}`}>
+            Approved ({statusCounts.approved})
+          </a>
+          <a href="?filter=rejected" class={`tab ${filter === 'rejected' ? 'active' : ''}`}>
+            Rejected ({statusCounts.rejected})
+          </a>
+          <a href="?filter=all" class={`tab ${filter === 'all' ? 'active' : ''}`}>
+            All ({statusCounts.all})
+          </a>
+        </div>
+
+        <select class="campaign-filter" onchange="window.location.href='?filter=' + '{filter}' + '&campaign=' + this.value">
+          <option value="">All Campaigns</option>
+          {campaigns?.map(c => (
+            <option value={c.id} selected={campaignFilter === c.id}>{c.title}</option>
+          ))}
+        </select>
+      </div>
+
+      <!-- Applications List -->
+      {filteredApps.length > 0 ? (
+        <div class="applications-list">
+          {filteredApps.map(app => (
+            <div class={`application-card ${app.status}`}>
+              <div class="application-header">
+                <div class="creator-info">
+                  <div class="creator-avatar">
+                    {app.creator?.avatar_url ? (
+                      <img src={app.creator.avatar_url} alt={app.creator.full_name} />
+                    ) : (
+                      <span>{app.creator?.full_name?.charAt(0) || '?'}</span>
+                    )}
+                  </div>
+                  <div class="creator-details">
+                    <div class="creator-name-row">
+                      <h3>{app.creator?.full_name || 'Unknown Creator'}</h3>
+                      {app.creator?.is_verified && <span class="verified-badge">✓</span>}
+                      <span class="level-badge">Lvl {app.creator?.level || 1}</span>
+                    </div>
+                    <p class="creator-email">{app.creator?.email}</p>
+                    <div class="creator-stats">
+                      <span>{app.creator?.completed_campaigns || 0} campaigns completed</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="application-status">
+                  <span class={`status-badge ${app.status}`}>{app.status}</span>
+                  <span class="applied-date">Applied {new Date(app.created_at).toLocaleDateString()}</span>
+                </div>
+              </div>
+
+              <div class="campaign-info">
+                <span class="campaign-label">Applied for:</span>
+                <a href={`/manager/campaigns/${app.campaign?.id}`} class="campaign-link">
+                  {app.campaign?.title}
+                </a>
+                <span class="campaign-payout">${app.campaign?.payout_per_post || 0}/post</span>
+              </div>
+
+              {app.message && (
+                <div class="application-message">
+                  <h4>Application Message</h4>
+                  <p>{app.message}</p>
+                </div>
+              )}
+
+              {app.creator?.bio && (
+                <div class="creator-bio">
+                  <h4>About the Creator</h4>
+                  <p>{app.creator.bio}</p>
+                </div>
+              )}
+
+              {app.status === 'pending' && (
+                <div class="application-actions">
+                  <form method="POST" class="action-form">
+                    <input type="hidden" name="application_id" value={app.id} />
+                    <button type="submit" name="action" value="approve" class="btn btn-success">
+                      ✓ Approve
+                    </button>
+                  </form>
+                  <form method="POST" class="action-form reject-form">
+                    <input type="hidden" name="application_id" value={app.id} />
+                    <input type="hidden" name="action" value="reject" />
+                    <input type="text" name="reason" placeholder="Rejection reason (optional)" class="reject-reason" />
+                    <button type="submit" class="btn btn-danger">✕ Reject</button>
+                  </form>
+                  <a href={`/profile/${app.creator?.id}`} target="_blank" class="btn btn-secondary">
+                    View Profile
+                  </a>
+                </div>
+              )}
+
+              {app.status === 'approved' && (
+                <div class="approved-notice">
+                  <span>✓ Approved on {new Date(app.reviewed_at).toLocaleDateString()}</span>
+                  <a href={`/profile/${app.creator?.id}`} target="_blank" class="btn btn-secondary btn-sm">
+                    View Profile
+                  </a>
+                </div>
+              )}
+
+              {app.status === 'rejected' && (
+                <div class="rejected-notice">
+                  <span>✕ Rejected on {new Date(app.reviewed_at).toLocaleDateString()}</span>
+                  {app.rejection_reason && <p class="rejection-reason">Reason: {app.rejection_reason}</p>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div class="empty-state">
+          <span class="empty-icon">📝</span>
+          <h2>No applications found</h2>
+          <p>
+            {filter === 'pending' 
+              ? "You don't have any pending applications to review."
+              : `No ${filter} applications at the moment.`}
+          </p>
+          {filter !== 'all' && (
+            <a href="?filter=all" class="btn btn-secondary">View All Applications</a>
+          )}
+        </div>
+      )}
+    </div>
+  </div>
+
+  <style>
+    .applications-page {
+      min-height: 100vh;
+      background: #f8fafc;
+    }
+
+    .page-header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%);
+      padding: 2rem 0;
+    }
+
+    .header-content {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    .back-link {
+      color: rgba(255,255,255,0.7);
+      text-decoration: none;
+      font-size: 0.875rem;
+      display: inline-block;
+      margin-bottom: 0.5rem;
+    }
+
+    .page-header h1 {
+      font-size: 1.75rem;
+      color: white;
+      margin: 0 0 0.25rem 0;
+    }
+
+    .page-header p {
+      color: rgba(255,255,255,0.7);
+      margin: 0;
+    }
+
+    .page-content {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+    }
+
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+
+    .filters-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .filter-tabs {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .tab {
+      padding: 0.5rem 1rem;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #6b7280;
+      font-size: 0.875rem;
+    }
+
+    .tab:hover { border-color: #2563eb; color: #2563eb; }
+    .tab.active { background: #2563eb; border-color: #2563eb; color: white; }
+
+    .campaign-filter {
+      padding: 0.5rem 1rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      background: white;
+    }
+
+    .applications-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .application-card {
+      background: white;
+      border-radius: 16px;
+      padding: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      border-left: 4px solid;
+    }
+
+    .application-card.pending { border-left-color: #f59e0b; }
+    .application-card.approved { border-left-color: #10b981; }
+    .application-card.rejected { border-left-color: #ef4444; }
+
+    .application-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+
+    .creator-info {
+      display: flex;
+      gap: 1rem;
+    }
+
+    .creator-avatar {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #2563eb, #8b5cf6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 1.25rem;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .creator-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .creator-name-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .creator-name-row h3 {
+      margin: 0;
+      font-size: 1.125rem;
+      color: #1a1a2e;
+    }
+
+    .verified-badge {
+      background: #10b981;
+      color: white;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.625rem;
+    }
+
+    .level-badge {
+      font-size: 0.6875rem;
+      padding: 0.125rem 0.375rem;
+      background: #f3f4f6;
+      border-radius: 4px;
+      color: #6b7280;
+    }
+
+    .creator-email {
+      margin: 0.25rem 0;
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    .creator-stats {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    .application-status {
+      text-align: right;
+    }
+
+    .status-badge {
+      display: inline-block;
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.625rem;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+    .status-badge.approved { background: #d1fae5; color: #059669; }
+    .status-badge.rejected { background: #fee2e2; color: #dc2626; }
+
+    .applied-date {
+      display: block;
+      font-size: 0.75rem;
+      color: #9ca3af;
+      margin-top: 0.25rem;
+    }
+
+    .campaign-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+
+    .campaign-label {
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    .campaign-link {
+      color: #2563eb;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .campaign-payout {
+      font-size: 0.8125rem;
+      color: #059669;
+      font-weight: 500;
+      margin-left: auto;
+    }
+
+    .application-message,
+    .creator-bio {
+      margin-bottom: 1rem;
+      padding: 1rem;
+      background: #f9fafb;
+      border-radius: 8px;
+    }
+
+    .application-message h4,
+    .creator-bio h4 {
+      font-size: 0.8125rem;
+      color: #6b7280;
+      margin: 0 0 0.5rem 0;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .application-message p,
+    .creator-bio p {
+      margin: 0;
+      color: #374151;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    .application-actions {
+      display: flex;
+      gap: 0.75rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e5e7eb;
+      flex-wrap: wrap;
+    }
+
+    .action-form {
+      display: contents;
+    }
+
+    .reject-form {
+      display: flex;
+      gap: 0.5rem;
+      flex: 1;
+    }
+
+    .reject-reason {
+      flex: 1;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 0.8125rem;
+      min-width: 150px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.625rem 1rem;
+      border-radius: 8px;
+      font-weight: 500;
+      text-decoration: none;
+      font-size: 0.875rem;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-success { background: #10b981; color: white; }
+    .btn-success:hover { background: #059669; }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+    .btn-secondary:hover { background: #e5e7eb; }
+    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
+
+    .approved-notice,
+    .rejected-notice {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 1rem;
+      border-top: 1px solid #e5e7eb;
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+
+    .rejection-reason {
+      margin: 0.5rem 0 0;
+      font-size: 0.8125rem;
+      color: #9ca3af;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      background: white;
+      border-radius: 16px;
+    }
+
+    .empty-icon { font-size: 4rem; display: block; margin-bottom: 1rem; }
+    .empty-state h2 { margin: 0 0 0.5rem 0; color: #1a1a2e; }
+    .empty-state p { color: #6b7280; margin: 0 0 1.5rem 0; }
+
+    @media (max-width: 640px) {
+      .application-header { flex-direction: column; gap: 1rem; }
+      .application-status { text-align: left; }
+      .reject-form { flex-direction: column; }
+    }
+  </style>
+</Layout>
