@@ -1,0 +1,912 @@
+---
+// src/pages/manager/campaigns/[id].astro
+export const prerender = false;
+
+import Layout from "../../../layouts/Layout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+const { id } = Astro.params;
+
+if (!session) {
+  return Astro.redirect('/login?redirect=/manager/campaigns/' + id);
+}
+
+if (profile?.role !== 'manager' && profile?.role !== 'admin') {
+  return Astro.redirect('/dashboard');
+}
+
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+let successMessage = Astro.url.searchParams.get('created') ? 'Campaign created successfully!' : '';
+let errorMessage = '';
+
+// Fetch campaign
+const { data: campaign, error } = await supabase
+  .from('campaigns')
+  .select('*')
+  .eq('id', id)
+  .eq('manager_id', session.user.id)
+  .single();
+
+if (error || !campaign) {
+  return Astro.redirect('/manager/campaigns');
+}
+
+// Handle status updates
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action') as string;
+
+  if (action === 'update_status') {
+    const newStatus = form.get('status') as string;
+    const { error: updateError } = await supabase
+      .from('campaigns')
+      .update({ status: newStatus })
+      .eq('id', id);
+    
+    if (updateError) errorMessage = updateError.message;
+    else {
+      campaign.status = newStatus;
+      successMessage = `Campaign ${newStatus === 'active' ? 'launched' : newStatus}!`;
+    }
+  }
+
+  if (action === 'delete') {
+    const { error: deleteError } = await supabase
+      .from('campaigns')
+      .delete()
+      .eq('id', id);
+    
+    if (deleteError) errorMessage = deleteError.message;
+    else return Astro.redirect('/manager/campaigns?deleted=true');
+  }
+}
+
+// Fetch applications
+const { data: applications } = await supabase
+  .from('campaign_applications')
+  .select(`
+    *,
+    creator:profiles!campaign_applications_creator_id_fkey(id, full_name, email, avatar_url, level, is_verified)
+  `)
+  .eq('campaign_id', id)
+  .order('created_at', { ascending: false });
+
+// Fetch submissions
+const { data: submissions } = await supabase
+  .from('posts')
+  .select(`
+    *,
+    creator:profiles!posts_creator_id_fkey(id, full_name, avatar_url)
+  `)
+  .eq('campaign_id', id)
+  .order('created_at', { ascending: false });
+
+// Stats
+const pendingApps = applications?.filter(a => a.status === 'pending').length || 0;
+const approvedApps = applications?.filter(a => a.status === 'approved').length || 0;
+const pendingSubs = submissions?.filter(s => s.status === 'pending').length || 0;
+const approvedSubs = submissions?.filter(s => s.status === 'approved').length || 0;
+const budgetUsed = campaign.budget > 0 ? Math.round(((campaign.amount_spent || 0) / campaign.budget) * 100) : 0;
+
+const tab = Astro.url.searchParams.get('tab') || 'overview';
+---
+
+<Layout title={campaign.title}>
+  <div class="campaign-detail-page">
+    <!-- Header -->
+    <div class="page-header">
+      <div class="header-content">
+        <div class="header-top">
+          <a href="/manager/campaigns" class="back-link">← Back to Campaigns</a>
+          <div class="header-actions">
+            <a href={`/campaigns/${campaign.slug}`} target="_blank" class="btn btn-outline">
+              👁️ Preview
+            </a>
+            <a href={`/manager/campaigns/${id}/edit`} class="btn btn-secondary">
+              ✏️ Edit
+            </a>
+            {campaign.status === 'draft' && (
+              <form method="POST" style="display: contents;">
+                <input type="hidden" name="action" value="update_status" />
+                <input type="hidden" name="status" value="active" />
+                <button type="submit" class="btn btn-primary">🚀 Launch Campaign</button>
+              </form>
+            )}
+          </div>
+        </div>
+        
+        <div class="campaign-title-row">
+          <h1>{campaign.title}</h1>
+          <span class={`status-badge ${campaign.status}`}>{campaign.status}</span>
+        </div>
+        
+        <p class="campaign-description">{campaign.description?.substring(0, 200)}</p>
+      </div>
+    </div>
+
+    {successMessage && <div class="alert success container">{successMessage}</div>}
+    {errorMessage && <div class="alert error container">{errorMessage}</div>}
+
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+      <div class="stat-item">
+        <span class="stat-value">${campaign.budget?.toLocaleString() || 0}</span>
+        <span class="stat-label">Budget</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value">${campaign.amount_spent?.toLocaleString() || 0}</span>
+        <span class="stat-label">Spent</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value">{applications?.length || 0}</span>
+        <span class="stat-label">Applications</span>
+        {pendingApps > 0 && <span class="stat-pending">{pendingApps} pending</span>}
+      </div>
+      <div class="stat-item">
+        <span class="stat-value">{approvedApps}</span>
+        <span class="stat-label">Creators</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value">{submissions?.length || 0}</span>
+        <span class="stat-label">Submissions</span>
+        {pendingSubs > 0 && <span class="stat-pending">{pendingSubs} pending</span>}
+      </div>
+      <div class="stat-item">
+        <span class="stat-value">{approvedSubs}</span>
+        <span class="stat-label">Approved</span>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs-container">
+      <div class="tabs">
+        <a href={`?tab=overview`} class={`tab ${tab === 'overview' ? 'active' : ''}`}>Overview</a>
+        <a href={`?tab=applications`} class={`tab ${tab === 'applications' ? 'active' : ''}`}>
+          Applications
+          {pendingApps > 0 && <span class="tab-badge">{pendingApps}</span>}
+        </a>
+        <a href={`?tab=submissions`} class={`tab ${tab === 'submissions' ? 'active' : ''}`}>
+          Submissions
+          {pendingSubs > 0 && <span class="tab-badge">{pendingSubs}</span>}
+        </a>
+        <a href={`?tab=creators`} class={`tab ${tab === 'creators' ? 'active' : ''}`}>Creators ({approvedApps})</a>
+        <a href={`?tab=settings`} class={`tab ${tab === 'settings' ? 'active' : ''}`}>Settings</a>
+      </div>
+    </div>
+
+    <div class="page-content">
+      <!-- Overview Tab -->
+      {tab === 'overview' && (
+        <div class="overview-grid">
+          <div class="main-content">
+            <!-- Budget Progress -->
+            <div class="panel">
+              <h2>💰 Budget Progress</h2>
+              <div class="budget-progress">
+                <div class="budget-header">
+                  <span>${(campaign.amount_spent || 0).toLocaleString()} spent</span>
+                  <span>${campaign.budget?.toLocaleString() || 0} total</span>
+                </div>
+                <div class="progress-bar large">
+                  <div class="progress-fill" style={`width: ${Math.min(budgetUsed, 100)}%`}></div>
+                </div>
+                <div class="budget-info">
+                  <span>{budgetUsed}% used</span>
+                  <span>${((campaign.budget || 0) - (campaign.amount_spent || 0)).toLocaleString()} remaining</span>
+                </div>
+              </div>
+              <div class="payout-info">
+                <span class="payout-label">Payout per post:</span>
+                <span class="payout-value">${campaign.payout_per_post || 0}</span>
+              </div>
+            </div>
+
+            <!-- Recent Activity -->
+            <div class="panel">
+              <h2>📊 Recent Activity</h2>
+              <div class="activity-list">
+                {applications?.slice(0, 3).map(app => (
+                  <div class="activity-item">
+                    <span class="activity-icon">📝</span>
+                    <div class="activity-content">
+                      <strong>{app.creator?.full_name}</strong> applied
+                      <span class="activity-time">{new Date(app.created_at).toLocaleDateString()}</span>
+                    </div>
+                    <span class={`status-dot ${app.status}`}></span>
+                  </div>
+                ))}
+                {submissions?.slice(0, 3).map(sub => (
+                  <div class="activity-item">
+                    <span class="activity-icon">📤</span>
+                    <div class="activity-content">
+                      <strong>{sub.creator?.full_name}</strong> submitted content
+                      <span class="activity-time">{new Date(sub.created_at).toLocaleDateString()}</span>
+                    </div>
+                    <span class={`status-dot ${sub.status}`}></span>
+                  </div>
+                ))}
+                {(!applications?.length && !submissions?.length) && (
+                  <p class="empty-text">No activity yet</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div class="sidebar">
+            <!-- Quick Actions -->
+            <div class="panel">
+              <h2>Quick Actions</h2>
+              <div class="quick-actions">
+                {pendingApps > 0 && (
+                  <a href={`?tab=applications`} class="action-btn warning">
+                    📝 Review {pendingApps} Application{pendingApps > 1 ? 's' : ''}
+                  </a>
+                )}
+                {pendingSubs > 0 && (
+                  <a href={`?tab=submissions`} class="action-btn success">
+                    ✅ Review {pendingSubs} Submission{pendingSubs > 1 ? 's' : ''}
+                  </a>
+                )}
+                <a href="/manager/creators" class="action-btn">
+                  🔍 Find More Creators
+                </a>
+              </div>
+            </div>
+
+            <!-- Campaign Details -->
+            <div class="panel">
+              <h2>Details</h2>
+              <div class="details-list">
+                <div class="detail-item">
+                  <span class="detail-label">Category</span>
+                  <span class="detail-value">{campaign.category || 'Not set'}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Content Type</span>
+                  <span class="detail-value">{campaign.content_type || 'Any'}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Deadline</span>
+                  <span class="detail-value">
+                    {campaign.deadline ? new Date(campaign.deadline).toLocaleDateString() : 'No deadline'}
+                  </span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Created</span>
+                  <span class="detail-value">{new Date(campaign.created_at).toLocaleDateString()}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <!-- Applications Tab -->
+      {tab === 'applications' && (
+        <div class="applications-section">
+          {applications && applications.length > 0 ? (
+            <div class="applications-list">
+              {applications.map(app => (
+                <div class={`application-card ${app.status}`}>
+                  <div class="app-creator">
+                    <div class="creator-avatar">
+                      {app.creator?.avatar_url ? (
+                        <img src={app.creator.avatar_url} alt="" />
+                      ) : (
+                        <span>{app.creator?.full_name?.charAt(0) || '?'}</span>
+                      )}
+                    </div>
+                    <div class="creator-info">
+                      <strong>{app.creator?.full_name}</strong>
+                      {app.creator?.is_verified && <span class="verified">✓</span>}
+                      <span class="level">Lvl {app.creator?.level || 1}</span>
+                      <p>{app.creator?.email}</p>
+                    </div>
+                  </div>
+                  <div class="app-status">
+                    <span class={`status-badge ${app.status}`}>{app.status}</span>
+                    <span class="app-date">{new Date(app.created_at).toLocaleDateString()}</span>
+                  </div>
+                  <div class="app-actions">
+                    <a href={`/profile/${app.creator?.id}`} target="_blank" class="btn btn-sm">View Profile</a>
+                    <a href={`/manager/applications?filter=pending`} class="btn btn-sm btn-primary">Review</a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div class="empty-state">
+              <span>📝</span>
+              <h3>No applications yet</h3>
+              <p>Creators will apply once your campaign is active.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <!-- Submissions Tab -->
+      {tab === 'submissions' && (
+        <div class="submissions-section">
+          {submissions && submissions.length > 0 ? (
+            <div class="submissions-grid">
+              {submissions.map(sub => (
+                <div class={`submission-card ${sub.status}`}>
+                  <div class="sub-preview">
+                    {sub.thumbnail_url || sub.media_url ? (
+                      <img src={sub.thumbnail_url || sub.media_url} alt="" />
+                    ) : (
+                      <div class="no-preview">📄</div>
+                    )}
+                    <span class={`status-badge ${sub.status}`}>{sub.status}</span>
+                  </div>
+                  <div class="sub-info">
+                    <h4>{sub.title}</h4>
+                    <p>{sub.creator?.full_name}</p>
+                    <span class="sub-date">{new Date(sub.created_at).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div class="empty-state">
+              <span>📤</span>
+              <h3>No submissions yet</h3>
+              <p>Approved creators will submit content here.</p>
+            </div>
+          )}
+          <a href="/manager/submissions" class="btn btn-primary" style="margin-top: 1rem;">
+            Review All Submissions
+          </a>
+        </div>
+      )}
+
+      <!-- Creators Tab -->
+      {tab === 'creators' && (
+        <div class="creators-section">
+          {applications?.filter(a => a.status === 'approved').length > 0 ? (
+            <div class="creators-grid">
+              {applications.filter(a => a.status === 'approved').map(app => (
+                <div class="creator-card">
+                  <div class="creator-avatar large">
+                    {app.creator?.avatar_url ? (
+                      <img src={app.creator.avatar_url} alt="" />
+                    ) : (
+                      <span>{app.creator?.full_name?.charAt(0) || '?'}</span>
+                    )}
+                  </div>
+                  <h4>{app.creator?.full_name}</h4>
+                  {app.creator?.is_verified && <span class="verified-badge">✓ Verified</span>}
+                  <span class="level-badge">Level {app.creator?.level || 1}</span>
+                  <a href={`/profile/${app.creator?.id}`} target="_blank" class="btn btn-sm">View Profile</a>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div class="empty-state">
+              <span>🎨</span>
+              <h3>No creators yet</h3>
+              <p>Approve applications to add creators to this campaign.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <!-- Settings Tab -->
+      {tab === 'settings' && (
+        <div class="settings-section">
+          <div class="panel">
+            <h2>Campaign Status</h2>
+            <div class="status-options">
+              {['draft', 'active', 'paused', 'completed'].map(status => (
+                <form method="POST" style="display: contents;">
+                  <input type="hidden" name="action" value="update_status" />
+                  <input type="hidden" name="status" value={status} />
+                  <button 
+                    type="submit" 
+                    class={`status-btn ${campaign.status === status ? 'active' : ''}`}
+                    disabled={campaign.status === status}
+                  >
+                    {status === 'draft' && '📝'}
+                    {status === 'active' && '🚀'}
+                    {status === 'paused' && '⏸️'}
+                    {status === 'completed' && '✅'}
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                  </button>
+                </form>
+              ))}
+            </div>
+          </div>
+
+          <div class="panel danger-zone">
+            <h2>⚠️ Danger Zone</h2>
+            <p>Once deleted, this campaign cannot be recovered.</p>
+            <form method="POST" onsubmit="return confirm('Are you sure you want to delete this campaign? This cannot be undone.');">
+              <input type="hidden" name="action" value="delete" />
+              <button type="submit" class="btn btn-danger">Delete Campaign</button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+
+  <style>
+    .campaign-detail-page {
+      min-height: 100vh;
+      background: #f8fafc;
+    }
+
+    .page-header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%);
+      padding: 2rem 0;
+    }
+
+    .header-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .back-link {
+      color: rgba(255,255,255,0.7);
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 0.75rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.625rem 1rem;
+      border-radius: 8px;
+      font-weight: 500;
+      text-decoration: none;
+      font-size: 0.875rem;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary { background: linear-gradient(135deg, #2563eb, #3b82f6); color: white; }
+    .btn-secondary { background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); }
+    .btn-outline { background: transparent; color: white; border: 1px solid rgba(255,255,255,0.3); }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
+
+    .campaign-title-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .campaign-title-row h1 {
+      margin: 0;
+      font-size: 1.75rem;
+      color: white;
+    }
+
+    .status-badge {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.active { background: #10b981; color: white; }
+    .status-badge.draft { background: #6b7280; color: white; }
+    .status-badge.paused { background: #f59e0b; color: white; }
+    .status-badge.completed { background: #2563eb; color: white; }
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+    .status-badge.approved { background: #d1fae5; color: #059669; }
+    .status-badge.rejected { background: #fee2e2; color: #dc2626; }
+
+    .campaign-description {
+      color: rgba(255,255,255,0.7);
+      margin: 0;
+      max-width: 600px;
+    }
+
+    .alert {
+      padding: 1rem;
+      border-radius: 8px;
+      margin: 1rem auto;
+      max-width: 1200px;
+    }
+
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+    .container { padding: 0 1.5rem; }
+
+    /* Stats Bar */
+    .stats-bar {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1.5rem;
+      display: flex;
+      gap: 2rem;
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      margin-top: -2rem;
+      position: relative;
+      z-index: 10;
+      flex-wrap: wrap;
+    }
+
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1;
+      min-width: 80px;
+    }
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .stat-label {
+      font-size: 0.75rem;
+      color: #6b7280;
+    }
+
+    .stat-pending {
+      font-size: 0.6875rem;
+      color: #f59e0b;
+      margin-top: 0.25rem;
+    }
+
+    /* Tabs */
+    .tabs-container {
+      max-width: 1200px;
+      margin: 2rem auto 0;
+      padding: 0 1.5rem;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 0.5rem;
+    }
+
+    .tab {
+      padding: 0.625rem 1rem;
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.875rem;
+      border-radius: 8px 8px 0 0;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .tab:hover { color: #2563eb; }
+    .tab.active { color: #2563eb; background: white; font-weight: 500; }
+
+    .tab-badge {
+      background: #ef4444;
+      color: white;
+      font-size: 0.625rem;
+      padding: 0.125rem 0.375rem;
+      border-radius: 999px;
+    }
+
+    .page-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    .panel {
+      background: white;
+      border-radius: 16px;
+      padding: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      margin-bottom: 1.5rem;
+    }
+
+    .panel h2 {
+      font-size: 1rem;
+      color: #1a1a2e;
+      margin: 0 0 1rem 0;
+    }
+
+    /* Overview Grid */
+    .overview-grid {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 1.5rem;
+    }
+
+    .budget-progress {
+      margin-bottom: 1rem;
+    }
+
+    .budget-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.875rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .progress-bar {
+      height: 12px;
+      background: #e5e7eb;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .progress-bar.large { height: 16px; border-radius: 8px; }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #2563eb, #3b82f6);
+      border-radius: inherit;
+    }
+
+    .budget-info {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: #6b7280;
+      margin-top: 0.5rem;
+    }
+
+    .payout-info {
+      padding-top: 1rem;
+      border-top: 1px solid #e5e7eb;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .payout-value {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #059669;
+    }
+
+    .activity-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .activity-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 8px;
+    }
+
+    .activity-icon { font-size: 1.25rem; }
+
+    .activity-content {
+      flex: 1;
+      font-size: 0.875rem;
+    }
+
+    .activity-time {
+      display: block;
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .status-dot.pending { background: #f59e0b; }
+    .status-dot.approved { background: #10b981; }
+    .status-dot.rejected { background: #ef4444; }
+
+    .quick-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .action-btn {
+      display: block;
+      padding: 0.75rem 1rem;
+      background: #f3f4f6;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #374151;
+      font-size: 0.875rem;
+      text-align: center;
+      transition: all 0.2s;
+    }
+
+    .action-btn:hover { background: #e5e7eb; }
+    .action-btn.warning { background: #fef3c7; color: #92400e; }
+    .action-btn.success { background: #d1fae5; color: #065f46; }
+
+    .details-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .detail-item {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.875rem;
+    }
+
+    .detail-label { color: #6b7280; }
+    .detail-value { color: #1a1a2e; font-weight: 500; }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem;
+      background: white;
+      border-radius: 16px;
+    }
+
+    .empty-state span { font-size: 3rem; display: block; margin-bottom: 1rem; }
+    .empty-state h3 { margin: 0 0 0.5rem 0; }
+    .empty-state p { color: #6b7280; margin: 0; }
+    .empty-text { color: #9ca3af; text-align: center; padding: 1rem; }
+
+    /* Applications */
+    .applications-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .application-card {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem;
+      background: white;
+      border-radius: 12px;
+      border-left: 4px solid;
+    }
+
+    .application-card.pending { border-color: #f59e0b; }
+    .application-card.approved { border-color: #10b981; }
+    .application-card.rejected { border-color: #ef4444; }
+
+    .app-creator { display: flex; gap: 0.75rem; flex: 1; }
+
+    .creator-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #2563eb, #8b5cf6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 600;
+      overflow: hidden;
+    }
+
+    .creator-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .creator-avatar.large { width: 64px; height: 64px; font-size: 1.25rem; }
+
+    .creator-info strong { display: flex; align-items: center; gap: 0.375rem; }
+    .creator-info p { margin: 0.25rem 0 0; font-size: 0.8125rem; color: #6b7280; }
+    .verified { color: #10b981; font-size: 0.875rem; }
+    .level { font-size: 0.6875rem; background: #f3f4f6; padding: 0.125rem 0.375rem; border-radius: 4px; color: #6b7280; }
+
+    .app-status { text-align: right; }
+    .app-date { display: block; font-size: 0.75rem; color: #9ca3af; margin-top: 0.25rem; }
+
+    .app-actions { display: flex; gap: 0.5rem; }
+
+    /* Submissions Grid */
+    .submissions-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 1rem;
+    }
+
+    .submission-card {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .sub-preview {
+      aspect-ratio: 1;
+      background: #f3f4f6;
+      position: relative;
+    }
+
+    .sub-preview img { width: 100%; height: 100%; object-fit: cover; }
+    .no-preview { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 2rem; color: #9ca3af; }
+    .sub-preview .status-badge { position: absolute; top: 0.5rem; right: 0.5rem; }
+
+    .sub-info { padding: 0.75rem; }
+    .sub-info h4 { margin: 0 0 0.25rem; font-size: 0.875rem; }
+    .sub-info p { margin: 0; font-size: 0.8125rem; color: #6b7280; }
+    .sub-date { font-size: 0.75rem; color: #9ca3af; }
+
+    /* Creators Grid */
+    .creators-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+    }
+
+    .creator-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-align: center;
+    }
+
+    .creator-card h4 { margin: 0.75rem 0 0.25rem; }
+    .verified-badge { font-size: 0.6875rem; background: #d1fae5; color: #059669; padding: 0.125rem 0.5rem; border-radius: 4px; }
+    .level-badge { display: block; font-size: 0.75rem; color: #6b7280; margin: 0.5rem 0; }
+
+    /* Settings */
+    .status-options {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .status-btn {
+      padding: 0.75rem 1.25rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      background: white;
+      cursor: pointer;
+      font-size: 0.875rem;
+      transition: all 0.2s;
+    }
+
+    .status-btn:hover:not(:disabled) { border-color: #2563eb; }
+    .status-btn.active { border-color: #2563eb; background: #eff6ff; }
+    .status-btn:disabled { opacity: 0.5; cursor: default; }
+
+    .danger-zone {
+      border: 1px solid #fecaca;
+      background: #fef2f2;
+    }
+
+    .danger-zone p { color: #991b1b; font-size: 0.875rem; margin: 0 0 1rem; }
+
+    @media (max-width: 1024px) {
+      .overview-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 640px) {
+      .stats-bar { flex-direction: column; gap: 1rem; }
+      .application-card { flex-direction: column; align-items: flex-start; }
+      .app-status { text-align: left; margin: 0.5rem 0; }
+    }
+  </style>
+</Layout>
