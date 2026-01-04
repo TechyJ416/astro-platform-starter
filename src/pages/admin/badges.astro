@@ -23,13 +23,38 @@ let errorMessage = '';
 
 // Get user to manage (from query param)
 const userId = Astro.url.searchParams.get('user');
+const badgeSlug = Astro.url.searchParams.get('badge');
 let targetUser: any = null;
 let userBadges: any[] = [];
+let viewBadge: any = null;
+let badgeUsers: any[] = [];
+
+// If viewing a specific badge, fetch users with that badge
+if (badgeSlug) {
+  const { data: badge } = await supabase
+    .from('badges')
+    .select('*')
+    .eq('slug', badgeSlug)
+    .single();
+  viewBadge = badge;
+
+  if (viewBadge) {
+    const { data: users } = await supabase
+      .from('user_badges')
+      .select(`
+        id, awarded_at, notes,
+        user:profiles!user_badges_user_id_fkey(id, full_name, email, avatar_url, role, level, is_verified)
+      `)
+      .eq('badge_id', viewBadge.id)
+      .order('awarded_at', { ascending: false });
+    badgeUsers = users || [];
+  }
+}
 
 if (userId) {
   const { data } = await supabase
     .from('profiles')
-    .select('id, full_name, email, role, is_verified, level')
+    .select('id, full_name, email, username, role, is_verified, level')
     .eq('id', userId)
     .single();
   targetUser = data;
@@ -208,7 +233,7 @@ const { data: allBadges } = await supabase
 // Fetch all users for dropdown
 const { data: allUsers } = await supabase
   .from('profiles')
-  .select('id, full_name, email, role')
+  .select('id, full_name, email, username, role')
   .order('full_name', { ascending: true, nullsFirst: false });
 
 // Get recent badge awards
@@ -222,7 +247,17 @@ const { data: recentAwards } = await supabase
   .order('awarded_at', { ascending: false })
   .limit(20);
 
-const tab = Astro.url.searchParams.get('tab') || (userId ? 'user' : 'badges');
+// Get badge counts
+const { data: badgeCounts } = await supabase
+  .from('user_badges')
+  .select('badge_id');
+
+const badgeCountMap: Record<string, number> = {};
+badgeCounts?.forEach(ub => {
+  badgeCountMap[ub.badge_id] = (badgeCountMap[ub.badge_id] || 0) + 1;
+});
+
+const tab = Astro.url.searchParams.get('tab') || (userId ? 'user' : badgeSlug ? 'view' : 'badges');
 ---
 
 <AdminLayout title="Badges Management">
@@ -242,21 +277,73 @@ const tab = Astro.url.searchParams.get('tab') || (userId ? 'user' : 'badges');
       <a href="/admin/badges?tab=badges" class={`tab ${tab === 'badges' ? 'active' : ''}`}>All Badges</a>
       <a href="/admin/badges?tab=award" class={`tab ${tab === 'award' ? 'active' : ''}`}>Award Badge</a>
       <a href="/admin/badges?tab=create" class={`tab ${tab === 'create' ? 'active' : ''}`}>Create Badge</a>
-      {userId && (
+      {badgeSlug && viewBadge && (
+        <a href={`/admin/badges?badge=${badgeSlug}`} class={`tab ${tab === 'view' ? 'active' : ''}`}>
+          {viewBadge.icon} {viewBadge.name}
+        </a>
+      )}
+      {userId && targetUser && (
         <a href={`/admin/badges?user=${userId}&tab=user`} class={`tab ${tab === 'user' ? 'active' : ''}`}>
-          User: {targetUser?.full_name || 'Unknown'}
+          User: {targetUser?.full_name || targetUser?.username || 'Unknown'}
         </a>
       )}
     </div>
+
+    <!-- View Badge Users Tab -->
+    {tab === 'view' && viewBadge && (
+      <div class="panel">
+        <div class="badge-header">
+          <span class="badge-icon-xlarge" style={`background: ${viewBadge.color}`}>{viewBadge.icon}</span>
+          <div>
+            <h2>{viewBadge.name}</h2>
+            <p class="badge-desc">{viewBadge.description}</p>
+            <span class="badge-meta">{viewBadge.category} • {badgeUsers.length} users</span>
+          </div>
+        </div>
+
+        <h3>Users with this badge ({badgeUsers.length})</h3>
+        {badgeUsers.length > 0 ? (
+          <div class="users-list">
+            {badgeUsers.map(ub => (
+              <div class="user-row">
+                <div class="user-avatar-small">
+                  {ub.user?.avatar_url ? (
+                    <img src={ub.user.avatar_url} alt="" />
+                  ) : (
+                    <span>{(ub.user?.full_name || ub.user?.email || '?').charAt(0).toUpperCase()}</span>
+                  )}
+                </div>
+                <div class="user-info">
+                  <strong>{ub.user?.full_name || 'Unknown'}</strong>
+                  <span class="user-email">{ub.user?.email}</span>
+                </div>
+                <div class="user-meta">
+                  <span class={`role-tag ${ub.user?.role}`}>{ub.user?.role}</span>
+                  {ub.user?.is_verified && <span class="verified-tag">✓</span>}
+                  <span class="level-tag">Lvl {ub.user?.level || 1}</span>
+                </div>
+                <div class="user-actions">
+                  <span class="award-date">Awarded {new Date(ub.awarded_at).toLocaleDateString()}</span>
+                  <a href={`/profile/${ub.user?.id}`} target="_blank" class="btn btn-sm">👤</a>
+                  <a href={`/admin/badges?user=${ub.user?.id}`} class="btn btn-sm">🏆</a>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p class="empty-text">No users have earned this badge yet.</p>
+        )}
+      </div>
+    )}
 
     <!-- User Management Tab -->
     {tab === 'user' && targetUser && (
       <div class="panel">
         <div class="user-header">
           <div>
-            <h2>{targetUser.full_name || targetUser.email}</h2>
-            <p class="user-meta">
-              {targetUser.role} • Level {targetUser.level} • 
+            <h2>{targetUser.full_name || targetUser.username || targetUser.email}</h2>
+            <p class="user-meta-line">
+              @{targetUser.username || 'no-username'} • {targetUser.role} • Level {targetUser.level} • 
               {targetUser.is_verified ? '✓ Verified' : 'Not Verified'}
             </p>
           </div>
@@ -352,14 +439,15 @@ const tab = Astro.url.searchParams.get('tab') || (userId ? 'user' : 'badges');
         <h2>All Badges ({allBadges?.length || 0})</h2>
         <div class="badges-grid">
           {allBadges?.map(badge => (
-            <div class="badge-card">
+            <a href={`/admin/badges?badge=${badge.slug}`} class="badge-card clickable">
               <span class="badge-icon-large" style={`background: ${badge.color}`}>{badge.icon}</span>
               <div class="badge-info">
                 <strong>{badge.name}</strong>
                 <span class="badge-category">{badge.category}</span>
                 <p>{badge.description}</p>
+                <span class="badge-count">{badgeCountMap[badge.id] || 0} users</span>
               </div>
-            </div>
+            </a>
           ))}
         </div>
       </div>
@@ -377,7 +465,9 @@ const tab = Astro.url.searchParams.get('tab') || (userId ? 'user' : 'badges');
             <select name="user_id" required>
               <option value="">Select User...</option>
               {allUsers?.map(user => (
-                <option value={user.id}>{user.full_name || user.email} ({user.role})</option>
+                <option value={user.id}>
+                  {user.full_name || user.username || user.email} ({user.role})
+                </option>
               ))}
             </select>
           </div>
@@ -479,8 +569,33 @@ const tab = Astro.url.searchParams.get('tab') || (userId ? 'user' : 'badges');
     .panel h2 { font-size: 1.125rem; color: #1a1a2e; margin-bottom: 1rem; }
     .panel h3 { font-size: 1rem; color: #374151; margin-bottom: 0.75rem; }
 
+    .badge-header { display: flex; gap: 1.5rem; align-items: center; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid #e5e7eb; }
+    .badge-header h2 { margin: 0 0 0.25rem 0; }
+    .badge-desc { color: #6b7280; margin: 0 0 0.5rem 0; }
+    .badge-meta { font-size: 0.75rem; color: #9ca3af; text-transform: uppercase; }
+
+    .badge-icon-xlarge { width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; color: white; flex-shrink: 0; }
+
+    .users-list { display: flex; flex-direction: column; gap: 0.5rem; }
+    .user-row { display: flex; align-items: center; gap: 1rem; padding: 0.75rem; background: #f9fafb; border-radius: 8px; }
+    .user-avatar-small { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #3b82f6, #8b5cf6); display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; overflow: hidden; flex-shrink: 0; }
+    .user-avatar-small img { width: 100%; height: 100%; object-fit: cover; }
+    .user-info { flex: 1; min-width: 0; }
+    .user-info strong { display: block; font-size: 0.875rem; }
+    .user-email { font-size: 0.75rem; color: #6b7280; }
+    .user-meta { display: flex; gap: 0.5rem; align-items: center; }
+    .role-tag { font-size: 0.625rem; padding: 0.125rem 0.5rem; border-radius: 999px; text-transform: uppercase; font-weight: 600; }
+    .role-tag.creator { background: #d1fae5; color: #059669; }
+    .role-tag.manager { background: #dbeafe; color: #2563eb; }
+    .role-tag.admin { background: #fee2e2; color: #dc2626; }
+    .role-tag.moderator { background: #fef3c7; color: #d97706; }
+    .verified-tag { background: #10b981; color: white; font-size: 0.625rem; padding: 0.125rem 0.375rem; border-radius: 999px; }
+    .level-tag { font-size: 0.625rem; padding: 0.125rem 0.375rem; background: #f3f4f6; border-radius: 4px; color: #6b7280; }
+    .user-actions { display: flex; gap: 0.5rem; align-items: center; }
+    .award-date { font-size: 0.75rem; color: #9ca3af; }
+
     .user-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb; }
-    .user-meta { color: #6b7280; font-size: 0.875rem; }
+    .user-meta-line { color: #6b7280; font-size: 0.875rem; }
 
     .section { margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #e5e7eb; }
     .section:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
@@ -496,14 +611,17 @@ const tab = Astro.url.searchParams.get('tab') || (userId ? 'user' : 'badges');
     .badge-details strong { display: block; font-size: 0.875rem; }
     .badge-date { font-size: 0.75rem; color: #6b7280; }
 
-    .badge-icon-small { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 1rem; }
+    .badge-icon-small { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 1rem; flex-shrink: 0; }
     .badge-icon-large { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.5rem; flex-shrink: 0; }
 
     .badges-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
-    .badge-card { display: flex; gap: 1rem; padding: 1rem; background: #f9fafb; border-radius: 8px; }
-    .badge-info strong { display: block; margin-bottom: 0.25rem; }
-    .badge-info p { font-size: 0.8125rem; color: #6b7280; margin: 0; }
+    .badge-card { display: flex; gap: 1rem; padding: 1rem; background: #f9fafb; border-radius: 8px; text-decoration: none; color: inherit; transition: all 0.2s; }
+    .badge-card.clickable:hover { background: #e5e7eb; transform: translateY(-2px); }
+    .badge-info { flex: 1; }
+    .badge-info strong { display: block; margin-bottom: 0.25rem; color: #1a1a2e; }
+    .badge-info p { font-size: 0.8125rem; color: #6b7280; margin: 0.25rem 0; }
     .badge-category { font-size: 0.6875rem; text-transform: uppercase; color: #9ca3af; background: #e5e7eb; padding: 0.125rem 0.375rem; border-radius: 4px; }
+    .badge-count { font-size: 0.75rem; color: #2563eb; font-weight: 500; }
 
     .award-form, .award-form-large, .create-form { margin-top: 1rem; }
     .form-row { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; }
@@ -514,11 +632,11 @@ const tab = Astro.url.searchParams.get('tab') || (userId ? 'user' : 'badges');
 
     .recent-awards { display: flex; flex-direction: column; gap: 0.5rem; }
     .award-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem; background: #f9fafb; border-radius: 6px; font-size: 0.875rem; }
-    .award-date { font-size: 0.75rem; color: #9ca3af; margin-left: 0.5rem; }
 
     .empty-text { color: #9ca3af; font-size: 0.875rem; }
 
     .btn { padding: 0.5rem 1rem; border-radius: 6px; font-weight: 500; border: none; cursor: pointer; text-decoration: none; font-size: 0.875rem; display: inline-flex; align-items: center; gap: 0.375rem; }
+    .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
     .btn-primary { background: #2563eb; color: white; }
     .btn-primary:hover { background: #1d4ed8; }
     .btn-secondary { background: #f3f4f6; color: #374151; }
