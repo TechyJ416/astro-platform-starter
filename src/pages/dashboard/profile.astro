@@ -22,6 +22,7 @@ if (Astro.request.method === 'POST') {
 
   if (action === 'update_profile') {
     const fullName = formData.get('fullName') as string;
+    const username = formData.get('username') as string;
     const bio = formData.get('bio') as string;
     const avatarUrl = formData.get('avatarUrl') as string;
     const website = formData.get('website') as string;
@@ -30,10 +31,16 @@ if (Astro.request.method === 'POST') {
     const socialYoutube = formData.get('social_youtube') as string;
     const socialTwitter = formData.get('social_twitter') as string;
 
+    // Sanitize username
+    const sanitizedUsername = username 
+      ? username.toLowerCase().replace(/[^a-z0-9_]/g, '') 
+      : null;
+
     const { error } = await supabase
       .from('profiles')
       .update({
         full_name: fullName,
+        username: sanitizedUsername,
         bio: bio,
         avatar_url: avatarUrl || null,
         website: website || null,
@@ -46,7 +53,11 @@ if (Astro.request.method === 'POST') {
       .eq('id', session.user.id);
 
     if (error) {
-      errorMessage = error.message;
+      if (error.code === '23505') {
+        errorMessage = 'This username is already taken. Please choose another.';
+      } else {
+        errorMessage = error.message;
+      }
     } else {
       successMessage = 'Profile updated successfully!';
       // Refresh profile data
@@ -192,6 +203,22 @@ const totalEarned = earningsData?.reduce((sum, p) => sum + (p.amount || 0), 0) |
                 value={profile?.full_name || ''}
                 placeholder="Your full name"
               />
+            </div>
+
+            <div class="form-group">
+              <label for="username">Username</label>
+              <div class="username-input-wrapper">
+                <span class="username-prefix">@</span>
+                <input 
+                  type="text" 
+                  id="username" 
+                  name="username" 
+                  value={profile?.username || ''}
+                  placeholder="yourname"
+                  pattern="[a-z0-9_]+"
+                />
+              </div>
+              <span class="hint">Lowercase letters, numbers, and underscores only</span>
             </div>
 
             <div class="form-group">
@@ -526,6 +553,39 @@ const totalEarned = earningsData?.reduce((sum, p) => sum + (p.amount || 0), 0) |
       color: #9ca3af;
       margin-top: 0.25rem;
       display: block;
+    }
+
+    /* Username Input */
+    .username-input-wrapper {
+      display: flex;
+      align-items: center;
+      border: 2px solid #e5e7eb;
+      border-radius: 10px;
+      overflow: hidden;
+      transition: all 0.2s;
+    }
+
+    .username-input-wrapper:focus-within {
+      border-color: #2563eb;
+    }
+
+    .username-prefix {
+      padding: 0.75rem;
+      background: #f3f4f6;
+      color: #6b7280;
+      font-weight: 500;
+      border-right: 2px solid #e5e7eb;
+    }
+
+    .username-input-wrapper input {
+      flex: 1;
+      border: none !important;
+      padding: 0.75rem 1rem;
+      font-size: 1rem;
+    }
+
+    .username-input-wrapper input:focus {
+      outline: none;
     }
 
     .form-actions {
