@@ -1,0 +1,663 @@
+---
+// src/pages/manager/creators.astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { supabase } from "../../lib/supabase";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!session) {
+  return Astro.redirect('/login?redirect=/manager/creators');
+}
+
+if (profile?.role !== 'manager' && profile?.role !== 'admin') {
+  return Astro.redirect('/dashboard');
+}
+
+// Filters
+const search = Astro.url.searchParams.get('search') || '';
+const levelFilter = Astro.url.searchParams.get('level') || '';
+const verifiedOnly = Astro.url.searchParams.get('verified') === 'true';
+const sortBy = Astro.url.searchParams.get('sort') || 'campaigns';
+
+// Fetch creators
+let query = supabase
+  .from('profiles')
+  .select('id, full_name, username, email, avatar_url, bio, level, is_verified, completed_campaigns, total_earnings, social_instagram, social_tiktok, social_youtube')
+  .eq('role', 'creator')
+  .eq('is_active', true)
+  .eq('status', 'active');
+
+if (search) {
+  query = query.or(`full_name.ilike.%${search}%,username.ilike.%${search}%,bio.ilike.%${search}%`);
+}
+
+if (levelFilter) {
+  query = query.eq('level', parseInt(levelFilter));
+}
+
+if (verifiedOnly) {
+  query = query.eq('is_verified', true);
+}
+
+if (sortBy === 'campaigns') {
+  query = query.order('completed_campaigns', { ascending: false });
+} else if (sortBy === 'level') {
+  query = query.order('level', { ascending: false });
+} else if (sortBy === 'newest') {
+  query = query.order('created_at', { ascending: false });
+}
+
+const { data: creators } = await query.limit(50);
+
+// Get manager's campaigns for invite dropdown
+const { data: managerCampaigns } = await supabase
+  .from('campaigns')
+  .select('id, title')
+  .eq('manager_id', session.user.id)
+  .in('status', ['active', 'draft']);
+
+// Stats
+const totalCreators = creators?.length || 0;
+const verifiedCreators = creators?.filter(c => c.is_verified).length || 0;
+const level3Creators = creators?.filter(c => c.level === 3).length || 0;
+---
+
+<Layout title="Find Creators">
+  <div class="creators-page">
+    <!-- Header -->
+    <div class="page-header">
+      <div class="header-content">
+        <div>
+          <a href="/manager" class="back-link">← Back to Dashboard</a>
+          <h1>Find Creators</h1>
+          <p>Discover talented creators for your campaigns</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-content">
+      <!-- Stats -->
+      <div class="stats-row">
+        <div class="stat-chip">
+          <span class="stat-num">{totalCreators}</span>
+          <span class="stat-text">Creators Found</span>
+        </div>
+        <div class="stat-chip verified">
+          <span class="stat-num">{verifiedCreators}</span>
+          <span class="stat-text">Verified</span>
+        </div>
+        <div class="stat-chip expert">
+          <span class="stat-num">{level3Creators}</span>
+          <span class="stat-text">Expert Level</span>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="filters-section">
+        <form method="GET" class="filters-form">
+          <div class="search-box">
+            <input 
+              type="text" 
+              name="search" 
+              value={search}
+              placeholder="Search creators by name, username, or bio..."
+            />
+            <button type="submit" class="search-btn">🔍</button>
+          </div>
+
+          <div class="filter-chips">
+            <select name="level" onchange="this.form.submit()">
+              <option value="">All Levels</option>
+              <option value="1" selected={levelFilter === '1'}>Level 1 - Newcomer</option>
+              <option value="2" selected={levelFilter === '2'}>Level 2 - Rising Star</option>
+              <option value="3" selected={levelFilter === '3'}>Level 3 - Expert</option>
+            </select>
+
+            <label class="verified-toggle">
+              <input 
+                type="checkbox" 
+                name="verified" 
+                value="true"
+                checked={verifiedOnly}
+                onchange="this.form.submit()"
+              />
+              <span>✓ Verified Only</span>
+            </label>
+
+            <select name="sort" onchange="this.form.submit()">
+              <option value="campaigns" selected={sortBy === 'campaigns'}>Most Campaigns</option>
+              <option value="level" selected={sortBy === 'level'}>Highest Level</option>
+              <option value="newest" selected={sortBy === 'newest'}>Newest</option>
+            </select>
+          </div>
+        </form>
+      </div>
+
+      <!-- Creators Grid -->
+      {creators && creators.length > 0 ? (
+        <div class="creators-grid">
+          {creators.map(creator => (
+            <div class="creator-card">
+              <div class="creator-header">
+                <div class="creator-avatar">
+                  {creator.avatar_url ? (
+                    <img src={creator.avatar_url} alt={creator.full_name} />
+                  ) : (
+                    <span>{creator.full_name?.charAt(0) || '?'}</span>
+                  )}
+                </div>
+                <div class="creator-level" data-level={creator.level}>
+                  Lvl {creator.level || 1}
+                </div>
+              </div>
+
+              <div class="creator-info">
+                <div class="creator-name-row">
+                  <h3>{creator.full_name || 'Anonymous'}</h3>
+                  {creator.is_verified && <span class="verified-badge">✓</span>}
+                </div>
+                {creator.username && (
+                  <p class="creator-username">@{creator.username}</p>
+                )}
+                {creator.bio && (
+                  <p class="creator-bio">{creator.bio.substring(0, 100)}{creator.bio.length > 100 ? '...' : ''}</p>
+                )}
+              </div>
+
+              <div class="creator-stats">
+                <div class="creator-stat">
+                  <span class="stat-value">{creator.completed_campaigns || 0}</span>
+                  <span class="stat-label">Campaigns</span>
+                </div>
+                {creator.is_verified && (
+                  <div class="creator-stat">
+                    <span class="stat-value">${(creator.total_earnings || 0).toLocaleString()}</span>
+                    <span class="stat-label">Earned</span>
+                  </div>
+                )}
+              </div>
+
+              {(creator.social_instagram || creator.social_tiktok || creator.social_youtube) && (
+                <div class="creator-socials">
+                  {creator.social_instagram && (
+                    <a href={`https://instagram.com/${creator.social_instagram}`} target="_blank" class="social-icon" title="Instagram">
+                      📷
+                    </a>
+                  )}
+                  {creator.social_tiktok && (
+                    <a href={`https://tiktok.com/@${creator.social_tiktok}`} target="_blank" class="social-icon" title="TikTok">
+                      🎵
+                    </a>
+                  )}
+                  {creator.social_youtube && (
+                    <a href={`https://youtube.com/@${creator.social_youtube}`} target="_blank" class="social-icon" title="YouTube">
+                      ▶️
+                    </a>
+                  )}
+                </div>
+              )}
+
+              <div class="creator-actions">
+                <a href={`/profile/${creator.id}`} target="_blank" class="btn btn-secondary">View Profile</a>
+                {managerCampaigns && managerCampaigns.length > 0 && (
+                  <div class="invite-dropdown">
+                    <button type="button" class="btn btn-primary" onclick={`toggleInvite('${creator.id}')`}>
+                      Invite to Campaign
+                    </button>
+                    <div class="invite-menu" id={`invite-${creator.id}`}>
+                      {managerCampaigns.map(campaign => (
+                        <a href={`/manager/invite?creator=${creator.id}&campaign=${campaign.id}`} class="invite-option">
+                          {campaign.title}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div class="empty-state">
+          <span class="empty-icon">🔍</span>
+          <h2>No creators found</h2>
+          <p>Try adjusting your search filters</p>
+          <a href="/manager/creators" class="btn btn-secondary">Clear Filters</a>
+        </div>
+      )}
+    </div>
+  </div>
+
+  <script>
+    function toggleInvite(creatorId: string) {
+      const menu = document.getElementById(`invite-${creatorId}`);
+      document.querySelectorAll('.invite-menu.active').forEach(m => {
+        if (m !== menu) m.classList.remove('active');
+      });
+      menu?.classList.toggle('active');
+    }
+
+    // Close dropdowns on outside click
+    document.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.invite-dropdown')) {
+        document.querySelectorAll('.invite-menu.active').forEach(m => m.classList.remove('active'));
+      }
+    });
+  </script>
+
+  <style>
+    .creators-page {
+      min-height: 100vh;
+      background: #f8fafc;
+    }
+
+    .page-header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%);
+      padding: 2rem 0;
+    }
+
+    .header-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    .back-link {
+      color: rgba(255,255,255,0.7);
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+
+    .page-header h1 {
+      font-size: 1.75rem;
+      color: white;
+      margin: 0.5rem 0 0.25rem;
+    }
+
+    .page-header p {
+      color: rgba(255,255,255,0.7);
+      margin: 0;
+    }
+
+    .page-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    .stats-row {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-chip {
+      background: white;
+      padding: 0.75rem 1.25rem;
+      border-radius: 50px;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .stat-chip.verified { background: #d1fae5; }
+    .stat-chip.expert { background: #ede9fe; }
+
+    .stat-num {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .stat-text {
+      font-size: 0.8125rem;
+      color: #6b7280;
+    }
+
+    .filters-section {
+      background: white;
+      border-radius: 16px;
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .filters-form {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .search-box {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .search-box input {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 0.9375rem;
+    }
+
+    .search-box input:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+
+    .search-btn {
+      padding: 0.75rem 1rem;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .filter-chips {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .filter-chips select {
+      padding: 0.5rem 1rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      background: white;
+    }
+
+    .verified-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: #f9fafb;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+
+    .verified-toggle input:checked + span {
+      color: #059669;
+      font-weight: 500;
+    }
+
+    .creators-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .creator-card {
+      background: white;
+      border-radius: 20px;
+      padding: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      transition: all 0.2s;
+    }
+
+    .creator-card:hover {
+      box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+      transform: translateY(-4px);
+    }
+
+    .creator-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .creator-avatar {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #2563eb, #8b5cf6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 1.5rem;
+      overflow: hidden;
+    }
+
+    .creator-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .creator-level {
+      padding: 0.375rem 0.75rem;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: #f3f4f6;
+      color: #6b7280;
+    }
+
+    .creator-level[data-level="2"] {
+      background: #fef3c7;
+      color: #d97706;
+    }
+
+    .creator-level[data-level="3"] {
+      background: #ede9fe;
+      color: #7c3aed;
+    }
+
+    .creator-info {
+      flex: 1;
+    }
+
+    .creator-name-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .creator-name-row h3 {
+      margin: 0;
+      font-size: 1.125rem;
+      color: #1a1a2e;
+    }
+
+    .verified-badge {
+      background: #10b981;
+      color: white;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.625rem;
+    }
+
+    .creator-username {
+      margin: 0.25rem 0 0;
+      color: #6b7280;
+      font-size: 0.875rem;
+    }
+
+    .creator-bio {
+      margin: 0.5rem 0 0;
+      color: #4b5563;
+      font-size: 0.8125rem;
+      line-height: 1.5;
+    }
+
+    .creator-stats {
+      display: flex;
+      gap: 1.5rem;
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 12px;
+    }
+
+    .creator-stat {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .creator-stat .stat-value {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .creator-stat .stat-label {
+      font-size: 0.6875rem;
+      color: #9ca3af;
+      text-transform: uppercase;
+    }
+
+    .creator-socials {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .social-icon {
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f3f4f6;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 1rem;
+      transition: all 0.2s;
+    }
+
+    .social-icon:hover {
+      background: #e5e7eb;
+      transform: scale(1.1);
+    }
+
+    .creator-actions {
+      display: flex;
+      gap: 0.75rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.375rem;
+      padding: 0.625rem 1rem;
+      border-radius: 8px;
+      font-weight: 500;
+      text-decoration: none;
+      font-size: 0.875rem;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      flex: 1;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      color: white;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .invite-dropdown {
+      position: relative;
+      flex: 1;
+    }
+
+    .invite-dropdown .btn {
+      width: 100%;
+    }
+
+    .invite-menu {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      margin-top: 0.5rem;
+      display: none;
+      z-index: 10;
+      overflow: hidden;
+    }
+
+    .invite-menu.active {
+      display: block;
+    }
+
+    .invite-option {
+      display: block;
+      padding: 0.75rem 1rem;
+      text-decoration: none;
+      color: #374151;
+      font-size: 0.875rem;
+      border-bottom: 1px solid #f3f4f6;
+    }
+
+    .invite-option:last-child {
+      border-bottom: none;
+    }
+
+    .invite-option:hover {
+      background: #f9fafb;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      background: white;
+      border-radius: 16px;
+    }
+
+    .empty-icon {
+      font-size: 4rem;
+      display: block;
+      margin-bottom: 1rem;
+    }
+
+    .empty-state h2 {
+      margin: 0 0 0.5rem 0;
+      color: #1a1a2e;
+    }
+
+    .empty-state p {
+      color: #6b7280;
+      margin: 0 0 1.5rem 0;
+    }
+
+    @media (max-width: 640px) {
+      .stats-row {
+        flex-direction: column;
+      }
+
+      .creators-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .filter-chips {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+  </style>
+</Layout>
