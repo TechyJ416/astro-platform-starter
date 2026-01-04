@@ -1,0 +1,320 @@
+---
+// src/pages/admin/preview/[userId]/manager-applications.astro
+export const prerender = false;
+
+import AdminLayout from "../../../../layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const { userId } = Astro.params;
+
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+const isAdmin = isMasterKeySession || profile?.role === 'admin';
+if (!isAdmin) {
+  return Astro.redirect('/admin');
+}
+
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+// Fetch target user
+const { data: targetUser } = await supabase
+  .from('profiles')
+  .select('*')
+  .eq('id', userId)
+  .single();
+
+if (!targetUser) {
+  return Astro.redirect('/admin/users?error=user_not_found');
+}
+
+// Fetch manager's campaigns
+const { data: campaigns } = await supabase
+  .from('campaigns')
+  .select('id, title')
+  .eq('manager_id', userId);
+
+const campaignIds = campaigns?.map(c => c.id) || [];
+
+// Fetch applications
+const { data: applications } = campaignIds.length > 0
+  ? await supabase
+      .from('campaign_applications')
+      .select(`
+        *,
+        campaign:campaigns(id, title, payout_per_post),
+        creator:profiles!campaign_applications_creator_id_fkey(id, full_name, email, avatar_url, bio, level, is_verified, completed_campaigns)
+      `)
+      .in('campaign_id', campaignIds)
+      .order('created_at', { ascending: false })
+  : { data: [] };
+
+// Filter
+const filter = Astro.url.searchParams.get('filter') || 'all';
+
+const filteredApps = (applications || []).filter(app => {
+  if (filter === 'all') return true;
+  return app.status === filter;
+});
+
+const statusCounts = {
+  all: applications?.length || 0,
+  pending: applications?.filter(a => a.status === 'pending').length || 0,
+  approved: applications?.filter(a => a.status === 'approved').length || 0,
+  rejected: applications?.filter(a => a.status === 'rejected').length || 0,
+};
+---
+
+<AdminLayout title={`Preview: ${targetUser.full_name} - Applications`}>
+  <div class="preview-container">
+    <!-- Preview Banner -->
+    <div class="preview-banner">
+      <div class="banner-content">
+        <span class="banner-icon">👁️</span>
+        <span>Previewing <strong>{targetUser.full_name}</strong>'s Applications</span>
+        <a href={`/admin/preview/${userId}`} class="banner-link">← Preview Hub</a>
+      </div>
+    </div>
+
+    <div class="applications-page">
+      <!-- Header -->
+      <div class="page-header">
+        <div class="header-content">
+          <div>
+            <a href={`/admin/preview/${userId}/manager`} class="back-link">← Back to Dashboard</a>
+            <h1>Applications Received</h1>
+            <p>{applications?.length || 0} total applications to their campaigns</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="page-content">
+        <!-- Filters -->
+        <div class="filters-bar">
+          <div class="filter-tabs">
+            <a href="?filter=all" class={`tab ${filter === 'all' ? 'active' : ''}`}>All ({statusCounts.all})</a>
+            <a href="?filter=pending" class={`tab ${filter === 'pending' ? 'active' : ''}`}>Pending ({statusCounts.pending})</a>
+            <a href="?filter=approved" class={`tab ${filter === 'approved' ? 'active' : ''}`}>Approved ({statusCounts.approved})</a>
+            <a href="?filter=rejected" class={`tab ${filter === 'rejected' ? 'active' : ''}`}>Rejected ({statusCounts.rejected})</a>
+          </div>
+        </div>
+
+        <!-- Applications List -->
+        {filteredApps.length > 0 ? (
+          <div class="applications-list">
+            {filteredApps.map(app => (
+              <div class={`application-card ${app.status}`}>
+                <div class="application-header">
+                  <div class="creator-info">
+                    <div class="creator-avatar">
+                      {app.creator?.avatar_url ? (
+                        <img src={app.creator.avatar_url} alt={app.creator.full_name} />
+                      ) : (
+                        <span>{app.creator?.full_name?.charAt(0) || '?'}</span>
+                      )}
+                    </div>
+                    <div class="creator-details">
+                      <div class="creator-name-row">
+                        <h3>{app.creator?.full_name || 'Unknown Creator'}</h3>
+                        {app.creator?.is_verified && <span class="verified-badge">✓</span>}
+                        <span class="level-badge">Lvl {app.creator?.level || 1}</span>
+                      </div>
+                      <p class="creator-email">{app.creator?.email}</p>
+                      <div class="creator-stats">
+                        <span>{app.creator?.completed_campaigns || 0} campaigns completed</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="application-status">
+                    <span class={`status-badge ${app.status}`}>{app.status}</span>
+                    <span class="applied-date">Applied {new Date(app.created_at).toLocaleDateString()}</span>
+                  </div>
+                </div>
+
+                <div class="campaign-info">
+                  <span class="campaign-label">Applied for:</span>
+                  <span class="campaign-link">{app.campaign?.title}</span>
+                  <span class="campaign-payout">${app.campaign?.payout_per_post || 0}/post</span>
+                </div>
+
+                {app.message && (
+                  <div class="application-message">
+                    <h4>Application Message</h4>
+                    <p>{app.message}</p>
+                  </div>
+                )}
+
+                <div class="admin-actions">
+                  <a href={`/profile/${app.creator?.id}`} target="_blank" class="btn btn-secondary">View Creator Profile</a>
+                  <a href={`/admin/users?edit=${app.creator?.id}`} class="btn btn-outline">Edit Creator</a>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div class="empty-state">
+            <span class="empty-icon">📝</span>
+            <h2>No applications found</h2>
+            <p>{filter === 'all' ? "No creators have applied to this manager's campaigns yet." : `No ${filter} applications.`}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .preview-container { min-height: 100vh; background: #f8fafc; }
+
+    .preview-banner {
+      background: linear-gradient(135deg, #7c3aed, #a855f7);
+      color: white;
+      padding: 0.75rem 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .banner-content { max-width: 1000px; margin: 0 auto; display: flex; align-items: center; gap: 1rem; font-size: 0.875rem; }
+    .banner-icon { font-size: 1.25rem; }
+    .banner-link { margin-left: auto; color: rgba(255,255,255,0.9); text-decoration: none; padding: 0.25rem 0.75rem; background: rgba(255,255,255,0.2); border-radius: 4px; }
+
+    .page-header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%);
+      padding: 2rem 0;
+    }
+
+    .header-content { max-width: 1000px; margin: 0 auto; padding: 0 1.5rem; }
+    .back-link { color: rgba(255,255,255,0.7); text-decoration: none; font-size: 0.875rem; display: inline-block; margin-bottom: 0.5rem; }
+    .page-header h1 { font-size: 1.75rem; color: white; margin: 0 0 0.25rem 0; }
+    .page-header p { color: rgba(255,255,255,0.7); margin: 0; }
+
+    .page-content { max-width: 1000px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+    .filters-bar { margin-bottom: 2rem; }
+    .filter-tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .tab { padding: 0.5rem 1rem; background: white; border: 1px solid #e5e7eb; border-radius: 8px; text-decoration: none; color: #6b7280; font-size: 0.875rem; }
+    .tab:hover { border-color: #2563eb; color: #2563eb; }
+    .tab.active { background: #2563eb; border-color: #2563eb; color: white; }
+
+    .applications-list { display: flex; flex-direction: column; gap: 1.5rem; }
+
+    .application-card {
+      background: white;
+      border-radius: 16px;
+      padding: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      border-left: 4px solid;
+    }
+
+    .application-card.pending { border-left-color: #f59e0b; }
+    .application-card.approved { border-left-color: #10b981; }
+    .application-card.rejected { border-left-color: #ef4444; }
+
+    .application-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; }
+
+    .creator-info { display: flex; gap: 1rem; }
+
+    .creator-avatar {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #2563eb, #8b5cf6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 1.25rem;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .creator-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+    .creator-name-row { display: flex; align-items: center; gap: 0.5rem; }
+    .creator-name-row h3 { margin: 0; font-size: 1.125rem; color: #1a1a2e; }
+
+    .verified-badge {
+      background: #10b981;
+      color: white;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.625rem;
+    }
+
+    .level-badge { font-size: 0.6875rem; padding: 0.125rem 0.375rem; background: #f3f4f6; border-radius: 4px; color: #6b7280; }
+
+    .creator-email { margin: 0.25rem 0; font-size: 0.8125rem; color: #6b7280; }
+    .creator-stats { font-size: 0.75rem; color: #9ca3af; }
+
+    .application-status { text-align: right; }
+
+    .status-badge {
+      display: inline-block;
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.625rem;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+    .status-badge.approved { background: #d1fae5; color: #059669; }
+    .status-badge.rejected { background: #fee2e2; color: #dc2626; }
+
+    .applied-date { display: block; font-size: 0.75rem; color: #9ca3af; margin-top: 0.25rem; }
+
+    .campaign-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: #f9fafb;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+
+    .campaign-label { font-size: 0.8125rem; color: #6b7280; }
+    .campaign-link { color: #2563eb; font-weight: 500; }
+    .campaign-payout { font-size: 0.8125rem; color: #059669; font-weight: 500; margin-left: auto; }
+
+    .application-message {
+      margin-bottom: 1rem;
+      padding: 1rem;
+      background: #f9fafb;
+      border-radius: 8px;
+    }
+
+    .application-message h4 { font-size: 0.8125rem; color: #6b7280; margin: 0 0 0.5rem 0; text-transform: uppercase; letter-spacing: 0.05em; }
+    .application-message p { margin: 0; color: #374151; font-size: 0.9375rem; line-height: 1.6; }
+
+    .admin-actions { display: flex; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; }
+
+    .btn { display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.625rem 1rem; border-radius: 8px; font-weight: 500; text-decoration: none; font-size: 0.875rem; border: none; cursor: pointer; }
+    .btn-secondary { background: #2563eb; color: white; }
+    .btn-outline { background: white; color: #374151; border: 1px solid #e5e7eb; }
+
+    .empty-state { text-align: center; padding: 4rem 2rem; background: white; border-radius: 16px; }
+    .empty-icon { font-size: 4rem; display: block; margin-bottom: 1rem; }
+    .empty-state h2 { margin: 0 0 0.5rem 0; color: #1a1a2e; }
+    .empty-state p { color: #6b7280; margin: 0; }
+
+    @media (max-width: 640px) {
+      .application-header { flex-direction: column; gap: 1rem; }
+      .application-status { text-align: left; }
+    }
+  </style>
+</AdminLayout>
