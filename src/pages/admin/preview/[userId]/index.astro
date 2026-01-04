@@ -39,28 +39,44 @@ if (error || !targetUser) {
   return Astro.redirect('/admin/users?error=user_not_found');
 }
 
-// Fetch user stats
-const { count: campaignCount } = await supabase
+// Fetch user stats based on role
+// For creators
+const { count: applicationCount } = await supabase
   .from('campaign_applications')
   .select('*', { count: 'exact', head: true })
-  .eq('user_id', userId);
+  .eq('creator_id', userId);
 
 const { count: submissionCount } = await supabase
-  .from('content_submissions')
+  .from('posts')
   .select('*', { count: 'exact', head: true })
-  .eq('user_id', userId);
+  .eq('creator_id', userId);
 
 const { data: earnings } = await supabase
-  .from('creator_payments')
+  .from('payments')
   .select('amount')
-  .eq('user_id', userId)
+  .eq('creator_id', userId)
   .eq('status', 'completed');
 
 const totalEarnings = earnings?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
 
+// For managers
+const { count: managedCampaignCount } = await supabase
+  .from('campaigns')
+  .select('*', { count: 'exact', head: true })
+  .eq('manager_id', userId);
+
+const { data: managerCampaigns } = await supabase
+  .from('campaigns')
+  .select('id, budget, amount_spent')
+  .eq('manager_id', userId);
+
+const totalBudget = managerCampaigns?.reduce((sum, c) => sum + (c.budget || 0), 0) || 0;
+const totalSpent = managerCampaigns?.reduce((sum, c) => sum + (c.amount_spent || 0), 0) || 0;
+
 // Role-specific preview options
 const isCreator = targetUser.role === 'creator';
-const isManager = targetUser.role === 'moderator' || targetUser.role === 'community_manager';
+const isManager = targetUser.role === 'manager';
+const isModerator = targetUser.role === 'moderator';
 const isAdminUser = targetUser.role === 'admin';
 ---
 
@@ -91,18 +107,50 @@ const isAdminUser = targetUser.role === 'admin';
         </div>
       </div>
       <div class="user-stats">
-        <div class="stat">
-          <span class="stat-value">{campaignCount || 0}</span>
-          <span class="stat-label">Campaigns</span>
-        </div>
-        <div class="stat">
-          <span class="stat-value">{submissionCount || 0}</span>
-          <span class="stat-label">Submissions</span>
-        </div>
-        <div class="stat">
-          <span class="stat-value">${totalEarnings.toFixed(0)}</span>
-          <span class="stat-label">Earned</span>
-        </div>
+        {isCreator && (
+          <>
+            <div class="stat">
+              <span class="stat-value">{applicationCount || 0}</span>
+              <span class="stat-label">Applications</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">{submissionCount || 0}</span>
+              <span class="stat-label">Submissions</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">${totalEarnings.toFixed(0)}</span>
+              <span class="stat-label">Earned</span>
+            </div>
+          </>
+        )}
+        {isManager && (
+          <>
+            <div class="stat">
+              <span class="stat-value">{managedCampaignCount || 0}</span>
+              <span class="stat-label">Campaigns</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">${totalBudget.toLocaleString()}</span>
+              <span class="stat-label">Total Budget</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">${totalSpent.toLocaleString()}</span>
+              <span class="stat-label">Spent</span>
+            </div>
+          </>
+        )}
+        {(isModerator || isAdminUser) && !isManager && !isCreator && (
+          <>
+            <div class="stat">
+              <span class="stat-value">-</span>
+              <span class="stat-label">Role</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">{targetUser.role}</span>
+              <span class="stat-label">Staff</span>
+            </div>
+          </>
+        )}
       </div>
     </div>
 
@@ -139,16 +187,57 @@ const isAdminUser = targetUser.role === 'admin';
         </>
       )}
 
-      {/* Manager/Moderator Previews */}
+      {/* Campaign Manager Previews */}
       {(isManager || isAdminUser) && (
         <>
-          <a href={`/admin/preview/${userId}/community-dashboard`} class="preview-card manager">
+          <a href={`/admin/preview/${userId}/manager`} class="preview-card manager">
+            <div class="preview-icon">📊</div>
+            <h3>Manager Dashboard</h3>
+            <p>View campaign management dashboard and stats</p>
+          </a>
+          
+          <a href={`/admin/preview/${userId}/manager-campaigns`} class="preview-card manager">
+            <div class="preview-icon">📢</div>
+            <h3>Manager Campaigns</h3>
+            <p>See campaigns they've created and manage</p>
+          </a>
+          
+          <a href={`/admin/preview/${userId}/manager-applications`} class="preview-card manager">
+            <div class="preview-icon">📝</div>
+            <h3>Applications Received</h3>
+            <p>View creator applications to their campaigns</p>
+          </a>
+          
+          <a href={`/admin/preview/${userId}/manager-submissions`} class="preview-card manager">
+            <div class="preview-icon">📤</div>
+            <h3>Content Submissions</h3>
+            <p>Review submissions from creators</p>
+          </a>
+          
+          <a href={`/admin/preview/${userId}/manager-creators`} class="preview-card manager">
+            <div class="preview-icon">🎨</div>
+            <h3>Find Creators</h3>
+            <p>Creator discovery and invitation tools</p>
+          </a>
+          
+          <a href={`/admin/preview/${userId}/manager-billing`} class="preview-card manager">
+            <div class="preview-icon">💳</div>
+            <h3>Billing & Spend</h3>
+            <p>View budget spend and billing history</p>
+          </a>
+        </>
+      )}
+
+      {/* Moderator Previews */}
+      {(isModerator || isAdminUser) && (
+        <>
+          <a href={`/admin/preview/${userId}/community-dashboard`} class="preview-card moderator">
             <div class="preview-icon">🏘️</div>
             <h3>Community Dashboard</h3>
             <p>View community management tools and stats</p>
           </a>
           
-          <a href={`/admin/preview/${userId}/moderation`} class="preview-card manager">
+          <a href={`/admin/preview/${userId}/moderation`} class="preview-card moderator">
             <div class="preview-icon">🛡️</div>
             <h3>Moderation Queue</h3>
             <p>See content awaiting moderation</p>
@@ -164,15 +253,46 @@ const isAdminUser = targetUser.role === 'admin';
           <p>Preview the admin control panel view</p>
         </a>
       )}
+
+      {/* Public Profile for all */}
+      <a href={`/profile/${userId}`} target="_blank" class="preview-card">
+        <div class="preview-icon">👁️</div>
+        <h3>Public Profile</h3>
+        <p>View their public profile page</p>
+      </a>
     </div>
 
     <!-- Quick Actions -->
     <h2 class="section-title">Quick Actions</h2>
     <div class="actions-row">
-      <a href={`/admin/users/${userId}`} class="btn btn-secondary">📝 Edit User</a>
+      <a href={`/admin/users?edit=${userId}`} class="btn btn-secondary">📝 Edit User</a>
+      <a href={`/admin/badges?user=${userId}`} class="btn btn-secondary">🏆 Manage Badges</a>
+      <a href={`/profile/${userId}`} target="_blank" class="btn btn-secondary">👤 Public Profile</a>
       <a href={`mailto:${targetUser.email}`} class="btn btn-secondary">✉️ Send Email</a>
       <button class="btn btn-primary" onclick="copyUserId()">📋 Copy User ID</button>
     </div>
+
+    {isManager && (
+      <>
+        <h2 class="section-title">Manager Actions</h2>
+        <div class="actions-row">
+          <a href={`/admin/campaigns?manager=${userId}`} class="btn btn-secondary">📢 View Campaigns</a>
+          <a href={`/admin/applications?manager=${userId}`} class="btn btn-secondary">📝 View Applications</a>
+          <a href={`/admin/submissions?manager=${userId}`} class="btn btn-secondary">📤 View Submissions</a>
+        </div>
+      </>
+    )}
+
+    {isCreator && (
+      <>
+        <h2 class="section-title">Creator Actions</h2>
+        <div class="actions-row">
+          <a href={`/admin/applications?creator=${userId}`} class="btn btn-secondary">📝 Applications</a>
+          <a href={`/admin/submissions?creator=${userId}`} class="btn btn-secondary">📤 Submissions</a>
+          <a href={`/admin/payments?creator=${userId}`} class="btn btn-secondary">💰 Payments</a>
+        </div>
+      </>
+    )}
   </div>
 
   <script is:inline define:vars={{ userId }}>
@@ -346,10 +466,19 @@ const isAdminUser = targetUser.role === 'admin';
     }
 
     .preview-card.manager {
-      border-color: #d1fae5;
+      border-color: #dbeafe;
     }
 
     .preview-card.manager:hover {
+      border-color: #2563eb;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+    }
+
+    .preview-card.moderator {
+      border-color: #d1fae5;
+    }
+
+    .preview-card.moderator:hover {
       border-color: #10b981;
       box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15);
     }
