@@ -1,0 +1,318 @@
+---
+// src/pages/admin/preview/[userId]/manager-submissions.astro
+export const prerender = false;
+
+import AdminLayout from "../../../../layouts/AdminLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const { userId } = Astro.params;
+
+const isMasterKeySession = Astro.locals.isMasterKeySession || false;
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!isMasterKeySession && !session) {
+  return Astro.redirect('/admin/login');
+}
+
+const isAdmin = isMasterKeySession || profile?.role === 'admin';
+if (!isAdmin) {
+  return Astro.redirect('/admin');
+}
+
+const supabase = createClient(
+  import.meta.env.SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+// Fetch target user
+const { data: targetUser } = await supabase
+  .from('profiles')
+  .select('*')
+  .eq('id', userId)
+  .single();
+
+if (!targetUser) {
+  return Astro.redirect('/admin/users?error=user_not_found');
+}
+
+// Fetch manager's campaigns
+const { data: campaigns } = await supabase
+  .from('campaigns')
+  .select('id, title, payout_per_post')
+  .eq('manager_id', userId);
+
+const campaignIds = campaigns?.map(c => c.id) || [];
+
+// Fetch submissions
+const { data: submissions } = campaignIds.length > 0
+  ? await supabase
+      .from('posts')
+      .select(`
+        *,
+        campaign:campaigns(id, title, payout_per_post),
+        creator:profiles!posts_creator_id_fkey(id, full_name, avatar_url, level, is_verified)
+      `)
+      .in('campaign_id', campaignIds)
+      .order('created_at', { ascending: false })
+  : { data: [] };
+
+// Filter
+const filter = Astro.url.searchParams.get('filter') || 'all';
+
+const filteredSubs = (submissions || []).filter(sub => {
+  if (filter === 'all') return true;
+  return sub.status === filter;
+});
+
+const statusCounts = {
+  all: submissions?.length || 0,
+  pending: submissions?.filter(s => s.status === 'pending').length || 0,
+  approved: submissions?.filter(s => s.status === 'approved').length || 0,
+  rejected: submissions?.filter(s => s.status === 'rejected').length || 0,
+  revision_requested: submissions?.filter(s => s.status === 'revision_requested').length || 0,
+};
+---
+
+<AdminLayout title={`Preview: ${targetUser.full_name} - Submissions`}>
+  <div class="preview-container">
+    <!-- Preview Banner -->
+    <div class="preview-banner">
+      <div class="banner-content">
+        <span class="banner-icon">👁️</span>
+        <span>Previewing <strong>{targetUser.full_name}</strong>'s Submissions</span>
+        <a href={`/admin/preview/${userId}`} class="banner-link">← Preview Hub</a>
+      </div>
+    </div>
+
+    <div class="submissions-page">
+      <!-- Header -->
+      <div class="page-header">
+        <div class="header-content">
+          <div>
+            <a href={`/admin/preview/${userId}/manager`} class="back-link">← Back to Dashboard</a>
+            <h1>Content Submissions</h1>
+            <p>{submissions?.length || 0} submissions to their campaigns</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="page-content">
+        <!-- Filters -->
+        <div class="filters-bar">
+          <div class="filter-tabs">
+            <a href="?filter=all" class={`tab ${filter === 'all' ? 'active' : ''}`}>All ({statusCounts.all})</a>
+            <a href="?filter=pending" class={`tab ${filter === 'pending' ? 'active' : ''}`}>Pending ({statusCounts.pending})</a>
+            <a href="?filter=revision_requested" class={`tab ${filter === 'revision_requested' ? 'active' : ''}`}>Revisions ({statusCounts.revision_requested})</a>
+            <a href="?filter=approved" class={`tab ${filter === 'approved' ? 'active' : ''}`}>Approved ({statusCounts.approved})</a>
+            <a href="?filter=rejected" class={`tab ${filter === 'rejected' ? 'active' : ''}`}>Rejected ({statusCounts.rejected})</a>
+          </div>
+        </div>
+
+        <!-- Submissions Grid -->
+        {filteredSubs.length > 0 ? (
+          <div class="submissions-grid">
+            {filteredSubs.map(sub => (
+              <div class={`submission-card ${sub.status}`}>
+                <!-- Preview -->
+                <div class="submission-preview">
+                  {sub.thumbnail_url || sub.media_url || sub.content_url ? (
+                    <img src={sub.thumbnail_url || sub.media_url || sub.content_url} alt="Submission preview" />
+                  ) : (
+                    <div class="no-preview">
+                      <span>📄</span>
+                      <p>No preview</p>
+                    </div>
+                  )}
+                  <span class={`status-badge ${sub.status}`}>
+                    {sub.status.replace('_', ' ')}
+                  </span>
+                </div>
+
+                <!-- Content -->
+                <div class="submission-content">
+                  <h3>{sub.title}</h3>
+                  
+                  <div class="creator-row">
+                    <div class="creator-avatar-small">
+                      {sub.creator?.avatar_url ? (
+                        <img src={sub.creator.avatar_url} alt="" />
+                      ) : (
+                        <span>{sub.creator?.full_name?.charAt(0) || '?'}</span>
+                      )}
+                    </div>
+                    <span class="creator-name">
+                      {sub.creator?.full_name}
+                      {sub.creator?.is_verified && <span class="verified-mini">✓</span>}
+                    </span>
+                  </div>
+
+                  <div class="campaign-row">
+                    <span class="campaign-name">{sub.campaign?.title}</span>
+                    <span class="payout">${sub.campaign?.payout_per_post || 0}</span>
+                  </div>
+
+                  {sub.caption && (
+                    <p class="submission-caption">{sub.caption.substring(0, 100)}{sub.caption.length > 100 ? '...' : ''}</p>
+                  )}
+
+                  <div class="submission-meta">
+                    <span>📅 {new Date(sub.created_at).toLocaleDateString()}</span>
+                    {sub.media_type && <span>📹 {sub.media_type}</span>}
+                  </div>
+
+                  {sub.content_url && (
+                    <a href={sub.content_url} target="_blank" class="content-link">
+                      🔗 View Content
+                    </a>
+                  )}
+                </div>
+
+                {/* Admin Actions */}
+                <div class="admin-actions">
+                  <a href={`/profile/${sub.creator?.id}`} target="_blank" class="btn btn-sm">View Creator</a>
+                  <a href={`/admin/users?edit=${sub.creator?.id}`} class="btn btn-sm btn-outline">Edit</a>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div class="empty-state">
+            <span class="empty-icon">📤</span>
+            <h2>No submissions found</h2>
+            <p>{filter === 'all' ? "No content has been submitted yet." : `No ${filter.replace('_', ' ')} submissions.`}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .preview-container { min-height: 100vh; background: #f8fafc; }
+
+    .preview-banner {
+      background: linear-gradient(135deg, #7c3aed, #a855f7);
+      color: white;
+      padding: 0.75rem 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .banner-content { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 1rem; font-size: 0.875rem; }
+    .banner-icon { font-size: 1.25rem; }
+    .banner-link { margin-left: auto; color: rgba(255,255,255,0.9); text-decoration: none; padding: 0.25rem 0.75rem; background: rgba(255,255,255,0.2); border-radius: 4px; }
+
+    .page-header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%);
+      padding: 2rem 0;
+    }
+
+    .header-content { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
+    .back-link { color: rgba(255,255,255,0.7); text-decoration: none; font-size: 0.875rem; }
+    .page-header h1 { font-size: 1.75rem; color: white; margin: 0.5rem 0 0.25rem; }
+    .page-header p { color: rgba(255,255,255,0.7); margin: 0; }
+
+    .page-content { max-width: 1200px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+    .filters-bar { margin-bottom: 2rem; }
+    .filter-tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .tab { padding: 0.5rem 1rem; background: white; border: 1px solid #e5e7eb; border-radius: 8px; text-decoration: none; color: #6b7280; font-size: 0.875rem; }
+    .tab:hover { border-color: #2563eb; color: #2563eb; }
+    .tab.active { background: #2563eb; border-color: #2563eb; color: white; }
+
+    .submissions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; }
+
+    .submission-card {
+      background: white;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .submission-preview {
+      position: relative;
+      aspect-ratio: 16/9;
+      background: #f3f4f6;
+    }
+
+    .submission-preview img { width: 100%; height: 100%; object-fit: cover; }
+
+    .no-preview {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #9ca3af;
+    }
+
+    .no-preview span { font-size: 2rem; }
+    .no-preview p { margin: 0.5rem 0 0; font-size: 0.875rem; }
+
+    .status-badge {
+      position: absolute;
+      top: 0.75rem;
+      right: 0.75rem;
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.625rem;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.pending { background: #fef3c7; color: #d97706; }
+    .status-badge.approved { background: #d1fae5; color: #059669; }
+    .status-badge.rejected { background: #fee2e2; color: #dc2626; }
+    .status-badge.revision_requested { background: #dbeafe; color: #2563eb; }
+
+    .submission-content { padding: 1.25rem; flex: 1; display: flex; flex-direction: column; gap: 0.75rem; }
+    .submission-content h3 { margin: 0; font-size: 1rem; color: #1a1a2e; }
+
+    .creator-row { display: flex; align-items: center; gap: 0.5rem; }
+
+    .creator-avatar-small {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #2563eb, #8b5cf6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 0.75rem;
+      font-weight: 600;
+      overflow: hidden;
+    }
+
+    .creator-avatar-small img { width: 100%; height: 100%; object-fit: cover; }
+    .creator-name { font-size: 0.875rem; color: #374151; }
+    .verified-mini { color: #10b981; font-size: 0.75rem; }
+
+    .campaign-row { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; background: #f9fafb; border-radius: 6px; }
+    .campaign-name { font-size: 0.8125rem; color: #6b7280; }
+    .payout { font-size: 0.875rem; font-weight: 600; color: #059669; }
+
+    .submission-caption { margin: 0; font-size: 0.8125rem; color: #6b7280; line-height: 1.5; }
+    .submission-meta { display: flex; gap: 1rem; font-size: 0.75rem; color: #9ca3af; }
+    .content-link { font-size: 0.8125rem; color: #2563eb; text-decoration: none; }
+
+    .admin-actions { display: flex; gap: 0.5rem; padding: 1rem 1.25rem; border-top: 1px solid #e5e7eb; }
+
+    .btn { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.5rem 0.875rem; border-radius: 6px; font-weight: 500; font-size: 0.8125rem; border: none; cursor: pointer; text-decoration: none; flex: 1; justify-content: center; }
+    .btn-sm { background: #2563eb; color: white; }
+    .btn-outline { background: white; color: #374151; border: 1px solid #e5e7eb; }
+
+    .empty-state { text-align: center; padding: 4rem 2rem; background: white; border-radius: 16px; }
+    .empty-icon { font-size: 4rem; display: block; margin-bottom: 1rem; }
+    .empty-state h2 { margin: 0 0 0.5rem 0; color: #1a1a2e; }
+    .empty-state p { color: #6b7280; margin: 0; }
+
+    @media (max-width: 640px) {
+      .submissions-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</AdminLayout>
