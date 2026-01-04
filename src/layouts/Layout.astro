@@ -371,69 +371,280 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
     </style>
 
     <script is:inline>
-      class BackgroundParticles {
+      class CosmicBlobSystem {
         constructor(canvas) {
           this.canvas = canvas;
           this.ctx = canvas.getContext('2d');
-          this.stars = [];
+          this.particles = [];
+          this.backgroundStars = [];
           this.time = 0;
+          this.mouseX = 0;
+          this.mouseY = 0;
+          this.scrollOffset = 0;
+          
+          // Blob configuration
+          this.blobCenterX = 0;
+          this.connectionDistance = 120;
+          this.particleCount = 400;
+          this.backgroundStarCount = 300;
+          
           this.init();
           this.animate();
         }
 
         init() {
           this.resize();
-          this.createStars();
-          window.addEventListener('resize', () => { this.resize(); this.createStars(); });
+          this.createBackgroundStars();
+          this.createBlobParticles();
+          
+          window.addEventListener('resize', () => {
+            this.resize();
+            this.createBackgroundStars();
+            this.createBlobParticles();
+          });
+          
+          window.addEventListener('scroll', () => {
+            this.scrollOffset = window.scrollY * 0.3;
+          });
+          
+          window.addEventListener('mousemove', (e) => {
+            this.mouseX = e.clientX;
+            this.mouseY = e.clientY;
+          });
         }
 
         resize() {
           this.canvas.width = window.innerWidth;
           this.canvas.height = window.innerHeight;
+          this.blobCenterX = this.canvas.width / 2;
         }
 
-        createStars() {
-          this.stars = [];
-          const count = Math.floor((this.canvas.width * this.canvas.height) / 8000);
-          for (let i = 0; i < count; i++) {
-            this.stars.push({
+        createBackgroundStars() {
+          this.backgroundStars = [];
+          for (let i = 0; i < this.backgroundStarCount; i++) {
+            this.backgroundStars.push({
               x: Math.random() * this.canvas.width,
               y: Math.random() * this.canvas.height,
-              size: Math.random() * 1.5 + 0.3,
-              brightness: Math.random() * 0.6 + 0.2,
-              twinkleSpeed: Math.random() * 0.02 + 0.005,
-              twinklePhase: Math.random() * Math.PI * 2,
-              color: this.getColor()
+              size: Math.random() * 1.2 + 0.2,
+              brightness: Math.random() * 0.4 + 0.1,
+              twinkleSpeed: Math.random() * 0.015 + 0.005,
+              twinklePhase: Math.random() * Math.PI * 2
             });
           }
         }
 
-        getColor() {
-          const colors = [
-            { r: 255, g: 255, b: 255 },
-            { r: 200, g: 220, b: 255 },
-            { r: 180, g: 200, b: 255 },
-            { r: 220, g: 200, b: 255 }
-          ];
-          return colors[Math.floor(Math.random() * colors.length)];
+        createBlobParticles() {
+          this.particles = [];
+          const centerX = this.canvas.width / 2;
+          const pageHeight = Math.max(document.body.scrollHeight, this.canvas.height * 3);
+          
+          for (let i = 0; i < this.particleCount; i++) {
+            // Vertical distribution along the page
+            const yPos = Math.random() * pageHeight;
+            
+            // Horizontal distribution - denser in middle, spread on sides
+            const distFromCenter = this.gaussianRandom() * 200;
+            const xPos = centerX + distFromCenter;
+            
+            // Determine if core particle (dense middle) or floating (sides)
+            const isCore = Math.abs(distFromCenter) < 100;
+            
+            const baseSize = isCore ? 
+              Math.random() * 2.5 + 1 : 
+              Math.random() * 1.8 + 0.5;
+            
+            const color = this.getParticleColor(Math.abs(distFromCenter) / 200);
+            
+            this.particles.push({
+              baseX: xPos,
+              baseY: yPos,
+              x: xPos,
+              y: yPos,
+              size: baseSize,
+              color: color,
+              isCore: isCore,
+              
+              // Floating motion
+              floatRadius: isCore ? 
+                Math.random() * 15 + 5 : 
+                Math.random() * 40 + 20,
+              floatSpeedX: Math.random() * 0.0008 + 0.0002,
+              floatSpeedY: Math.random() * 0.0006 + 0.0002,
+              floatPhaseX: Math.random() * Math.PI * 2,
+              floatPhaseY: Math.random() * Math.PI * 2,
+              
+              // Vertical drift
+              driftSpeed: (Math.random() - 0.5) * 0.3,
+              
+              // Pulse
+              pulseSpeed: Math.random() * 0.02 + 0.01,
+              pulsePhase: Math.random() * Math.PI * 2,
+              
+              // Brightness
+              brightness: isCore ? 
+                Math.random() * 0.4 + 0.6 : 
+                Math.random() * 0.5 + 0.3
+            });
+          }
+        }
+
+        gaussianRandom() {
+          let u = 0, v = 0;
+          while (u === 0) u = Math.random();
+          while (v === 0) v = Math.random();
+          return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        }
+
+        getParticleColor(distRatio) {
+          // Core particles are brighter blue/cyan, outer are purple/pink
+          if (distRatio < 0.3) {
+            return { r: 79 + Math.random() * 40, g: 139 + Math.random() * 60, b: 255 };
+          } else if (distRatio < 0.6) {
+            return { r: 139 + Math.random() * 30, g: 92 + Math.random() * 50, b: 246 };
+          } else {
+            return { r: 168 + Math.random() * 40, g: 85 + Math.random() * 40, b: 247 };
+          }
+        }
+
+        updateParticles() {
+          this.time += 0.016;
+          
+          const viewportTop = this.scrollOffset - 200;
+          const viewportBottom = this.scrollOffset + this.canvas.height + 200;
+          
+          this.particles.forEach(p => {
+            // Floating motion
+            const floatX = Math.sin(this.time * p.floatSpeedX + p.floatPhaseX) * p.floatRadius;
+            const floatY = Math.cos(this.time * p.floatSpeedY + p.floatPhaseY) * p.floatRadius * 0.6;
+            
+            // Vertical drift
+            p.baseY += p.driftSpeed;
+            
+            // Wrap vertically
+            const pageHeight = Math.max(document.body.scrollHeight, this.canvas.height * 3);
+            if (p.baseY > pageHeight + 100) p.baseY = -100;
+            if (p.baseY < -100) p.baseY = pageHeight + 100;
+            
+            // Mouse repulsion for nearby particles
+            const screenY = p.baseY - this.scrollOffset;
+            const dx = p.baseX - this.mouseX;
+            const dy = screenY - this.mouseY;
+            const mouseDist = Math.sqrt(dx * dx + dy * dy);
+            
+            let mouseRepelX = 0;
+            let mouseRepelY = 0;
+            if (mouseDist < 150) {
+              const repelForce = (150 - mouseDist) / 150 * 30;
+              mouseRepelX = (dx / mouseDist) * repelForce;
+              mouseRepelY = (dy / mouseDist) * repelForce;
+            }
+            
+            p.x = p.baseX + floatX + mouseRepelX;
+            p.y = p.baseY + floatY;
+            p.screenY = screenY + floatY + mouseRepelY;
+            
+            // Pulse
+            p.currentSize = p.size * (0.8 + 0.2 * Math.sin(this.time * p.pulseSpeed + p.pulsePhase));
+            p.currentBrightness = p.brightness * (0.7 + 0.3 * Math.sin(this.time * p.pulseSpeed + p.pulsePhase));
+            
+            // Check if visible
+            p.visible = p.screenY > -50 && p.screenY < this.canvas.height + 50;
+          });
+        }
+
+        drawConnections() {
+          const visibleParticles = this.particles.filter(p => p.visible);
+          
+          for (let i = 0; i < visibleParticles.length; i++) {
+            const p1 = visibleParticles[i];
+            
+            for (let j = i + 1; j < visibleParticles.length; j++) {
+              const p2 = visibleParticles[j];
+              
+              const dx = p1.x - p2.x;
+              const dy = p1.screenY - p2.screenY;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              
+              if (dist < this.connectionDistance) {
+                const alpha = (1 - dist / this.connectionDistance) * 0.15;
+                
+                // Gradient line between particles
+                const gradient = this.ctx.createLinearGradient(p1.x, p1.screenY, p2.x, p2.screenY);
+                gradient.addColorStop(0, `rgba(${p1.color.r}, ${p1.color.g}, ${p1.color.b}, ${alpha})`);
+                gradient.addColorStop(1, `rgba(${p2.color.r}, ${p2.color.g}, ${p2.color.b}, ${alpha})`);
+                
+                this.ctx.beginPath();
+                this.ctx.moveTo(p1.x, p1.screenY);
+                this.ctx.lineTo(p2.x, p2.screenY);
+                this.ctx.strokeStyle = gradient;
+                this.ctx.lineWidth = 0.5;
+                this.ctx.stroke();
+              }
+            }
+          }
         }
 
         render() {
-          this.time += 0.016;
+          // Clear
           this.ctx.fillStyle = '#020206';
           this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-
-          this.stars.forEach(star => {
+          
+          // Background stars
+          this.backgroundStars.forEach(star => {
             const twinkle = 0.5 + 0.5 * Math.sin(this.time * star.twinkleSpeed + star.twinklePhase);
-            const alpha = star.brightness * twinkle;
             this.ctx.beginPath();
             this.ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
-            this.ctx.fillStyle = `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${alpha})`;
+            this.ctx.fillStyle = `rgba(255, 255, 255, ${star.brightness * twinkle})`;
+            this.ctx.fill();
+          });
+          
+          // Vertical blob glow (center column)
+          const blobGradient = this.ctx.createLinearGradient(
+            this.canvas.width / 2 - 150, 0,
+            this.canvas.width / 2 + 150, 0
+          );
+          blobGradient.addColorStop(0, 'transparent');
+          blobGradient.addColorStop(0.3, 'rgba(79, 139, 255, 0.03)');
+          blobGradient.addColorStop(0.5, 'rgba(139, 92, 246, 0.05)');
+          blobGradient.addColorStop(0.7, 'rgba(79, 139, 255, 0.03)');
+          blobGradient.addColorStop(1, 'transparent');
+          
+          this.ctx.fillStyle = blobGradient;
+          this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+          
+          // Draw connections
+          this.drawConnections();
+          
+          // Draw particles
+          const visibleParticles = this.particles.filter(p => p.visible);
+          
+          visibleParticles.forEach(p => {
+            // Glow for core particles
+            if (p.isCore && p.currentSize > 1.5) {
+              const glowSize = p.currentSize * 4;
+              const glowGradient = this.ctx.createRadialGradient(
+                p.x, p.screenY, 0,
+                p.x, p.screenY, glowSize
+              );
+              glowGradient.addColorStop(0, `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${p.currentBrightness * 0.3})`);
+              glowGradient.addColorStop(1, 'transparent');
+              
+              this.ctx.fillStyle = glowGradient;
+              this.ctx.beginPath();
+              this.ctx.arc(p.x, p.screenY, glowSize, 0, Math.PI * 2);
+              this.ctx.fill();
+            }
+            
+            // Particle
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.screenY, p.currentSize, 0, Math.PI * 2);
+            this.ctx.fillStyle = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${p.currentBrightness})`;
             this.ctx.fill();
           });
         }
 
         animate() {
+          this.updateParticles();
           this.render();
           requestAnimationFrame(() => this.animate());
         }
@@ -441,7 +652,7 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
 
       document.addEventListener('DOMContentLoaded', () => {
         const canvas = document.getElementById('bg-particles');
-        if (canvas) new BackgroundParticles(canvas);
+        if (canvas) new CosmicBlobSystem(canvas);
       });
     </script>
   </body>
