@@ -12,39 +12,36 @@ const { title, description } = Astro.props;
 
 // Load settings from database
 let general = {
-  siteName: 'Banity',
-  tagline: 'Create Authentic Content. Get Paid.',
-  description: 'Banity connects creators with brands for authentic UGC campaigns.',
-  supportEmail: 'support@banity.com',
-  contactEmail: 'hello@banity.com',
+  siteName: "Banity",
+  tagline: "Create Authentic Content. Get Paid.",
+  description: "Banity connects creators with brands for authentic UGC campaigns.",
+  supportEmail: "support@banity.com",
+  contactEmail: "hello@banity.com",
 };
 
 let appearance = {
-  primaryColor: '#2563eb',
-  accentColor: '#059669',
-  logoUrl: '',
-  faviconUrl: '',
+  primaryColor: "#2563eb",
+  accentColor: "#059669",
+  logoUrl: "",
+  faviconUrl: "",
 };
 
 try {
-  const { data: rows } = await supabase.from('site_settings').select('key, value');
-  if (rows) {
-    for (const row of rows) {
-      if (row.key === 'general' && row.value) {
-        general = { ...general, ...row.value };
-      }
-      if (row.key === 'appearance' && row.value) {
-        appearance = { ...appearance, ...row.value };
-      }
+  const { data } = await supabase.from("site_settings").select("key, value");
+  if (data) {
+    for (const row of data) {
+      if (row.key === "general") general = { ...general, ...row.value };
+      if (row.key === "appearance") appearance = { ...appearance, ...row.value };
     }
   }
 } catch (e) {
-  console.error('Failed to load settings:', e);
+  console.error("Failed to load settings:", e);
 }
 
 const pageTitle = title
   ? `${title} | ${general.siteName}`
   : `${general.siteName} - ${general.tagline}`;
+
 const pageDescription = description || general.description;
 
 const session = Astro.locals?.session;
@@ -57,9 +54,10 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="view-transition" content="same-origin" />
+
     <title>{pageTitle}</title>
     <meta name="description" content={pageDescription} />
 
@@ -73,15 +71,15 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
     <meta property="og:description" content={pageDescription} />
     {appearance.logoUrl && <meta property="og:image" content={appearance.logoUrl} />}
 
-    <!-- Particle styles -->
+    <!-- Global particle styling only -->
     <link rel="stylesheet" href="/styles/particles.css" />
   </head>
 
   <body
     style={`--primary-color:${appearance.primaryColor};--accent-color:${appearance.accentColor};`}
-    class:list={[{ 'has-impersonation-banner': isImpersonating }]}
+    class:list={[{ "has-impersonation-banner": isImpersonating }]}
   >
-    <!-- 🌌 PERSISTENT PARTICLE LAYER -->
+    <!-- 🌌 GLOBAL BACKGROUND PARTICLES (persistent across pages) -->
     <canvas id="global-particles" aria-hidden="true"></canvas>
 
     {isImpersonating && impersonatedUser && (
@@ -92,13 +90,13 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
       <div class="header-container">
         <a href="/" class="logo">
           {appearance.logoUrl ? (
-            <img src={appearance.logoUrl} alt={general.siteName} class="logo-image" />
+            <img src={appearance.logoUrl} alt={general.siteName} />
           ) : (
-            <span class="logo-text">{general.siteName}</span>
+            <span>{general.siteName}</span>
           )}
         </a>
 
-        <nav class="main-nav">
+        <nav>
           <a href="/campaigns">Campaigns</a>
           <a href="/creators">Creators</a>
           <a href="/forum">Forum</a>
@@ -109,18 +107,16 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
         <div class="header-actions">
           {session ? (
             <>
-              <a href="/dashboard" class="btn btn-secondary">Dashboard</a>
+              <a href="/dashboard">Dashboard</a>
               {(isAdmin || isModerator) && !isImpersonating && (
-                <a href="/admin" class="btn btn-secondary">Admin</a>
+                <a href="/admin">Admin</a>
               )}
-              {!isImpersonating && (
-                <a href="/logout" class="btn btn-primary">Log Out</a>
-              )}
+              {!isImpersonating && <a href="/logout">Log Out</a>}
             </>
           ) : (
             <>
-              <a href="/login" class="btn btn-secondary">Log In</a>
-              <a href="/signup" class="btn btn-primary">Sign Up</a>
+              <a href="/login">Log In</a>
+              <a href="/signup">Sign Up</a>
             </>
           )}
         </div>
@@ -132,17 +128,16 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
     </main>
 
     <footer class="site-footer">
-      <!-- (UNCHANGED FOOTER CONTENT) -->
       <slot name="footer" />
     </footer>
 
-    <!-- 🌌 GLOBAL PARTICLE ENGINE -->
+    <!-- 🌌 GLOBAL PARTICLE ENGINE (ONE TIME ONLY) -->
     <script type="module" src="/particles/globalParticles.js"></script>
 
     <style>
-      /* (Your existing styles remain unchanged here) */
       body {
         background: radial-gradient(1200px at 50% -20%, #0b1024, #020208);
+        overflow-x: hidden;
       }
 
       main {
@@ -150,10 +145,17 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
         z-index: 2;
       }
 
-      .site-header,
-      .site-footer {
+      header,
+      footer {
         position: relative;
         z-index: 3;
+      }
+
+      #global-particles {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
       }
     </style>
   </body>
