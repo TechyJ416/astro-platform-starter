@@ -159,6 +159,7 @@ if (Astro.request.method === 'POST') {
   if (formAction === 'update_user') {
     const userId = form.get('userId') as string;
     const fullName = (form.get('fullName') as string)?.trim();
+    const username = (form.get('username') as string)?.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') || null;
     const role = form.get('role') as string;
     const status = form.get('status') as string;
     const isActive = form.get('isActive') === 'on';
@@ -166,14 +167,22 @@ if (Astro.request.method === 'POST') {
 
     const { error } = await supabase.from('profiles').update({
       full_name: fullName,
+      username,
       role,
       status,
       is_active: isActive,
       is_verified: isVerified,
     }).eq('id', userId);
 
-    if (error) actionError = error.message;
-    else return Astro.redirect('/admin/users?updated=true');
+    if (error) {
+      if (error.code === '23505') {
+        actionError = 'Username already taken.';
+      } else {
+        actionError = error.message;
+      }
+    } else {
+      return Astro.redirect('/admin/users?updated=true');
+    }
   }
 
   // ============ QUICK ACTIONS ============
@@ -344,6 +353,13 @@ const showForm = action === 'new' || editUserId;
                 <input type="text" name="fullName" value={editUser.full_name || ''} placeholder="John Doe" />
               </div>
               <div class="form-group">
+                <label>Username</label>
+                <input type="text" name="username" value={editUser.username || ''} placeholder="johndoe" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
                 <label>Role</label>
                 <select name="role">
                   <option value="creator" selected={editUser.role === 'creator'}>Creator</option>
@@ -352,9 +368,6 @@ const showForm = action === 'new' || editUserId;
                   <option value="admin" selected={editUser.role === 'admin'}>Admin</option>
                 </select>
               </div>
-            </div>
-
-            <div class="form-row">
               <div class="form-group">
                 <label>Status</label>
                 <select name="status">
@@ -364,6 +377,9 @@ const showForm = action === 'new' || editUserId;
                   <option value="denied" selected={editUser.status === 'denied'}>Denied</option>
                 </select>
               </div>
+            </div>
+
+            <div class="form-row">
               <div class="form-group checkboxes">
                 <label class="checkbox-label">
                   <input type="checkbox" name="isActive" checked={editUser.is_active} />
