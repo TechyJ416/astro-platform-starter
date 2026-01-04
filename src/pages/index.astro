@@ -379,9 +379,9 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
        COSMIC FOUNDATIONS
        ============================================ */
     :root {
-      --void: #030308;
-      --nebula: #0a0a1a;
-      --stardust: #1a1a2e;
+      --void: #020206;
+      --nebula: #080812;
+      --stardust: #12121f;
       --cosmic-blue: #4f8bff;
       --cosmic-purple: #a855f7;
       --cosmic-pink: #ec4899;
@@ -439,8 +439,8 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       right: 0;
       z-index: 1000;
       padding: 1.25rem 2rem;
-      background: linear-gradient(180deg, rgba(3, 3, 8, 0.9) 0%, transparent 100%);
-      backdrop-filter: blur(20px);
+      background: linear-gradient(180deg, rgba(2, 2, 6, 0.95) 0%, rgba(2, 2, 6, 0.4) 70%, transparent 100%);
+      backdrop-filter: blur(12px);
     }
 
     .nav-content {
@@ -901,12 +901,13 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
 
     .campaign-card {
       position: relative;
-      background: linear-gradient(135deg, rgba(26, 26, 46, 0.8), rgba(10, 10, 26, 0.8));
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: linear-gradient(135deg, rgba(18, 18, 31, 0.7), rgba(8, 8, 18, 0.7));
+      border: 1px solid rgba(255, 255, 255, 0.06);
       border-radius: 24px;
       overflow: hidden;
       animation: card-in 0.8s ease-out var(--delay) backwards;
       transition: all 0.4s;
+      backdrop-filter: blur(10px);
     }
 
     @keyframes card-in {
@@ -1070,7 +1071,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
        ============================================ */
     .process-section {
       padding: 8rem 2rem;
-      background: linear-gradient(180deg, transparent, rgba(79, 139, 255, 0.03), transparent);
+      background: linear-gradient(180deg, transparent, rgba(79, 139, 255, 0.02), transparent);
     }
 
     .process-timeline {
@@ -1084,8 +1085,14 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       left: 28px;
       top: 0;
       bottom: 0;
-      width: 2px;
-      background: linear-gradient(180deg, var(--cosmic-blue), var(--cosmic-purple), var(--cosmic-pink), var(--cosmic-cyan));
+      width: 1px;
+      background: linear-gradient(180deg, 
+        rgba(79, 139, 255, 0.6), 
+        rgba(168, 85, 247, 0.6), 
+        rgba(236, 72, 153, 0.4), 
+        rgba(34, 211, 238, 0.4)
+      );
+      box-shadow: 0 0 10px rgba(79, 139, 255, 0.3);
     }
 
     .process-step {
@@ -1113,17 +1120,27 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     }
 
     .marker-dot {
-      width: 16px;
-      height: 16px;
+      width: 12px;
+      height: 12px;
       background: var(--void);
-      border: 3px solid var(--cosmic-blue);
+      border: 2px solid var(--cosmic-blue);
       border-radius: 50%;
       transition: all 0.3s;
+      box-shadow: 0 0 8px rgba(79, 139, 255, 0.5);
     }
 
-    .process-step:nth-child(3) .marker-dot { border-color: var(--cosmic-purple); }
-    .process-step:nth-child(4) .marker-dot { border-color: var(--cosmic-pink); }
-    .process-step:nth-child(5) .marker-dot { border-color: var(--cosmic-cyan); }
+    .process-step:nth-child(3) .marker-dot { 
+      border-color: var(--cosmic-purple); 
+      box-shadow: 0 0 8px rgba(168, 85, 247, 0.5);
+    }
+    .process-step:nth-child(4) .marker-dot { 
+      border-color: var(--cosmic-pink); 
+      box-shadow: 0 0 8px rgba(236, 72, 153, 0.5);
+    }
+    .process-step:nth-child(5) .marker-dot { 
+      border-color: var(--cosmic-cyan); 
+      box-shadow: 0 0 8px rgba(34, 211, 238, 0.5);
+    }
 
     .process-step:hover .marker-dot {
       background: currentColor;
@@ -1228,7 +1245,8 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
        ============================================ */
     .main-footer {
       padding: 4rem 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      border-top: 1px solid rgba(255, 255, 255, 0.03);
+      background: linear-gradient(180deg, transparent, rgba(2, 2, 6, 0.8));
     }
 
     .footer-content {
@@ -1323,30 +1341,37 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     }
   </style>
 
-  <!-- Galaxy Particle System -->
+  <!-- Cosmic Galaxy Particle System -->
   <script is:inline>
-    class GalaxyParticleSystem {
+    class CosmicGalaxy {
       constructor(canvas) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
-        this.particles = [];
         this.stars = [];
-        this.nebulaParticles = [];
+        this.time = 0;
         this.mouseX = 0;
         this.mouseY = 0;
+        this.targetMouseX = 0;
+        this.targetMouseY = 0;
         this.scrollY = 0;
-        this.time = 0;
-        
-        // Galaxy parameters
-        this.centerX = 0;
-        this.centerY = 0;
-        this.baseRadius = 250;
         this.expansionFactor = 1;
         
-        // Particle counts
-        this.galaxyParticleCount = 4000;
-        this.starCount = 600;
-        this.nebulaParticleCount = 150;
+        // Galaxy center
+        this.centerX = 0;
+        this.centerY = 0;
+        
+        // Galaxy parameters for croissant shape
+        this.baseRadius = 280;
+        this.numArms = 2;
+        this.armTightness = 0.22;
+        this.armSpread = 0.6;
+        this.tiltAngle = 0.32; // Croissant tilt
+        
+        // Star counts - LOTS of stars
+        this.galaxyStarCount = 6000;
+        this.backgroundStarCount = 800;
+        this.brightStarCount = 150;
+        this.dustCloudCount = 80;
         
         this.init();
         this.bindEvents();
@@ -1355,9 +1380,10 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
 
       init() {
         this.resize();
-        this.createStars();
-        this.createGalaxyParticles();
-        this.createNebulaParticles();
+        this.createBackgroundStars();
+        this.createGalaxyStars();
+        this.createBrightStars();
+        this.createDustClouds();
       }
 
       resize() {
@@ -1367,277 +1393,407 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
         this.centerY = this.canvas.height / 2;
       }
 
-      createStars() {
-        this.stars = [];
-        for (let i = 0; i < this.starCount; i++) {
-          this.stars.push({
+      // Background stars - distant, subtle twinkling
+      createBackgroundStars() {
+        this.backgroundStars = [];
+        for (let i = 0; i < this.backgroundStarCount; i++) {
+          this.backgroundStars.push({
             x: Math.random() * this.canvas.width,
             y: Math.random() * this.canvas.height,
-            size: Math.random() * 1.5 + 0.5,
-            opacity: Math.random() * 0.8 + 0.2,
-            twinkleSpeed: Math.random() * 0.02 + 0.01,
-            twinkleOffset: Math.random() * Math.PI * 2
+            size: Math.random() * 1.2 + 0.3,
+            brightness: Math.random() * 0.6 + 0.2,
+            twinkleSpeed: Math.random() * 0.03 + 0.01,
+            twinklePhase: Math.random() * Math.PI * 2,
+            color: this.getStarColor(Math.random())
           });
         }
       }
 
-      createGalaxyParticles() {
-        this.particles = [];
+      // Main galaxy stars - forming the spiral croissant shape
+      createGalaxyStars() {
+        this.stars = [];
         
-        // Create spiral arms (croissant-like galaxy)
-        const numArms = 2;
-        const armSpread = 0.5;
-        const armTightness = 0.25;
-        
-        for (let i = 0; i < this.galaxyParticleCount; i++) {
-          // Choose which arm
-          const arm = i % numArms;
-          const armOffset = (arm / numArms) * Math.PI * 2;
+        for (let i = 0; i < this.galaxyStarCount; i++) {
+          // Which spiral arm
+          const arm = i % this.numArms;
+          const armOffset = (arm / this.numArms) * Math.PI * 2;
           
-          // Distance from center (exponential distribution for more particles near center)
-          const distanceRandom = Math.pow(Math.random(), 0.5);
-          const distance = distanceRandom * this.baseRadius;
+          // Distance from center - exponential for density near core
+          const t = Math.pow(Math.random(), 0.45);
+          const baseDistance = t * this.baseRadius;
           
-          // Spiral angle
-          const spiralAngle = distance * armTightness + armOffset;
+          // Spiral angle based on distance
+          const spiralAngle = baseDistance * this.armTightness + armOffset;
           
-          // Add some spread to the arm
-          const spreadAngle = (Math.random() - 0.5) * armSpread * (1 + distanceRandom * 0.5);
-          const angle = spiralAngle + spreadAngle;
+          // Spread - tighter near core, looser at edges
+          const spread = (Math.random() - 0.5) * this.armSpread * (0.3 + t * 0.7);
+          const angle = spiralAngle + spread;
           
-          // Particle color based on distance (core is brighter, edges more blue/purple)
-          const colorProgress = distanceRandom;
-          const colors = this.getParticleColor(colorProgress);
+          // Vertical spread for thickness (less near core)
+          const zSpread = (Math.random() - 0.5) * 60 * t;
           
-          // Z-depth for 3D effect
-          const z = (Math.random() - 0.5) * 80;
+          // Star properties
+          const distanceRatio = baseDistance / this.baseRadius;
+          const starColor = this.getStarColor(distanceRatio);
+          const starSize = Math.random() * 1.5 + 0.4;
           
-          this.particles.push({
+          // Floating motion - each star drifts slightly
+          const floatRadius = Math.random() * 8 + 2;
+          const floatSpeed = Math.random() * 0.0008 + 0.0002;
+          const floatPhase = Math.random() * Math.PI * 2;
+          const floatPhase2 = Math.random() * Math.PI * 2;
+          
+          this.stars.push({
+            // Base spiral position
             baseAngle: angle,
-            baseDistance: distance,
-            angle: angle,
-            distance: distance,
+            baseDistance: baseDistance,
+            z: zSpread,
+            
+            // Current calculated position
             x: 0,
             y: 0,
-            z: z,
-            size: Math.random() * 2 + 0.5,
-            color: colors.color,
-            glow: colors.glow,
-            speed: Math.random() * 0.0003 + 0.0001,
-            opacity: Math.random() * 0.9 + 0.1,
-            pulseSpeed: Math.random() * 0.015 + 0.005,
-            pulseOffset: Math.random() * Math.PI * 2
+            
+            // Visual properties
+            size: starSize,
+            color: starColor,
+            brightness: Math.random() * 0.7 + 0.3,
+            
+            // Orbital rotation
+            orbitSpeed: (Math.random() * 0.0002 + 0.00005) * (1 - t * 0.5),
+            
+            // Floating/drifting motion
+            floatRadius: floatRadius,
+            floatSpeed: floatSpeed,
+            floatPhase: floatPhase,
+            floatPhase2: floatPhase2,
+            
+            // Twinkle
+            twinkleSpeed: Math.random() * 0.04 + 0.01,
+            twinklePhase: Math.random() * Math.PI * 2,
+            
+            // Distance from center for effects
+            distanceRatio: distanceRatio
           });
         }
         
-        // Add core particles (brighter center)
-        for (let i = 0; i < 800; i++) {
-          const distance = Math.pow(Math.random(), 1.5) * 50;
+        // Add denser core stars
+        for (let i = 0; i < 1200; i++) {
+          const distance = Math.pow(Math.random(), 2) * 40;
           const angle = Math.random() * Math.PI * 2;
+          const z = (Math.random() - 0.5) * 20;
           
-          this.particles.push({
+          this.stars.push({
             baseAngle: angle,
             baseDistance: distance,
-            angle: angle,
-            distance: distance,
+            z: z,
             x: 0,
             y: 0,
-            z: (Math.random() - 0.5) * 30,
-            size: Math.random() * 2.5 + 0.8,
-            color: 'rgba(255, 255, 255, 1)',
-            glow: 'rgba(255, 220, 180, 0.7)',
-            speed: Math.random() * 0.0008 + 0.0003,
-            opacity: Math.random() * 0.6 + 0.4,
-            pulseSpeed: Math.random() * 0.025 + 0.015,
-            pulseOffset: Math.random() * Math.PI * 2,
+            size: Math.random() * 1.8 + 0.5,
+            color: this.getStarColor(0.05 + Math.random() * 0.15),
+            brightness: Math.random() * 0.4 + 0.6,
+            orbitSpeed: Math.random() * 0.0006 + 0.0002,
+            floatRadius: Math.random() * 4 + 1,
+            floatSpeed: Math.random() * 0.001 + 0.0005,
+            floatPhase: Math.random() * Math.PI * 2,
+            floatPhase2: Math.random() * Math.PI * 2,
+            twinkleSpeed: Math.random() * 0.05 + 0.02,
+            twinklePhase: Math.random() * Math.PI * 2,
+            distanceRatio: 0.1,
             isCore: true
           });
         }
       }
 
-      createNebulaParticles() {
-        this.nebulaParticles = [];
-        
-        const colors = [
-          'rgba(79, 139, 255, 0.04)',
-          'rgba(168, 85, 247, 0.04)',
-          'rgba(236, 72, 153, 0.03)',
-          'rgba(34, 211, 238, 0.03)'
-        ];
-        
-        for (let i = 0; i < this.nebulaParticleCount; i++) {
-          const angle = Math.random() * Math.PI * 2;
-          const distance = Math.random() * this.baseRadius * 1.8 + 50;
+      // Bright prominent stars scattered throughout
+      createBrightStars() {
+        this.brightStars = [];
+        for (let i = 0; i < this.brightStarCount; i++) {
+          const arm = i % this.numArms;
+          const armOffset = (arm / this.numArms) * Math.PI * 2;
+          const t = Math.pow(Math.random(), 0.6);
+          const distance = t * this.baseRadius * 1.1;
+          const angle = distance * this.armTightness + armOffset + (Math.random() - 0.5) * 0.8;
           
-          this.nebulaParticles.push({
-            angle: angle,
-            distance: distance,
-            size: Math.random() * 150 + 80,
-            color: colors[Math.floor(Math.random() * colors.length)],
-            speed: Math.random() * 0.00015 + 0.00005
+          this.brightStars.push({
+            baseAngle: angle,
+            baseDistance: distance,
+            z: (Math.random() - 0.5) * 40,
+            x: 0,
+            y: 0,
+            size: Math.random() * 2 + 1.5,
+            color: this.getStarColor(Math.random() * 0.4),
+            brightness: Math.random() * 0.3 + 0.7,
+            orbitSpeed: Math.random() * 0.0002 + 0.00008,
+            floatRadius: Math.random() * 6 + 3,
+            floatSpeed: Math.random() * 0.0006 + 0.0002,
+            floatPhase: Math.random() * Math.PI * 2,
+            floatPhase2: Math.random() * Math.PI * 2,
+            twinkleSpeed: Math.random() * 0.02 + 0.005,
+            twinklePhase: Math.random() * Math.PI * 2,
+            glowSize: Math.random() * 8 + 4,
+            distanceRatio: t
           });
         }
       }
 
-      getParticleColor(progress) {
-        // Colors transition from warm white/yellow at center to blue/purple at edges
-        if (progress < 0.15) {
-          return {
-            color: `rgba(255, ${230 + Math.random() * 25}, ${200 + Math.random() * 40}, 1)`,
-            glow: 'rgba(255, 230, 200, 0.5)'
-          };
-        } else if (progress < 0.4) {
-          return {
-            color: `rgba(${180 + Math.random() * 75}, ${200 + Math.random() * 55}, 255, 1)`,
-            glow: 'rgba(79, 139, 255, 0.4)'
-          };
-        } else if (progress < 0.7) {
-          return {
-            color: `rgba(${168 + Math.random() * 40}, ${85 + Math.random() * 40}, ${220 + Math.random() * 35}, 1)`,
-            glow: 'rgba(168, 85, 247, 0.35)'
-          };
+      // Subtle dust/nebula clouds
+      createDustClouds() {
+        this.dustClouds = [];
+        const colors = [
+          { r: 79, g: 139, b: 255 },
+          { r: 168, g: 85, b: 247 },
+          { r: 139, g: 92, b: 246 },
+          { r: 59, g: 130, b: 246 }
+        ];
+        
+        for (let i = 0; i < this.dustCloudCount; i++) {
+          const arm = i % this.numArms;
+          const armOffset = (arm / this.numArms) * Math.PI * 2;
+          const t = Math.random();
+          const distance = t * this.baseRadius * 1.3 + 30;
+          const angle = distance * this.armTightness + armOffset + (Math.random() - 0.5);
+          const color = colors[Math.floor(Math.random() * colors.length)];
+          
+          this.dustClouds.push({
+            baseAngle: angle,
+            baseDistance: distance,
+            x: 0,
+            y: 0,
+            size: Math.random() * 80 + 40,
+            color: color,
+            opacity: Math.random() * 0.025 + 0.01,
+            orbitSpeed: Math.random() * 0.00008 + 0.00002
+          });
+        }
+      }
+
+      getStarColor(distanceRatio) {
+        // Stars range from warm white/yellow near core to blue at edges
+        if (distanceRatio < 0.15) {
+          // Core - warm white to pale yellow
+          const r = 255;
+          const g = 240 + Math.random() * 15;
+          const b = 210 + Math.random() * 30;
+          return { r, g, b };
+        } else if (distanceRatio < 0.35) {
+          // Inner - white to pale blue
+          const r = 220 + Math.random() * 35;
+          const g = 230 + Math.random() * 25;
+          const b = 255;
+          return { r, g, b };
+        } else if (distanceRatio < 0.6) {
+          // Mid - blue-white
+          const r = 180 + Math.random() * 50;
+          const g = 200 + Math.random() * 40;
+          const b = 255;
+          return { r, g, b };
         } else {
-          return {
-            color: `rgba(${140 + Math.random() * 50}, ${100 + Math.random() * 50}, ${200 + Math.random() * 55}, 1)`,
-            glow: 'rgba(168, 85, 247, 0.25)'
-          };
+          // Outer - blue to purple
+          const r = 150 + Math.random() * 60;
+          const g = 160 + Math.random() * 60;
+          const b = 230 + Math.random() * 25;
+          return { r, g, b };
         }
       }
 
       bindEvents() {
         window.addEventListener('resize', () => {
           this.resize();
-          this.createStars();
+          this.createBackgroundStars();
         });
         
         window.addEventListener('scroll', () => {
           this.scrollY = window.scrollY;
-          // Expansion increases as you scroll - creates dramatic expansion effect
-          const maxExpansion = 4;
-          const scrollRange = document.body.scrollHeight - window.innerHeight;
-          this.expansionFactor = 1 + (this.scrollY / scrollRange) * (maxExpansion - 1);
+          const scrollMax = Math.max(1, document.body.scrollHeight - window.innerHeight);
+          this.expansionFactor = 1 + (this.scrollY / scrollMax) * 3.5;
         });
 
         window.addEventListener('mousemove', (e) => {
-          this.mouseX = e.clientX;
-          this.mouseY = e.clientY;
+          this.targetMouseX = (e.clientX - this.centerX) / this.canvas.width;
+          this.targetMouseY = (e.clientY - this.centerY) / this.canvas.height;
         });
       }
 
-      updateParticles() {
+      updateStars() {
         this.time += 0.016;
         
-        const mouseInfluence = 30;
-        const mouseDx = (this.mouseX - this.centerX) / this.canvas.width;
-        const mouseDy = (this.mouseY - this.centerY) / this.canvas.height;
+        // Smooth mouse following
+        this.mouseX += (this.targetMouseX - this.mouseX) * 0.05;
+        this.mouseY += (this.targetMouseY - this.mouseY) * 0.05;
         
-        this.particles.forEach(p => {
-          // Rotate around center
-          p.angle += p.speed;
+        const perspective = 600;
+        const tiltX = this.tiltAngle + this.mouseY * 0.1;
+        const tiltY = this.mouseX * 0.15;
+        
+        // Update galaxy stars
+        this.stars.forEach(star => {
+          // Orbital rotation
+          star.baseAngle += star.orbitSpeed;
           
-          // Calculate expanded distance based on scroll
-          const expandedDistance = p.baseDistance * this.expansionFactor;
-          p.distance = expandedDistance;
+          // Floating motion - gives stars a gentle drift
+          const floatX = Math.sin(this.time * star.floatSpeed + star.floatPhase) * star.floatRadius;
+          const floatY = Math.cos(this.time * star.floatSpeed * 0.7 + star.floatPhase2) * star.floatRadius * 0.6;
           
-          // Calculate position with slight tilt for 3D croissant effect
-          const tiltX = 0.35 + mouseDx * 0.15;
-          const tiltY = 0.15 + mouseDy * 0.1;
+          // Calculate expanded position
+          const expandedDistance = star.baseDistance * this.expansionFactor;
           
-          const x = Math.cos(p.angle) * p.distance;
-          const y = Math.sin(p.angle) * p.distance * tiltX;
+          // Spiral position
+          const x = Math.cos(star.baseAngle) * expandedDistance + floatX;
+          const y = Math.sin(star.baseAngle) * expandedDistance;
+          const z = star.z * (1 + (this.expansionFactor - 1) * 0.3);
           
-          // Apply z-depth perspective
-          const perspective = 800;
-          const scale = perspective / (perspective + p.z);
+          // Apply croissant tilt (3D rotation)
+          const y2 = y * Math.cos(tiltX) - z * Math.sin(tiltX);
+          const z2 = y * Math.sin(tiltX) + z * Math.cos(tiltX);
+          const x2 = x * Math.cos(tiltY) + z2 * Math.sin(tiltY);
+          const z3 = -x * Math.sin(tiltY) + z2 * Math.cos(tiltY);
           
-          p.x = this.centerX + x * scale + (mouseDx * mouseInfluence * scale);
-          p.y = this.centerY + y * scale + (p.z * tiltY * 0.5) + (mouseDy * mouseInfluence * scale);
+          // Perspective projection
+          const scale = perspective / (perspective + z3);
           
-          // Pulse effect
-          p.currentOpacity = p.opacity * (0.6 + 0.4 * Math.sin(this.time * p.pulseSpeed + p.pulseOffset));
+          star.x = this.centerX + x2 * scale + floatY * scale;
+          star.y = this.centerY + y2 * scale;
+          star.scale = scale;
+          
+          // Twinkle
+          star.twinkle = 0.6 + 0.4 * Math.sin(this.time * star.twinkleSpeed + star.twinklePhase);
         });
 
-        // Update nebula particles
-        this.nebulaParticles.forEach(p => {
-          p.angle += p.speed;
-          const expandedDistance = p.distance * this.expansionFactor;
-          p.x = this.centerX + Math.cos(p.angle) * expandedDistance;
-          p.y = this.centerY + Math.sin(p.angle) * expandedDistance * 0.35;
+        // Update bright stars
+        this.brightStars.forEach(star => {
+          star.baseAngle += star.orbitSpeed;
+          
+          const floatX = Math.sin(this.time * star.floatSpeed + star.floatPhase) * star.floatRadius;
+          const floatY = Math.cos(this.time * star.floatSpeed * 0.8 + star.floatPhase2) * star.floatRadius * 0.5;
+          
+          const expandedDistance = star.baseDistance * this.expansionFactor;
+          
+          const x = Math.cos(star.baseAngle) * expandedDistance + floatX;
+          const y = Math.sin(star.baseAngle) * expandedDistance;
+          const z = star.z * (1 + (this.expansionFactor - 1) * 0.3);
+          
+          const y2 = y * Math.cos(tiltX) - z * Math.sin(tiltX);
+          const z2 = y * Math.sin(tiltX) + z * Math.cos(tiltX);
+          const x2 = x * Math.cos(tiltY) + z2 * Math.sin(tiltY);
+          const z3 = -x * Math.sin(tiltY) + z2 * Math.cos(tiltY);
+          
+          const scale = perspective / (perspective + z3);
+          
+          star.x = this.centerX + x2 * scale + floatY * scale;
+          star.y = this.centerY + y2 * scale;
+          star.scale = scale;
+          star.twinkle = 0.7 + 0.3 * Math.sin(this.time * star.twinkleSpeed + star.twinklePhase);
+        });
+
+        // Update dust clouds
+        this.dustClouds.forEach(cloud => {
+          cloud.baseAngle += cloud.orbitSpeed;
+          
+          const expandedDistance = cloud.baseDistance * this.expansionFactor;
+          const x = Math.cos(cloud.baseAngle) * expandedDistance;
+          const y = Math.sin(cloud.baseAngle) * expandedDistance * Math.cos(tiltX);
+          
+          cloud.x = this.centerX + x;
+          cloud.y = this.centerY + y;
         });
       }
 
       render() {
-        // Clear canvas completely
-        this.ctx.fillStyle = 'rgba(3, 3, 8, 1)';
+        // Clear to deep space black
+        this.ctx.fillStyle = '#020206';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Draw background stars
-        this.stars.forEach(star => {
-          const twinkle = 0.5 + 0.5 * Math.sin(this.time * star.twinkleSpeed + star.twinkleOffset);
+        // Draw background stars with twinkle
+        this.backgroundStars.forEach(star => {
+          const twinkle = 0.5 + 0.5 * Math.sin(this.time * star.twinkleSpeed + star.twinklePhase);
+          const alpha = star.brightness * twinkle;
+          
           this.ctx.beginPath();
           this.ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
-          this.ctx.fillStyle = `rgba(255, 255, 255, ${star.opacity * twinkle})`;
+          this.ctx.fillStyle = `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${alpha})`;
           this.ctx.fill();
         });
 
-        // Draw nebula (behind particles)
+        // Draw dust clouds (nebula effect)
         this.ctx.globalCompositeOperation = 'lighter';
-        this.nebulaParticles.forEach(p => {
-          const expandedSize = p.size * Math.pow(this.expansionFactor, 0.7);
-          const gradient = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, expandedSize);
-          gradient.addColorStop(0, p.color);
+        this.dustClouds.forEach(cloud => {
+          const expandedSize = cloud.size * Math.pow(this.expansionFactor, 0.6);
+          const gradient = this.ctx.createRadialGradient(
+            cloud.x, cloud.y, 0,
+            cloud.x, cloud.y, expandedSize
+          );
+          gradient.addColorStop(0, `rgba(${cloud.color.r}, ${cloud.color.g}, ${cloud.color.b}, ${cloud.opacity})`);
+          gradient.addColorStop(0.5, `rgba(${cloud.color.r}, ${cloud.color.g}, ${cloud.color.b}, ${cloud.opacity * 0.3})`);
           gradient.addColorStop(1, 'transparent');
+          
           this.ctx.fillStyle = gradient;
           this.ctx.beginPath();
-          this.ctx.arc(p.x, p.y, expandedSize, 0, Math.PI * 2);
+          this.ctx.arc(cloud.x, cloud.y, expandedSize, 0, Math.PI * 2);
           this.ctx.fill();
         });
         this.ctx.globalCompositeOperation = 'source-over';
 
-        // Sort particles by z for proper depth rendering
-        const sortedParticles = [...this.particles].sort((a, b) => a.z - b.z);
+        // Sort all galaxy stars by depth
+        const sortedStars = [...this.stars].sort((a, b) => (a.scale || 0) - (b.scale || 0));
 
-        // Draw galaxy particles
-        sortedParticles.forEach(p => {
-          // Skip if way off screen
-          if (p.x < -100 || p.x > this.canvas.width + 100 || 
-              p.y < -100 || p.y > this.canvas.height + 100) return;
-
-          const size = p.size * (1 + (this.expansionFactor - 1) * 0.2);
+        // Draw galaxy stars
+        sortedStars.forEach(star => {
+          if (star.x < -50 || star.x > this.canvas.width + 50 ||
+              star.y < -50 || star.y > this.canvas.height + 50) return;
           
-          // Draw glow
-          if (p.glow && p.currentOpacity > 0.2) {
-            const glowSize = size * 4;
-            const gradient = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowSize);
-            gradient.addColorStop(0, p.glow);
-            gradient.addColorStop(1, 'transparent');
-            this.ctx.fillStyle = gradient;
-            this.ctx.globalAlpha = p.currentOpacity * 0.4;
-            this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, glowSize, 0, Math.PI * 2);
-            this.ctx.fill();
-          }
+          const size = star.size * (star.scale || 1);
+          const alpha = star.brightness * star.twinkle * (star.scale || 1);
           
-          // Draw particle
+          // Draw star
           this.ctx.beginPath();
-          this.ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
-          this.ctx.fillStyle = p.color;
-          this.ctx.globalAlpha = p.currentOpacity;
+          this.ctx.arc(star.x, star.y, Math.max(0.3, size), 0, Math.PI * 2);
+          this.ctx.fillStyle = `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${Math.min(1, alpha)})`;
           this.ctx.fill();
-          
-          this.ctx.globalAlpha = 1;
         });
 
-        // Draw bright core glow
-        const coreSize = 100 * Math.pow(this.expansionFactor, 0.5);
+        // Draw bright stars with glow
+        this.ctx.globalCompositeOperation = 'lighter';
+        this.brightStars.forEach(star => {
+          if (star.x < -50 || star.x > this.canvas.width + 50 ||
+              star.y < -50 || star.y > this.canvas.height + 50) return;
+          
+          const size = star.size * (star.scale || 1);
+          const alpha = star.brightness * star.twinkle;
+          const glowSize = star.glowSize * (star.scale || 1) * this.expansionFactor * 0.5;
+          
+          // Glow
+          const gradient = this.ctx.createRadialGradient(
+            star.x, star.y, 0,
+            star.x, star.y, glowSize
+          );
+          gradient.addColorStop(0, `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${alpha * 0.4})`);
+          gradient.addColorStop(0.4, `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${alpha * 0.1})`);
+          gradient.addColorStop(1, 'transparent');
+          
+          this.ctx.fillStyle = gradient;
+          this.ctx.beginPath();
+          this.ctx.arc(star.x, star.y, glowSize, 0, Math.PI * 2);
+          this.ctx.fill();
+          
+          // Star core
+          this.ctx.beginPath();
+          this.ctx.arc(star.x, star.y, size, 0, Math.PI * 2);
+          this.ctx.fillStyle = `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${Math.min(1, alpha + 0.2)})`;
+          this.ctx.fill();
+        });
+        this.ctx.globalCompositeOperation = 'source-over';
+
+        // Galaxy core glow
+        const coreSize = 60 * Math.pow(this.expansionFactor, 0.4);
         const coreGradient = this.ctx.createRadialGradient(
           this.centerX, this.centerY, 0,
           this.centerX, this.centerY, coreSize
         );
-        coreGradient.addColorStop(0, 'rgba(255, 240, 220, 0.25)');
-        coreGradient.addColorStop(0.2, 'rgba(255, 220, 180, 0.15)');
-        coreGradient.addColorStop(0.5, 'rgba(200, 180, 255, 0.08)');
+        coreGradient.addColorStop(0, 'rgba(255, 250, 240, 0.15)');
+        coreGradient.addColorStop(0.3, 'rgba(255, 240, 220, 0.08)');
+        coreGradient.addColorStop(0.6, 'rgba(200, 180, 255, 0.03)');
         coreGradient.addColorStop(1, 'transparent');
+        
         this.ctx.fillStyle = coreGradient;
         this.ctx.beginPath();
         this.ctx.arc(this.centerX, this.centerY, coreSize, 0, Math.PI * 2);
@@ -1645,17 +1801,17 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       }
 
       animate() {
-        this.updateParticles();
+        this.updateStars();
         this.render();
         requestAnimationFrame(() => this.animate());
       }
     }
 
-    // Initialize when DOM is ready
+    // Initialize
     document.addEventListener('DOMContentLoaded', () => {
       const canvas = document.getElementById('galaxy-canvas');
       if (canvas) {
-        new GalaxyParticleSystem(canvas);
+        new CosmicGalaxy(canvas);
       }
     });
   </script>
