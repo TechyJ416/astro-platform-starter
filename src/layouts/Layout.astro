@@ -381,28 +381,26 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
     </style>
 
     <script is:inline>
-      class FlowingNebula {
+      class CosmicNebula {
         constructor(canvas) {
           this.canvas = canvas;
           this.ctx = canvas.getContext('2d');
-          this.particles = [];
-          this.clouds = [];
           this.time = 0;
-          this.verticalSpeed = 1.5;
+          this.particles = [];
+          this.nebulaLayers = [];
           
-          // Simple noise using sine waves
           this.init();
           this.animate();
         }
 
         init() {
           this.resize();
-          this.createClouds();
+          this.createNebula();
           this.createParticles();
           
           window.addEventListener('resize', () => {
             this.resize();
-            this.createClouds();
+            this.createNebula();
             this.createParticles();
           });
         }
@@ -410,184 +408,179 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
         resize() {
           this.canvas.width = window.innerWidth;
           this.canvas.height = window.innerHeight;
+          this.centerX = this.canvas.width / 2;
         }
 
-        // Simple flow noise
-        flowNoise(x, y, t) {
-          return Math.sin(x * 0.01 + t) * Math.cos(y * 0.008 + t * 0.7) + 
-                 Math.sin(x * 0.005 - t * 0.5) * Math.cos(y * 0.012 + t * 0.3);
-        }
-
-        createClouds() {
-          this.clouds = [];
-          const cloudCount = 60;
+        createNebula() {
+          this.nebulaLayers = [];
           
-          for (let i = 0; i < cloudCount; i++) {
-            this.clouds.push({
-              x: Math.random() * this.canvas.width,
-              y: Math.random() * this.canvas.height * 2 - this.canvas.height * 0.5,
-              size: Math.random() * 200 + 100,
-              color: this.getColor(),
-              opacity: Math.random() * 0.12 + 0.03,
-              speedY: Math.random() * 0.5 + 0.3,
-              wobblePhase: Math.random() * Math.PI * 2,
-              wobbleSpeed: Math.random() * 0.02 + 0.01
-            });
+          // Create layered nebula clouds that form a vertical column
+          const layerCount = 12;
+          for (let i = 0; i < layerCount; i++) {
+            // Multiple blobs per layer for complex shape
+            const blobsInLayer = 3 + Math.floor(Math.random() * 3);
+            for (let j = 0; j < blobsInLayer; j++) {
+              const yOffset = (i / layerCount) * this.canvas.height * 1.5;
+              this.nebulaLayers.push({
+                x: this.centerX + (Math.random() - 0.5) * 300,
+                y: yOffset - this.canvas.height * 0.25,
+                baseY: yOffset - this.canvas.height * 0.25,
+                width: Math.random() * 250 + 150,
+                height: Math.random() * 300 + 200,
+                rotation: Math.random() * Math.PI * 2,
+                rotationSpeed: (Math.random() - 0.5) * 0.002,
+                color: this.getNebulaColor(),
+                alpha: Math.random() * 0.15 + 0.08,
+                speed: 0.3 + Math.random() * 0.2,
+                wobbleAmp: Math.random() * 30 + 10,
+                wobbleFreq: Math.random() * 0.01 + 0.005
+              });
+            }
           }
         }
 
         createParticles() {
           this.particles = [];
-          const count = 18000;
+          const count = 3000; // Reduced count for performance
           
           for (let i = 0; i < count; i++) {
-            const layer = Math.random();
-            let size, brightness, speed;
+            // Gaussian distribution to cluster particles in nebula
+            const gaussX = this.gaussianRandom() * 200;
+            const x = this.centerX + gaussX;
+            const y = Math.random() * this.canvas.height * 1.5 - this.canvas.height * 0.25;
             
-            if (layer < 0.6) {
-              size = Math.random() * 1 + 0.3;
-              brightness = Math.random() * 0.5 + 0.2;
-              speed = Math.random() * 1 + 0.5;
-            } else if (layer < 0.9) {
-              size = Math.random() * 1.5 + 0.8;
-              brightness = Math.random() * 0.7 + 0.3;
-              speed = Math.random() * 0.8 + 0.3;
-            } else {
-              size = Math.random() * 2.5 + 1.5;
-              brightness = Math.random() * 0.9 + 0.4;
-              speed = Math.random() * 0.5 + 0.2;
-            }
+            // Particles closer to center are brighter/larger
+            const distFromCenter = Math.abs(gaussX);
+            const centralness = 1 - Math.min(distFromCenter / 300, 1);
+            
+            const size = centralness > 0.5 
+              ? Math.random() * 2 + 1 
+              : Math.random() * 1.5 + 0.5;
             
             this.particles.push({
-              x: Math.random() * this.canvas.width,
-              y: Math.random() * this.canvas.height,
+              x: x,
+              baseX: x,
+              y: y,
               size: size,
-              baseSize: size,
-              brightness: Math.min(brightness, 1),
-              baseBrightness: Math.min(brightness, 1),
-              color: this.getColor(),
-              speedY: speed,
-              wobblePhase: Math.random() * Math.PI * 2,
-              pulsePhase: Math.random() * Math.PI * 2
+              alpha: (0.3 + centralness * 0.5) * (Math.random() * 0.5 + 0.5),
+              color: this.getParticleColor(),
+              speed: 0.5 + Math.random() * 0.5,
+              wobbleAmp: Math.random() * 20 + 5,
+              wobbleFreq: Math.random() * 0.02 + 0.01,
+              phase: Math.random() * Math.PI * 2
             });
           }
         }
 
-        getColor() {
+        gaussianRandom() {
+          let u = 0, v = 0;
+          while (u === 0) u = Math.random();
+          while (v === 0) v = Math.random();
+          return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        }
+
+        getNebulaColor() {
           const colors = [
-            { r: 180, g: 30, b: 220 },   // Magenta
-            { r: 140, g: 20, b: 200 },   // Purple
-            { r: 220, g: 50, b: 180 },   // Pink
-            { r: 160, g: 40, b: 240 },   // Violet
-            { r: 200, g: 60, b: 200 },   // Bright magenta
-            { r: 120, g: 30, b: 180 },   // Deep purple
+            [180, 40, 220],  // Magenta
+            [150, 30, 200],  // Purple  
+            [200, 50, 180],  // Pink-magenta
+            [130, 40, 190],  // Deep purple
+            [170, 60, 210],  // Bright purple
           ];
-          const c = colors[Math.floor(Math.random() * colors.length)];
-          return { r: c.r + Math.random() * 30 - 15, g: c.g + Math.random() * 20 - 10, b: c.b + Math.random() * 30 - 15 };
+          return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        getParticleColor() {
+          const colors = [
+            [220, 180, 255], // Light purple
+            [255, 150, 220], // Pink
+            [200, 160, 255], // Lavender
+            [255, 200, 240], // Light pink
+            [180, 140, 255], // Violet
+          ];
+          return colors[Math.floor(Math.random() * colors.length)];
         }
 
         update() {
-          this.time += 0.01;
+          this.time += 0.016;
           
-          // Update clouds
-          this.clouds.forEach(cloud => {
-            cloud.y += cloud.speedY * this.verticalSpeed;
-            cloud.x += Math.sin(this.time * cloud.wobbleSpeed + cloud.wobblePhase) * 0.5;
+          // Update nebula layers
+          const totalHeight = this.canvas.height * 1.5;
+          this.nebulaLayers.forEach(layer => {
+            layer.y += layer.speed;
+            layer.x = this.centerX + (layer.baseY !== undefined ? 
+              Math.sin(this.time * layer.wobbleFreq + layer.baseY * 0.01) * layer.wobbleAmp : 0);
+            layer.rotation += layer.rotationSpeed;
             
-            if (cloud.y - cloud.size > this.canvas.height) {
-              cloud.y = -cloud.size;
-              cloud.x = Math.random() * this.canvas.width;
+            if (layer.y > this.canvas.height + layer.height) {
+              layer.y = -layer.height;
+              layer.baseY = layer.y;
             }
           });
           
           // Update particles
           this.particles.forEach(p => {
-            // Flow field movement
-            const flow = this.flowNoise(p.x, p.y, this.time);
+            p.y += p.speed;
+            p.x = p.baseX + Math.sin(this.time * p.wobbleFreq + p.phase) * p.wobbleAmp;
             
-            p.x += flow * 1.5;
-            p.y += p.speedY * this.verticalSpeed;
-            
-            // Pulse effect
-            const pulse = Math.sin(this.time * 2 + p.pulsePhase);
-            p.currentSize = p.baseSize * (0.7 + 0.3 * pulse);
-            p.currentBrightness = p.baseBrightness * (0.5 + 0.5 * pulse);
-            
-            // Wrap around
             if (p.y > this.canvas.height + 20) {
               p.y = -20;
-              p.x = Math.random() * this.canvas.width;
+              p.baseX = this.centerX + this.gaussianRandom() * 200;
             }
-            if (p.x < -50) p.x = this.canvas.width + 50;
-            if (p.x > this.canvas.width + 50) p.x = -50;
           });
         }
 
         render() {
-          // Clear with dark background
-          this.ctx.fillStyle = '#030108';
-          this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+          const ctx = this.ctx;
           
-          // Background ambient glow
-          const bgGlow = this.ctx.createRadialGradient(
-            this.canvas.width * 0.5, this.canvas.height * 0.5, 0,
-            this.canvas.width * 0.5, this.canvas.height * 0.5, this.canvas.width * 0.7
+          // Clear
+          ctx.fillStyle = '#030108';
+          ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+          
+          // Ambient center glow (static, cheap)
+          const ambientGlow = ctx.createRadialGradient(
+            this.centerX, this.canvas.height / 2, 0,
+            this.centerX, this.canvas.height / 2, 400
           );
-          bgGlow.addColorStop(0, 'rgba(80, 20, 120, 0.2)');
-          bgGlow.addColorStop(0.5, 'rgba(50, 10, 80, 0.1)');
-          bgGlow.addColorStop(1, 'transparent');
-          this.ctx.fillStyle = bgGlow;
-          this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+          ambientGlow.addColorStop(0, 'rgba(100, 30, 140, 0.15)');
+          ambientGlow.addColorStop(0.5, 'rgba(60, 20, 100, 0.08)');
+          ambientGlow.addColorStop(1, 'transparent');
+          ctx.fillStyle = ambientGlow;
+          ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
           
-          // Draw clouds (nebula gas)
-          this.ctx.globalCompositeOperation = 'screen';
+          // Draw nebula layers with screen blend
+          ctx.globalCompositeOperation = 'screen';
           
-          this.clouds.forEach(cloud => {
-            const gradient = this.ctx.createRadialGradient(
-              cloud.x, cloud.y, 0,
-              cloud.x, cloud.y, cloud.size
-            );
-            gradient.addColorStop(0, `rgba(${cloud.color.r}, ${cloud.color.g}, ${cloud.color.b}, ${cloud.opacity})`);
-            gradient.addColorStop(0.4, `rgba(${cloud.color.r}, ${cloud.color.g}, ${cloud.color.b}, ${cloud.opacity * 0.5})`);
-            gradient.addColorStop(0.7, `rgba(${cloud.color.r * 0.8}, ${cloud.color.g * 0.8}, ${cloud.color.b}, ${cloud.opacity * 0.2})`);
+          this.nebulaLayers.forEach(layer => {
+            ctx.save();
+            ctx.translate(layer.x, layer.y);
+            ctx.rotate(layer.rotation);
+            
+            const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, layer.width);
+            gradient.addColorStop(0, `rgba(${layer.color[0]}, ${layer.color[1]}, ${layer.color[2]}, ${layer.alpha})`);
+            gradient.addColorStop(0.4, `rgba(${layer.color[0]}, ${layer.color[1]}, ${layer.color[2]}, ${layer.alpha * 0.5})`);
+            gradient.addColorStop(0.7, `rgba(${layer.color[0] * 0.7}, ${layer.color[1] * 0.7}, ${layer.color[2]}, ${layer.alpha * 0.2})`);
             gradient.addColorStop(1, 'transparent');
             
-            this.ctx.fillStyle = gradient;
-            this.ctx.beginPath();
-            this.ctx.arc(cloud.x, cloud.y, cloud.size, 0, Math.PI * 2);
-            this.ctx.fill();
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, layer.width, layer.height, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
           });
           
-          // Draw particles
-          this.ctx.globalCompositeOperation = 'lighter';
+          // Draw particles with additive blend - batch by color for efficiency
+          ctx.globalCompositeOperation = 'lighter';
           
+          // Draw all particles in one pass with simple circles
           this.particles.forEach(p => {
-            const r = Math.min(255, p.color.r + 60);
-            const g = Math.min(255, p.color.g + 40);
-            const b = Math.min(255, p.color.b + 40);
-            
-            // Glow for larger particles
-            if (p.currentSize > 1.2) {
-              const glowSize = p.currentSize * 5;
-              const glow = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowSize);
-              glow.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${p.currentBrightness * 0.4})`);
-              glow.addColorStop(0.3, `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${p.currentBrightness * 0.15})`);
-              glow.addColorStop(1, 'transparent');
-              
-              this.ctx.fillStyle = glow;
-              this.ctx.beginPath();
-              this.ctx.arc(p.x, p.y, glowSize, 0, Math.PI * 2);
-              this.ctx.fill();
-            }
-            
-            // Core particle
-            this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, p.currentSize, 0, Math.PI * 2);
-            this.ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${p.currentBrightness})`;
-            this.ctx.fill();
+            ctx.fillStyle = `rgba(${p.color[0]}, ${p.color[1]}, ${p.color[2]}, ${p.alpha})`;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
           });
           
-          this.ctx.globalCompositeOperation = 'source-over';
+          ctx.globalCompositeOperation = 'source-over';
         }
 
         animate() {
@@ -599,9 +592,7 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
 
       document.addEventListener('DOMContentLoaded', () => {
         const canvas = document.getElementById('bg-particles');
-        if (canvas) {
-          new FlowingNebula(canvas);
-        }
+        if (canvas) new CosmicNebula(canvas);
       });
     </script>
   </body>
