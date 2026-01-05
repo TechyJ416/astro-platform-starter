@@ -1,29 +1,32 @@
 ---
 // src/pages/legal.astro
-import Layout from '../layouts/Layout.astro';
+export const prerender = false;
+
+import Layout from "../layouts/Layout.astro";
 
 const lastUpdated = "January 1, 2025";
 ---
 
 <Layout title="Legal">
   <div class="legal-page">
-    <!-- Hero -->
-    <section class="legal-hero">
-      <span class="badge">Legal Documentation</span>
+    <section class="hero-section">
+      <span class="header-label"><span class="label-line"></span> Legal Documentation <span class="label-line"></span></span>
       <h1>Privacy & Terms</h1>
-      <p class="hero-subtitle">
-        Transparent policies for our creator community. Last updated {lastUpdated}.
-      </p>
+      <p>Transparent policies for our creator community. Last updated {lastUpdated}.</p>
+      
+      <div class="nav-pills">
+        <a href="#privacy" class="pill active">Privacy Policy</a>
+        <a href="#terms" class="pill">Terms of Service</a>
+        <a href="#contact" class="pill">Contact</a>
+      </div>
     </section>
 
-    <!-- Content -->
     <div class="content-wrapper">
-      
       <!-- Privacy Policy -->
       <article id="privacy" class="section">
-        <div class="section-header">
-          <h2 class="section-title">1. Privacy Policy</h2>
-          <p class="section-meta"><strong>Effective Date:</strong> {lastUpdated}</p>
+        <div class="section-header privacy">
+          <h2>1. Privacy Policy</h2>
+          <span class="section-meta">Effective Date: {lastUpdated}</span>
         </div>
 
         <div class="prose">
@@ -31,7 +34,6 @@ const lastUpdated = "January 1, 2025";
             Banity Ltd ("Banity", "we", "us", "our") operates banity.com and related campaign platforms. 
             We run paid user-generated content (UGC) campaigns on behalf of brands.
           </p>
-
           <p>
             This Privacy Policy applies worldwide and complies with GDPR, CCPA/CPRA, LGPD, and other applicable 
             data-protection laws.
@@ -81,25 +83,21 @@ const lastUpdated = "January 1, 2025";
             You may at any time: access, rectify, delete, restrict, object, port your data, or withdraw consent 
             by emailing <a href="mailto:privacy@banity.com">privacy@banity.com</a>.
           </p>
-          <p>
-            California residents: additional CCPA rights (see Section 10).
-          </p>
+          <p>California residents: additional CCPA rights (see Section 10).</p>
 
           <h3>7. Security & Children</h3>
           <p>
-            We use industry-standard encryption and access controls.<br>
+            We use industry-standard encryption and access controls.<br/>
             The service is not directed to persons under 16.
           </p>
 
           <h3>8. Changes</h3>
-          <p>
-            Material changes will be notified by email or in-app notice.
-          </p>
+          <p>Material changes will be notified by email or in-app notice.</p>
 
           <h3>9. Contact & Data Controller</h3>
           <p>
-            <strong>Banity Ltd</strong><br>
-            Email: <a href="mailto:privacy@banity.com">privacy@banity.com</a><br>
+            <strong>Banity Ltd</strong><br/>
+            Email: <a href="mailto:privacy@banity.com">privacy@banity.com</a><br/>
             EU representative: available on request
           </p>
 
@@ -112,14 +110,13 @@ const lastUpdated = "January 1, 2025";
         </div>
       </article>
 
-      <!-- Divider -->
       <div class="divider"></div>
 
       <!-- Terms of Service -->
       <article id="terms" class="section">
         <div class="section-header terms">
-          <h2 class="section-title">2. Terms of Service</h2>
-          <p class="section-meta"><strong>Last Updated:</strong> {lastUpdated}</p>
+          <h2>2. Terms of Service</h2>
+          <span class="section-meta">Last Updated: {lastUpdated}</span>
         </div>
 
         <div class="prose">
@@ -217,239 +214,150 @@ const lastUpdated = "January 1, 2025";
 
       <!-- Contact Section -->
       <section id="contact" class="contact-section">
-        <h2 class="contact-title">Questions?</h2>
-        <p class="contact-info">
-          <strong>Banity Ltd</strong>
-        </p>
+        <div class="contact-icon">📋</div>
+        <h2>Questions?</h2>
+        <p><strong>Banity Ltd</strong></p>
         <div class="contact-buttons">
-          <a href="mailto:legal@banity.com" class="btn btn-primary">
-            📧 Legal Inquiries
-          </a>
-          <a href="mailto:privacy@banity.com" class="btn btn-secondary">
-            🔒 Privacy Requests
-          </a>
-          <a href="/contact" class="btn btn-secondary">
-            💬 Contact Us
-          </a>
+          <a href="mailto:legal@banity.com" class="btn btn-primary">📧 Legal Inquiries</a>
+          <a href="mailto:privacy@banity.com" class="btn btn-secondary">🔒 Privacy Requests</a>
+          <a href="/contact" class="btn btn-secondary">💬 Contact Us</a>
         </div>
       </section>
-
     </div>
   </div>
 
   <style>
-    .legal-page {
-      background: #f8fafc;
-      min-height: 100vh;
+    .legal-page { max-width: 900px; margin: 0 auto; padding: 2rem; }
+
+    .hero-section { text-align: center; margin-bottom: 3rem; }
+
+    .header-label {
+      display: inline-flex; align-items: center; gap: 1rem; margin-bottom: 1rem;
+      font-size: 0.8125rem; color: var(--cosmic-blue); text-transform: uppercase;
+      letter-spacing: 0.15em; font-weight: 600;
     }
 
-    .legal-hero {
-      text-align: center;
-      padding: 4rem 2rem 3rem;
-      background: linear-gradient(135deg, #1a1a2e, #2d2d4a);
-      color: white;
+    .label-line { width: 30px; height: 1px; background: var(--cosmic-blue); }
+
+    .hero-section h1 {
+      font-size: 2.5rem; font-weight: 800; color: var(--star-white);
+      margin-bottom: 0.75rem; letter-spacing: -0.02em;
     }
-    
-    .badge {
-      display: inline-block;
-      padding: 0.375rem 1rem;
-      background: rgba(37, 99, 235, 0.2);
-      color: #60a5fa;
+
+    .hero-section > p { color: var(--star-dim); font-size: 1.125rem; margin-bottom: 2rem; }
+
+    .nav-pills {
+      display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;
+    }
+
+    .pill {
+      padding: 0.5rem 1.25rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 100px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      margin-bottom: 1.5rem;
-    }
-    
-    .legal-hero h1 {
-      font-size: 3rem;
-      font-weight: 700;
-      line-height: 1.1;
-      letter-spacing: -0.03em;
-      margin-bottom: 1rem;
-    }
-    
-    .hero-subtitle {
-      font-size: 1.125rem;
-      color: rgba(255,255,255,0.8);
-      max-width: 600px;
-      margin: 0 auto;
-    }
-    
-    .content-wrapper {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 3rem 2rem;
-    }
-    
-    .section {
-      margin-bottom: 3rem;
-      background: white;
-      border-radius: 16px;
-      overflow: hidden;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }
-    
-    .section-header {
-      background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-      border-left: 4px solid #2563eb;
-      padding: 2rem;
-    }
-    
-    .section-header.terms {
-      background: linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%);
-      border-left-color: #9333ea;
-    }
-    
-    .section-title {
-      font-size: 1.75rem;
-      font-weight: 700;
-      color: #1a1a2e;
-      margin-bottom: 0.5rem;
-    }
-    
-    .section-meta {
-      font-size: 0.875rem;
-      color: #6b7280;
-    }
-    
-    .prose {
-      padding: 2rem;
-      font-size: 1rem;
-      line-height: 1.75;
-    }
-    
-    .prose h3 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #1a1a2e;
-      margin-top: 2rem;
-      margin-bottom: 0.75rem;
-    }
-    
-    .prose h3:first-child {
-      margin-top: 0;
-    }
-    
-    .prose p {
-      margin-bottom: 1rem;
-      color: #4b5563;
-    }
-    
-    .prose strong {
-      font-weight: 600;
-      color: #1a1a2e;
-    }
-    
-    .prose ul {
-      margin-bottom: 1rem;
-      padding-left: 1.5rem;
-    }
-    
-    .prose li {
-      margin-bottom: 0.5rem;
-      color: #4b5563;
-    }
-    
-    .prose a {
-      color: #2563eb;
+      color: var(--star-dim);
       text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.3s;
     }
-    
-    .prose a:hover {
-      text-decoration: underline;
+
+    .pill:hover, .pill.active {
+      background: rgba(79, 139, 255, 0.15);
+      border-color: rgba(79, 139, 255, 0.4);
+      color: var(--cosmic-blue);
     }
-    
+
+    .content-wrapper { display: flex; flex-direction: column; gap: 2rem; }
+
+    .section {
+      background: linear-gradient(135deg, rgba(26, 26, 46, 0.7), rgba(8, 8, 18, 0.7));
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 20px;
+      overflow: hidden;
+    }
+
+    .section-header {
+      padding: 1.5rem 2rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .section-header.privacy {
+      background: linear-gradient(135deg, rgba(79, 139, 255, 0.15), rgba(79, 139, 255, 0.05));
+      border-left: 4px solid var(--cosmic-blue);
+    }
+
+    .section-header.terms {
+      background: linear-gradient(135deg, rgba(168, 85, 247, 0.15), rgba(168, 85, 247, 0.05));
+      border-left: 4px solid var(--cosmic-purple);
+    }
+
+    .section-header h2 {
+      font-size: 1.375rem; font-weight: 700; color: var(--star-white); margin: 0;
+    }
+
+    .section-meta { font-size: 0.8125rem; color: var(--star-dim); }
+
+    .prose { padding: 2rem; }
+
+    .prose h3 {
+      font-size: 1.125rem; font-weight: 700; color: var(--star-white);
+      margin-top: 2rem; margin-bottom: 0.75rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .prose h3:first-child { margin-top: 0; }
+
+    .prose p { color: var(--star-dim); line-height: 1.8; margin-bottom: 1rem; }
+    .prose strong { color: var(--star-white); font-weight: 600; }
+
+    .prose ul {
+      color: var(--star-dim); line-height: 1.8;
+      padding-left: 1.5rem; margin-bottom: 1rem;
+    }
+
+    .prose li { margin-bottom: 0.5rem; }
+
+    .prose a { color: var(--cosmic-blue); text-decoration: none; }
+    .prose a:hover { text-decoration: underline; }
+
     .divider {
       height: 1px;
-      background: linear-gradient(to right, transparent, #e5e7eb, transparent);
-      margin: 3rem 0;
+      background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.1), transparent);
+      margin: 1rem 0;
     }
-    
+
     .contact-section {
-      background: white;
-      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(26, 26, 46, 0.6), rgba(8, 8, 18, 0.6));
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 20px;
       padding: 3rem;
       text-align: center;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
-    
-    .contact-title {
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: #1a1a2e;
-      margin-bottom: 0.5rem;
+
+    .contact-icon { font-size: 3rem; margin-bottom: 1rem; }
+
+    .contact-section h2 {
+      font-size: 1.5rem; font-weight: 700; color: var(--star-white); margin-bottom: 0.5rem;
     }
-    
-    .contact-info {
-      color: #6b7280;
-      margin-bottom: 1.5rem;
-    }
-    
+
+    .contact-section p { color: var(--star-dim); margin-bottom: 1.5rem; }
+
     .contact-buttons {
-      display: flex;
-      gap: 1rem;
-      justify-content: center;
-      flex-wrap: wrap;
+      display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;
     }
-    
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.75rem 1.5rem;
-      border-radius: 10px;
-      font-weight: 600;
-      font-size: 0.9375rem;
-      text-decoration: none;
-      transition: all 0.2s;
-    }
-    
-    .btn-primary {
-      background: #2563eb;
-      color: white;
-    }
-    
-    .btn-primary:hover {
-      background: #1d4ed8;
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-    }
-    
-    .btn-secondary {
-      background: #f3f4f6;
-      color: #374151;
-      border: 1px solid #e5e7eb;
-    }
-    
-    .btn-secondary:hover {
-      border-color: #2563eb;
-      color: #2563eb;
-      transform: translateY(-2px);
-    }
-    
+
     @media (max-width: 768px) {
-      .legal-hero h1 {
-        font-size: 2rem;
-      }
-      
-      .section-title {
-        font-size: 1.5rem;
-      }
-      
-      .content-wrapper {
-        padding: 2rem 1rem;
-      }
-      
-      .prose {
-        padding: 1.5rem;
-      }
-      
-      .contact-buttons {
-        flex-direction: column;
-      }
+      .section-header { flex-direction: column; align-items: flex-start; }
+      .prose { padding: 1.5rem; }
+      .contact-buttons { flex-direction: column; }
+      .contact-buttons .btn { width: 100%; justify-content: center; }
     }
   </style>
 </Layout>
