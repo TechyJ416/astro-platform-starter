@@ -5,31 +5,21 @@ export const prerender = false;
 import Layout from "../layouts/Layout.astro";
 import { supabase } from "../lib/supabase";
 
-// Redirect if already logged in
 const session = Astro.locals.session;
-if (session?.user) {
+if (session) {
   return Astro.redirect('/dashboard');
 }
 
 let error = '';
-let pendingAccount = false;
-let deniedAccount = false;
-let suspendedAccount = false;
-
-// Check for status from URL (redirected from middleware)
-const statusParam = Astro.url.searchParams.get('status');
-if (statusParam === 'pending') pendingAccount = true;
-if (statusParam === 'denied') deniedAccount = true;
-if (statusParam === 'suspended') suspendedAccount = true;
+const url = new URL(Astro.request.url);
+const redirectTo = url.searchParams.get('redirect') || '/dashboard';
 
 if (Astro.request.method === 'POST') {
-  const formData = await Astro.request.formData();
-  const email = formData.get('email') as string;
-  const password = formData.get('password') as string;
+  try {
+    const formData = await Astro.request.formData();
+    const email = formData.get('email')?.toString() || '';
+    const password = formData.get('password')?.toString() || '';
 
-  if (!email || !password) {
-    error = 'Email and password are required.';
-  } else {
     const { data, error: authError } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -37,310 +27,188 @@ if (Astro.request.method === 'POST') {
 
     if (authError) {
       error = authError.message;
-    } else if (data.user) {
-      // Check user profile status
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('status, is_active')
-        .eq('id', data.user.id)
-        .single();
-
-      if (profile?.status === 'pending') {
-        await supabase.auth.signOut();
-        pendingAccount = true;
-      } else if (profile?.status === 'denied') {
-        await supabase.auth.signOut();
-        deniedAccount = true;
-      } else if (!profile?.is_active || profile?.status === 'suspended') {
-        await supabase.auth.signOut();
-        suspendedAccount = true;
-      } else {
-        // Set session cookie and redirect
-        const response = Astro.response;
-        response.headers.set(
-          'Set-Cookie',
-          `sb-access-token=${data.session?.access_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`
-        );
-        return Astro.redirect('/dashboard');
-      }
+    } else if (data.session) {
+      // Set cookie and redirect
+      Astro.cookies.set('sb-access-token', data.session.access_token, {
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 7,
+      });
+      Astro.cookies.set('sb-refresh-token', data.session.refresh_token, {
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 30,
+      });
+      return Astro.redirect(redirectTo);
     }
+  } catch (e) {
+    error = 'Something went wrong. Please try again.';
   }
 }
-
-const returnTo = Astro.url.searchParams.get('returnTo') || '/dashboard';
 ---
 
-<Layout>
-  <div class="login-page">
-    <div class="login-container">
-      {pendingAccount ? (
-        <div class="status-card pending">
-          <div class="status-icon">⏳</div>
-          <h1>Account Pending Approval</h1>
-          <p>Your account is still being reviewed by our team.</p>
-          <p class="subtext">We'll send you an email as soon as your account is approved. This usually takes 1-2 business days.</p>
-          <div class="status-actions">
-            <a href="/" class="btn btn-secondary">Go Home</a>
-          </div>
+<Layout title="Sign In">
+  <div class="auth-page">
+    <div class="auth-container">
+      <div class="auth-card">
+        <div class="auth-header">
+          <span class="auth-icon">✦</span>
+          <h1>Welcome Back</h1>
+          <p>Sign in to your account</p>
         </div>
-      ) : deniedAccount ? (
-        <div class="status-card denied">
-          <div class="status-icon">❌</div>
-          <h1>Application Not Approved</h1>
-          <p>Unfortunately, your application was not approved at this time.</p>
-          <p class="subtext">If you believe this is a mistake, please contact our support team.</p>
-          <div class="status-actions">
-            <a href="/" class="btn btn-secondary">Go Home</a>
+
+        {error && <div class="error-message">{error}</div>}
+
+        <form method="POST" class="auth-form">
+          <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" required placeholder="your@email.com" autocomplete="email" />
           </div>
+
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required placeholder="••••••••" autocomplete="current-password" />
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-full">Sign In →</button>
+        </form>
+
+        <div class="auth-footer">
+          <p>Don't have an account? <a href="/signup">Sign up</a></p>
+          <a href="/forgot-password" class="forgot-link">Forgot password?</a>
         </div>
-      ) : suspendedAccount ? (
-        <div class="status-card suspended">
-          <div class="status-icon">🚫</div>
-          <h1>Account Suspended</h1>
-          <p>Your account has been suspended.</p>
-          <p class="subtext">Please contact support if you believe this is an error.</p>
-          <div class="status-actions">
-            <a href="/" class="btn btn-secondary">Go Home</a>
-          </div>
-        </div>
-      ) : (
-        <div class="login-card">
-          <div class="card-header">
-            <h1>Welcome Back</h1>
-            <p>Log in to your creator account</p>
-          </div>
+      </div>
 
-          {error && <div class="alert error">{error}</div>}
-
-          <form method="POST" class="login-form">
-            <div class="form-group">
-              <label for="email">Email Address</label>
-              <input 
-                type="email" 
-                id="email" 
-                name="email" 
-                placeholder="you@example.com"
-                required
-                autocomplete="email"
-              />
-            </div>
-
-            <div class="form-group">
-              <label for="password">Password</label>
-              <input 
-                type="password" 
-                id="password" 
-                name="password" 
-                placeholder="••••••••"
-                required
-                autocomplete="current-password"
-              />
-            </div>
-
-            <button type="submit" class="btn btn-primary btn-full">Log In</button>
-            
-            <div class="forgot-link">
-              <a href="/forgot-password">Forgot your password?</a>
-            </div>
-          </form>
-
-          <div class="card-footer">
-            <p>Don't have an account? <a href="/signup">Join the waitlist</a></p>
-          </div>
-        </div>
-      )}
+      <div class="auth-decoration">
+        <div class="deco-orb orb-1"></div>
+        <div class="deco-orb orb-2"></div>
+        <div class="deco-orb orb-3"></div>
+      </div>
     </div>
   </div>
 
   <style>
-    .login-page {
-      min-height: 100vh;
+    .auth-page {
+      min-height: calc(100vh - 200px);
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 2rem;
-      background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
     }
 
-    .login-container {
-      width: 100%;
-      max-width: 420px;
+    .auth-container { position: relative; width: 100%; max-width: 420px; }
+
+    .auth-card {
+      position: relative;
+      background: linear-gradient(135deg, rgba(26, 26, 46, 0.8), rgba(8, 8, 18, 0.8));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 24px;
+      padding: 2.5rem;
+      backdrop-filter: blur(20px);
+      z-index: 1;
     }
 
-    .login-card, .status-card {
-      background: white;
-      border-radius: 16px;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.1);
-      overflow: hidden;
+    .auth-header { text-align: center; margin-bottom: 2rem; }
+    
+    .auth-icon {
+      display: inline-block;
+      font-size: 2rem;
+      color: var(--cosmic-blue);
+      margin-bottom: 1rem;
+      text-shadow: 0 0 30px var(--glow-blue);
     }
 
-    .card-header {
-      padding: 2rem 2rem 0;
-      text-align: center;
-    }
+    .auth-header h1 { font-size: 1.75rem; font-weight: 800; color: var(--star-white); margin-bottom: 0.5rem; }
+    .auth-header p { color: var(--star-dim); }
 
-    .card-header h1 {
-      font-size: 1.75rem;
-      color: #1a1a2e;
-      margin-bottom: 0.5rem;
-    }
+    .auth-form { display: flex; flex-direction: column; gap: 1.25rem; }
 
-    .card-header p {
-      color: #6b7280;
-      font-size: 0.9375rem;
-    }
-
-    .login-form {
-      padding: 1.5rem 2rem 2rem;
-    }
-
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: #374151;
-      margin-bottom: 0.5rem;
-    }
+    .form-group { display: flex; flex-direction: column; gap: 0.5rem; }
+    .form-group label { font-size: 0.875rem; font-weight: 600; color: var(--star-white); }
 
     .form-group input {
-      width: 100%;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
       padding: 0.875rem 1rem;
-      border: 2px solid #e5e7eb;
-      border-radius: 10px;
+      color: var(--star-white);
       font-size: 1rem;
-      transition: all 0.2s;
+      font-family: inherit;
+      transition: all 0.3s;
     }
+
+    .form-group input::placeholder { color: var(--star-muted); }
 
     .form-group input:focus {
       outline: none;
-      border-color: #2563eb;
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+      border-color: var(--cosmic-blue);
+      background: rgba(79, 139, 255, 0.08);
+      box-shadow: 0 0 0 3px rgba(79, 139, 255, 0.1);
     }
 
-    .btn {
-      padding: 0.875rem 1.5rem;
+    .btn-full { width: 100%; justify-content: center; margin-top: 0.5rem; }
+
+    .error-message {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
       border-radius: 10px;
-      font-weight: 600;
-      font-size: 1rem;
-      text-decoration: none;
-      border: none;
-      cursor: pointer;
-      transition: all 0.2s;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .btn-primary {
-      background: #2563eb;
-      color: white;
-    }
-
-    .btn-primary:hover {
-      background: #1d4ed8;
-    }
-
-    .btn-secondary {
-      background: #f3f4f6;
-      color: #374151;
-    }
-
-    .forgot-link {
-      text-align: center;
-      margin-top: 1rem;
-    }
-
-    .forgot-link a {
-      color: #6b7280;
-      text-decoration: none;
+      padding: 0.875rem;
+      color: #f87171;
       font-size: 0.875rem;
-    }
-
-    .forgot-link a:hover {
-      color: #2563eb;
-      text-decoration: underline;
-    }
-
-    .btn-full {
-      width: 100%;
-    }
-
-    .card-footer {
-      padding: 1.5rem 2rem;
-      background: #f9fafb;
-      text-align: center;
-      font-size: 0.9375rem;
-      color: #6b7280;
-    }
-
-    .card-footer a {
-      color: #2563eb;
-      text-decoration: none;
-      font-weight: 600;
-    }
-
-    .card-footer a:hover {
-      text-decoration: underline;
-    }
-
-    .alert {
-      margin: 1.5rem 2rem 0;
-      padding: 1rem;
-      border-radius: 10px;
-      font-size: 0.9375rem;
-    }
-
-    .alert.error {
-      background: #fee2e2;
-      color: #991b1b;
-    }
-
-    /* Status Cards */
-    .status-card {
-      padding: 3rem 2rem;
-      text-align: center;
-    }
-
-    .status-card.pending {
-      border-top: 4px solid #f59e0b;
-    }
-
-    .status-card.denied {
-      border-top: 4px solid #ef4444;
-    }
-
-    .status-card.suspended {
-      border-top: 4px solid #6b7280;
-    }
-
-    .status-icon {
-      font-size: 4rem;
       margin-bottom: 1rem;
     }
 
-    .status-card h1 {
-      font-size: 1.5rem;
-      color: #1a1a2e;
-      margin-bottom: 1rem;
+    .auth-footer {
+      margin-top: 2rem;
+      text-align: center;
+      padding-top: 1.5rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
     }
 
-    .status-card p {
-      color: #374151;
-      font-size: 1rem;
-      margin-bottom: 0.5rem;
+    .auth-footer p { color: var(--star-dim); font-size: 0.9375rem; }
+    .auth-footer a { color: var(--cosmic-blue); text-decoration: none; font-weight: 600; }
+    .auth-footer a:hover { text-decoration: underline; }
+
+    .forgot-link { display: block; margin-top: 0.75rem; font-size: 0.875rem; color: var(--star-muted) !important; }
+
+    /* Decorative orbs */
+    .auth-decoration { position: absolute; inset: -50px; pointer-events: none; z-index: 0; }
+
+    .deco-orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(60px);
+      opacity: 0.4;
     }
 
-    .status-card .subtext {
-      color: #6b7280;
-      font-size: 0.9375rem;
+    .orb-1 {
+      width: 200px; height: 200px;
+      background: var(--cosmic-blue);
+      top: -50px; left: -50px;
+      animation: float 8s ease-in-out infinite;
     }
 
-    .status-actions {
-      margin-top: 1.5rem;
+    .orb-2 {
+      width: 150px; height: 150px;
+      background: var(--cosmic-purple);
+      bottom: -30px; right: -30px;
+      animation: float 10s ease-in-out infinite reverse;
+    }
+
+    .orb-3 {
+      width: 100px; height: 100px;
+      background: var(--cosmic-pink);
+      top: 50%; right: -60px;
+      animation: float 6s ease-in-out infinite 2s;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translate(0, 0); }
+      50% { transform: translate(20px, -20px); }
     }
   </style>
 </Layout>
