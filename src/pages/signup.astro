@@ -4,416 +4,222 @@ export const prerender = false;
 
 import Layout from "../layouts/Layout.astro";
 import { supabase } from "../lib/supabase";
-import { sendWelcomeEmail } from "../lib/email";
+
+const session = Astro.locals.session;
+if (session) {
+  return Astro.redirect('/dashboard');
+}
 
 let error = '';
 let success = false;
 
-// Check if registration is open or waitlist mode
-let registrationMode = 'waitlist'; // 'open', 'waitlist', 'closed'
-try {
-  const { data } = await supabase
-    .from('site_settings')
-    .select('value')
-    .eq('key', 'general')
-    .single();
-  if (data?.value?.registrationMode) {
-    registrationMode = data.value.registrationMode;
-  }
-} catch (e) {
-  // Default to waitlist
-}
-
-if (registrationMode === 'closed') {
-  return Astro.redirect('/?error=registration_closed');
-}
-
 if (Astro.request.method === 'POST') {
-  const formData = await Astro.request.formData();
-  const email = formData.get('email') as string;
-  const password = formData.get('password') as string;
-  const confirmPassword = formData.get('confirmPassword') as string;
-  const fullName = formData.get('fullName') as string;
+  try {
+    const formData = await Astro.request.formData();
+    const email = formData.get('email')?.toString() || '';
+    const password = formData.get('password')?.toString() || '';
+    const fullName = formData.get('fullName')?.toString() || '';
 
-  if (!email || !password) {
-    error = 'Email and password are required.';
-  } else if (password.length < 8) {
-    error = 'Password must be at least 8 characters.';
-  } else if (password !== confirmPassword) {
-    error = 'Passwords do not match.';
-  } else {
-    // Create auth user
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
-        },
-      },
-    });
-
-    if (authError) {
-      error = authError.message;
-    } else if (authData.user) {
-      // Determine user status based on registration mode
-      const userStatus = registrationMode === 'waitlist' ? 'pending' : 'active';
-      const isActive = registrationMode !== 'waitlist';
-      
-      // Create profile with appropriate status
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: authData.user.id,
+    if (password.length < 8) {
+      error = 'Password must be at least 8 characters.';
+    } else {
+      const { data, error: authError } = await supabase.auth.signUp({
         email,
-        full_name: fullName,
-        role: 'creator',
-        status: userStatus,
-        is_active: isActive,
-        is_verified: false,
-        created_at: new Date().toISOString(),
+        password,
+        options: {
+          data: { full_name: fullName },
+        },
       });
 
-      if (profileError) {
-        console.error('Profile creation error:', profileError);
-      }
-
-      // Create notification for admins (waitlist mode)
-      if (registrationMode === 'waitlist') {
-        await supabase.from('messages').insert({
-          name: 'System',
-          email: 'system@banity.com',
-          subject: `New Waitlist Signup: ${fullName || email}`,
-          body: `A new user has joined the waitlist:\n\nName: ${fullName || 'Not provided'}\nEmail: ${email}\n\nReview their application in the Users section of the admin panel.`,
-          is_read: false,
-          is_announcement: false,
+      if (authError) {
+        error = authError.message;
+      } else if (data.user) {
+        // Create profile
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          email: email,
+          full_name: fullName,
+          role: 'creator',
+          status: 'pending',
+          is_active: false,
+          level: 1,
+          created_at: new Date().toISOString(),
         });
-        
-        // Send welcome email to user
-        await sendWelcomeEmail(email, fullName || '');
+        success = true;
       }
-
-      success = true;
     }
+  } catch (e) {
+    error = 'Something went wrong. Please try again.';
   }
 }
 ---
 
-<Layout>
-  <div class="signup-page">
-    <div class="signup-container">
-      {success ? (
-        <div class="success-card">
-          <div class="success-icon">🎉</div>
-          <h1>{registrationMode === 'waitlist' ? "You're on the Waitlist!" : 'Account Created!'}</h1>
-          {registrationMode === 'waitlist' ? (
-            <>
-              <p>Thanks for signing up! We've added you to our waitlist.</p>
-              <p class="subtext">We'll review your application and send you an email once your account is approved. This usually takes 1-2 business days.</p>
-              <div class="next-steps">
-                <h3>What happens next?</h3>
-                <ol>
-                  <li>Our team reviews your application</li>
-                  <li>You'll receive an email notification</li>
-                  <li>Once approved, you can log in and start creating</li>
-                </ol>
-              </div>
-            </>
-          ) : (
-            <>
-              <p>Your account has been created successfully!</p>
-              <p class="subtext">Please check your email to verify your account, then you can log in.</p>
-            </>
-          )}
-          <a href="/login" class="btn btn-primary">Go to Login</a>
-        </div>
-      ) : (
-        <div class="signup-card">
-          <div class="card-header">
-            <h1>{registrationMode === 'waitlist' ? 'Join the Waitlist' : 'Create Account'}</h1>
-            <p>{registrationMode === 'waitlist' 
-              ? "We're currently in private beta. Sign up to join our waitlist!"
-              : 'Start your creator journey today.'}</p>
+<Layout title="Sign Up">
+  <div class="auth-page">
+    <div class="auth-container">
+      <div class="auth-card">
+        {success ? (
+          <div class="success-state">
+            <div class="success-icon">✓</div>
+            <h2>Application Submitted!</h2>
+            <p>We'll review your application and notify you once approved. Check your email for confirmation.</p>
+            <a href="/login" class="btn btn-primary">Go to Sign In</a>
           </div>
+        ) : (
+          <>
+            <div class="auth-header">
+              <span class="auth-icon">✦</span>
+              <h1>Join as Creator</h1>
+              <p>Start your journey with us</p>
+            </div>
 
-          {error && <div class="alert error">{error}</div>}
+            {error && <div class="error-message">{error}</div>}
 
-          {registrationMode === 'waitlist' && (
-            <div class="waitlist-notice">
-              <span class="notice-icon">⏳</span>
-              <div>
-                <strong>Private Beta</strong>
-                <p>Accounts require approval. You'll be notified by email once accepted.</p>
+            <form method="POST" class="auth-form">
+              <div class="form-group">
+                <label for="fullName">Full Name</label>
+                <input type="text" id="fullName" name="fullName" required placeholder="Your name" autocomplete="name" />
               </div>
-            </div>
-          )}
 
-          <form method="POST" class="signup-form">
-            <div class="form-group">
-              <label for="fullName">Full Name</label>
-              <input 
-                type="text" 
-                id="fullName" 
-                name="fullName" 
-                placeholder="Your full name"
-                required
-              />
-            </div>
+              <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" required placeholder="your@email.com" autocomplete="email" />
+              </div>
 
-            <div class="form-group">
-              <label for="email">Email Address *</label>
-              <input 
-                type="email" 
-                id="email" 
-                name="email" 
-                placeholder="you@example.com"
-                required
-              />
+              <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required placeholder="Min 8 characters" autocomplete="new-password" minlength="8" />
+              </div>
+
+              <button type="submit" class="btn btn-primary btn-full">Create Account →</button>
+            </form>
+
+            <div class="auth-footer">
+              <p>Already have an account? <a href="/login">Sign in</a></p>
             </div>
 
-            <div class="form-group">
-              <label for="password">Password *</label>
-              <input 
-                type="password" 
-                id="password" 
-                name="password" 
-                placeholder="At least 8 characters"
-                minlength="8"
-                required
-              />
+            <div class="terms-notice">
+              By signing up, you agree to our <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms of Service</a>.
             </div>
+          </>
+        )}
+      </div>
 
-            <div class="form-group">
-              <label for="confirmPassword">Confirm Password *</label>
-              <input 
-                type="password" 
-                id="confirmPassword" 
-                name="confirmPassword" 
-                placeholder="Confirm your password"
-                minlength="8"
-                required
-              />
-            </div>
-
-            <button type="submit" class="btn btn-primary btn-full">
-              {registrationMode === 'waitlist' ? 'Join Waitlist' : 'Create Account'}
-            </button>
-          </form>
-
-          <div class="card-footer">
-            <p>Already have an account? <a href="/login">Log in</a></p>
-          </div>
-        </div>
-      )}
+      <div class="auth-decoration">
+        <div class="deco-orb orb-1"></div>
+        <div class="deco-orb orb-2"></div>
+        <div class="deco-orb orb-3"></div>
+      </div>
     </div>
   </div>
 
   <style>
-    .signup-page {
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    .auth-page {
+      min-height: calc(100vh - 200px);
+      display: flex; align-items: center; justify-content: center;
       padding: 2rem;
-      background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
     }
 
-    .signup-container {
-      width: 100%;
-      max-width: 440px;
+    .auth-container { position: relative; width: 100%; max-width: 420px; }
+
+    .auth-card {
+      position: relative;
+      background: linear-gradient(135deg, rgba(26, 26, 46, 0.8), rgba(8, 8, 18, 0.8));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 24px; padding: 2.5rem;
+      backdrop-filter: blur(20px); z-index: 1;
     }
 
-    .signup-card, .success-card {
-      background: white;
-      border-radius: 16px;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.1);
-      overflow: hidden;
+    .auth-header { text-align: center; margin-bottom: 2rem; }
+    
+    .auth-icon {
+      display: inline-block; font-size: 2rem; color: var(--cosmic-blue);
+      margin-bottom: 1rem; text-shadow: 0 0 30px var(--glow-blue);
     }
 
-    .card-header {
-      padding: 2rem 2rem 0;
-      text-align: center;
-    }
+    .auth-header h1 { font-size: 1.75rem; font-weight: 800; color: var(--star-white); margin-bottom: 0.5rem; }
+    .auth-header p { color: var(--star-dim); }
 
-    .card-header h1 {
-      font-size: 1.75rem;
-      color: #1a1a2e;
-      margin-bottom: 0.5rem;
-    }
+    .auth-form { display: flex; flex-direction: column; gap: 1.25rem; }
 
-    .card-header p {
-      color: #6b7280;
-      font-size: 0.9375rem;
-    }
-
-    .waitlist-notice {
-      display: flex;
-      gap: 1rem;
-      align-items: flex-start;
-      background: #fef3c7;
-      border: 1px solid #fcd34d;
-      margin: 1.5rem 2rem 0;
-      padding: 1rem;
-      border-radius: 10px;
-    }
-
-    .notice-icon {
-      font-size: 1.5rem;
-    }
-
-    .waitlist-notice strong {
-      color: #92400e;
-      display: block;
-      margin-bottom: 0.25rem;
-    }
-
-    .waitlist-notice p {
-      font-size: 0.8125rem;
-      color: #78350f;
-      margin: 0;
-    }
-
-    .signup-form {
-      padding: 1.5rem 2rem 2rem;
-    }
-
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: #374151;
-      margin-bottom: 0.5rem;
-    }
+    .form-group { display: flex; flex-direction: column; gap: 0.5rem; }
+    .form-group label { font-size: 0.875rem; font-weight: 600; color: var(--star-white); }
 
     .form-group input {
-      width: 100%;
-      padding: 0.875rem 1rem;
-      border: 2px solid #e5e7eb;
-      border-radius: 10px;
-      font-size: 1rem;
-      transition: all 0.2s;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px; padding: 0.875rem 1rem;
+      color: var(--star-white); font-size: 1rem;
+      font-family: inherit; transition: all 0.3s;
     }
+
+    .form-group input::placeholder { color: var(--star-muted); }
 
     .form-group input:focus {
-      outline: none;
-      border-color: #2563eb;
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+      outline: none; border-color: var(--cosmic-blue);
+      background: rgba(79, 139, 255, 0.08);
+      box-shadow: 0 0 0 3px rgba(79, 139, 255, 0.1);
     }
 
-    .btn {
-      padding: 0.875rem 1.5rem;
-      border-radius: 10px;
-      font-weight: 600;
-      font-size: 1rem;
-      text-decoration: none;
-      border: none;
-      cursor: pointer;
-      transition: all 0.2s;
-      display: inline-flex;
-      align-items: center;
+    .btn-full { width: 100%; justify-content: center; margin-top: 0.5rem; }
+
+    .error-message {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 10px; padding: 0.875rem;
+      color: #f87171; font-size: 0.875rem; margin-bottom: 1rem;
     }
 
-    .btn-primary {
-      background: #2563eb;
-      color: white;
+    .auth-footer {
+      margin-top: 2rem; text-align: center;
+      padding-top: 1.5rem; border-top: 1px solid rgba(255, 255, 255, 0.06);
     }
 
-    .btn-primary:hover {
-      background: #1d4ed8;
+    .auth-footer p { color: var(--star-dim); font-size: 0.9375rem; }
+    .auth-footer a { color: var(--cosmic-blue); text-decoration: none; font-weight: 600; }
+    .auth-footer a:hover { text-decoration: underline; }
+
+    .terms-notice {
+      margin-top: 1.5rem; text-align: center;
+      font-size: 0.75rem; color: var(--star-muted);
     }
 
-    .btn-full {
-      width: 100%;
-      justify-content: center;
-    }
+    .terms-notice a { color: var(--star-dim); }
 
-    .card-footer {
-      padding: 1.5rem 2rem;
-      background: #f9fafb;
-      text-align: center;
-      font-size: 0.9375rem;
-      color: #6b7280;
-    }
-
-    .card-footer a {
-      color: #2563eb;
-      text-decoration: none;
-      font-weight: 600;
-    }
-
-    .card-footer a:hover {
-      text-decoration: underline;
-    }
-
-    .alert {
-      margin: 1.5rem 2rem 0;
-      padding: 1rem;
-      border-radius: 10px;
-      font-size: 0.9375rem;
-    }
-
-    .alert.error {
-      background: #fee2e2;
-      color: #991b1b;
-    }
-
-    /* Success Card */
-    .success-card {
-      padding: 3rem 2rem;
-      text-align: center;
-    }
+    .success-state { text-align: center; padding: 2rem 0; }
 
     .success-icon {
-      font-size: 4rem;
-      margin-bottom: 1rem;
+      width: 70px; height: 70px; margin: 0 auto 1.5rem;
+      background: linear-gradient(135deg, var(--success), #059669);
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-size: 2rem; color: white;
     }
 
-    .success-card h1 {
-      font-size: 1.75rem;
-      color: #1a1a2e;
-      margin-bottom: 1rem;
+    .success-state h2 { font-size: 1.5rem; color: var(--star-white); margin-bottom: 0.75rem; }
+    .success-state p { color: var(--star-dim); margin-bottom: 2rem; line-height: 1.6; }
+
+    .auth-decoration { position: absolute; inset: -50px; pointer-events: none; z-index: 0; }
+
+    .deco-orb { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.4; }
+
+    .orb-1 {
+      width: 200px; height: 200px; background: var(--cosmic-purple);
+      top: -50px; right: -50px; animation: float 8s ease-in-out infinite;
     }
 
-    .success-card p {
-      color: #374151;
-      font-size: 1rem;
-      margin-bottom: 0.5rem;
+    .orb-2 {
+      width: 150px; height: 150px; background: var(--cosmic-blue);
+      bottom: -30px; left: -30px; animation: float 10s ease-in-out infinite reverse;
     }
 
-    .success-card .subtext {
-      color: #6b7280;
-      font-size: 0.9375rem;
+    .orb-3 {
+      width: 100px; height: 100px; background: var(--cosmic-cyan);
+      top: 40%; left: -60px; animation: float 6s ease-in-out infinite 2s;
     }
 
-    .next-steps {
-      background: #f9fafb;
-      border-radius: 12px;
-      padding: 1.5rem;
-      margin: 1.5rem 0;
-      text-align: left;
-    }
-
-    .next-steps h3 {
-      font-size: 0.9375rem;
-      color: #374151;
-      margin-bottom: 1rem;
-    }
-
-    .next-steps ol {
-      margin: 0;
-      padding-left: 1.25rem;
-      color: #6b7280;
-      font-size: 0.9375rem;
-    }
-
-    .next-steps li {
-      margin-bottom: 0.5rem;
-    }
-
-    .success-card .btn {
-      margin-top: 1rem;
+    @keyframes float {
+      0%, 100% { transform: translate(0, 0); }
+      50% { transform: translate(20px, -20px); }
     }
   </style>
 </Layout>
