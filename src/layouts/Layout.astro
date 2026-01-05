@@ -386,31 +386,24 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
           this.canvas = canvas;
           this.ctx = canvas.getContext('2d');
           this.particles = [];
-          this.tendrils = [];
+          this.clouds = [];
           this.time = 0;
-          this.noiseScale = 0.003;
-          this.flowStrength = 2;
-          this.verticalSpeed = 1.2;
+          this.verticalSpeed = 1.5;
           
-          // Noise permutation table
-          this.perm = [];
-          for (let i = 0; i < 512; i++) {
-            this.perm[i] = Math.floor(Math.random() * 256);
-          }
-          
+          // Simple noise using sine waves
           this.init();
           this.animate();
         }
 
         init() {
           this.resize();
+          this.createClouds();
           this.createParticles();
-          this.createTendrils();
           
           window.addEventListener('resize', () => {
             this.resize();
+            this.createClouds();
             this.createParticles();
-            this.createTendrils();
           });
         }
 
@@ -419,187 +412,111 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
           this.canvas.height = window.innerHeight;
         }
 
-        // Simplex-like noise
-        noise(x, y, z) {
-          const X = Math.floor(x) & 255;
-          const Y = Math.floor(y) & 255;
-          const Z = Math.floor(z) & 255;
+        // Simple flow noise
+        flowNoise(x, y, t) {
+          return Math.sin(x * 0.01 + t) * Math.cos(y * 0.008 + t * 0.7) + 
+                 Math.sin(x * 0.005 - t * 0.5) * Math.cos(y * 0.012 + t * 0.3);
+        }
+
+        createClouds() {
+          this.clouds = [];
+          const cloudCount = 60;
           
-          x -= Math.floor(x);
-          y -= Math.floor(y);
-          z -= Math.floor(z);
-          
-          const u = x * x * (3 - 2 * x);
-          const v = y * y * (3 - 2 * y);
-          const w = z * z * (3 - 2 * z);
-          
-          const A = this.perm[X] + Y;
-          const AA = this.perm[A] + Z;
-          const AB = this.perm[A + 1] + Z;
-          const B = this.perm[X + 1] + Y;
-          const BA = this.perm[B] + Z;
-          const BB = this.perm[B + 1] + Z;
-          
-          const lerp = (t, a, b) => a + t * (b - a);
-          const grad = (hash, x, y, z) => {
-            const h = hash & 15;
-            const u = h < 8 ? x : y;
-            const v = h < 4 ? y : h === 12 || h === 14 ? x : z;
-            return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
-          };
-          
-          return lerp(w,
-            lerp(v,
-              lerp(u, grad(this.perm[AA], x, y, z), grad(this.perm[BA], x - 1, y, z)),
-              lerp(u, grad(this.perm[AB], x, y - 1, z), grad(this.perm[BB], x - 1, y - 1, z))
-            ),
-            lerp(v,
-              lerp(u, grad(this.perm[AA + 1], x, y, z - 1), grad(this.perm[BA + 1], x - 1, y, z - 1)),
-              lerp(u, grad(this.perm[AB + 1], x, y - 1, z - 1), grad(this.perm[BB + 1], x - 1, y - 1, z - 1))
-            )
-          );
+          for (let i = 0; i < cloudCount; i++) {
+            this.clouds.push({
+              x: Math.random() * this.canvas.width,
+              y: Math.random() * this.canvas.height * 2 - this.canvas.height * 0.5,
+              size: Math.random() * 200 + 100,
+              color: this.getColor(),
+              opacity: Math.random() * 0.12 + 0.03,
+              speedY: Math.random() * 0.5 + 0.3,
+              wobblePhase: Math.random() * Math.PI * 2,
+              wobbleSpeed: Math.random() * 0.02 + 0.01
+            });
+          }
         }
 
         createParticles() {
           this.particles = [];
-          const count = 20000;
+          const count = 18000;
           
           for (let i = 0; i < count; i++) {
-            const x = Math.random() * this.canvas.width;
-            const y = Math.random() * this.canvas.height;
-            
-            // Cluster particles toward center streams
-            const streamCount = 5;
-            const streamWidth = this.canvas.width / streamCount;
-            const nearestStream = Math.round(x / streamWidth) * streamWidth;
-            const distToStream = Math.abs(x - nearestStream);
-            const inStream = distToStream < streamWidth * 0.4;
-            
             const layer = Math.random();
-            let size, brightness;
+            let size, brightness, speed;
             
-            if (layer < 0.5) {
+            if (layer < 0.6) {
               size = Math.random() * 1 + 0.3;
-              brightness = Math.random() * 0.4 + 0.1;
-            } else if (layer < 0.85) {
-              size = Math.random() * 1.5 + 0.5;
-              brightness = Math.random() * 0.6 + 0.2;
+              brightness = Math.random() * 0.5 + 0.2;
+              speed = Math.random() * 1 + 0.5;
+            } else if (layer < 0.9) {
+              size = Math.random() * 1.5 + 0.8;
+              brightness = Math.random() * 0.7 + 0.3;
+              speed = Math.random() * 0.8 + 0.3;
             } else {
-              size = Math.random() * 2.5 + 1;
-              brightness = Math.random() * 0.8 + 0.4;
-            }
-            
-            if (inStream) {
-              size *= 1.3;
-              brightness *= 1.2;
+              size = Math.random() * 2.5 + 1.5;
+              brightness = Math.random() * 0.9 + 0.4;
+              speed = Math.random() * 0.5 + 0.2;
             }
             
             this.particles.push({
-              x: x,
-              y: y,
+              x: Math.random() * this.canvas.width,
+              y: Math.random() * this.canvas.height,
               size: size,
               baseSize: size,
               brightness: Math.min(brightness, 1),
               baseBrightness: Math.min(brightness, 1),
-              color: this.getColor(x / this.canvas.width),
-              vx: 0,
-              vy: 0,
-              life: Math.random(),
-              pulsePhase: Math.random() * Math.PI * 2,
-              pulseSpeed: Math.random() * 0.02 + 0.005
+              color: this.getColor(),
+              speedY: speed,
+              wobblePhase: Math.random() * Math.PI * 2,
+              pulsePhase: Math.random() * Math.PI * 2
             });
           }
         }
 
-        createTendrils() {
-          this.tendrils = [];
-          const tendrilCount = 80;
-          
-          for (let i = 0; i < tendrilCount; i++) {
-            const points = [];
-            let x = Math.random() * this.canvas.width;
-            let y = -Math.random() * 500;
-            
-            const length = Math.floor(Math.random() * 150 + 100);
-            
-            for (let j = 0; j < length; j++) {
-              points.push({ x, y });
-              
-              const noiseVal = this.noise(x * 0.002, y * 0.002, i * 0.1);
-              x += Math.sin(noiseVal * Math.PI * 2) * 3;
-              y += 5;
-            }
-            
-            this.tendrils.push({
-              points: points,
-              width: Math.random() * 40 + 20,
-              color: this.getColor(x / this.canvas.width),
-              opacity: Math.random() * 0.15 + 0.05,
-              speed: Math.random() * 0.8 + 0.4,
-              offset: 0
-            });
-          }
-        }
-
-        getColor(position) {
+        getColor() {
           const colors = [
-            { r: 120, g: 20, b: 180 },   // Deep purple
-            { r: 180, g: 30, b: 200 },   // Magenta
-            { r: 220, g: 50, b: 160 },   // Pink
-            { r: 140, g: 40, b: 220 },   // Violet
-            { r: 200, g: 60, b: 180 },   // Bright magenta
-            { r: 100, g: 30, b: 160 }    // Dark purple
+            { r: 180, g: 30, b: 220 },   // Magenta
+            { r: 140, g: 20, b: 200 },   // Purple
+            { r: 220, g: 50, b: 180 },   // Pink
+            { r: 160, g: 40, b: 240 },   // Violet
+            { r: 200, g: 60, b: 200 },   // Bright magenta
+            { r: 120, g: 30, b: 180 },   // Deep purple
           ];
-          
-          const idx = Math.floor(position * colors.length) % colors.length;
-          const nextIdx = (idx + 1) % colors.length;
-          const t = (position * colors.length) % 1;
-          
-          return {
-            r: colors[idx].r + (colors[nextIdx].r - colors[idx].r) * t,
-            g: colors[idx].g + (colors[nextIdx].g - colors[idx].g) * t,
-            b: colors[idx].b + (colors[nextIdx].b - colors[idx].b) * t
-          };
+          const c = colors[Math.floor(Math.random() * colors.length)];
+          return { r: c.r + Math.random() * 30 - 15, g: c.g + Math.random() * 20 - 10, b: c.b + Math.random() * 30 - 15 };
         }
 
         update() {
-          this.time += 0.008;
+          this.time += 0.01;
           
-          // Update tendrils
-          this.tendrils.forEach(tendril => {
-            tendril.offset += tendril.speed * this.verticalSpeed;
+          // Update clouds
+          this.clouds.forEach(cloud => {
+            cloud.y += cloud.speedY * this.verticalSpeed;
+            cloud.x += Math.sin(this.time * cloud.wobbleSpeed + cloud.wobblePhase) * 0.5;
             
-            if (tendril.offset > this.canvas.height + 500) {
-              tendril.offset = -tendril.points.length * 5;
-              tendril.points.forEach((p, i) => {
-                p.x = Math.random() * this.canvas.width;
-              });
+            if (cloud.y - cloud.size > this.canvas.height) {
+              cloud.y = -cloud.size;
+              cloud.x = Math.random() * this.canvas.width;
             }
           });
           
-          // Update particles with flow field
+          // Update particles
           this.particles.forEach(p => {
-            const noiseX = this.noise(p.x * this.noiseScale, p.y * this.noiseScale, this.time);
-            const noiseY = this.noise(p.x * this.noiseScale + 100, p.y * this.noiseScale + 100, this.time);
+            // Flow field movement
+            const flow = this.flowNoise(p.x, p.y, this.time);
             
-            const angle = noiseX * Math.PI * 2;
+            p.x += flow * 1.5;
+            p.y += p.speedY * this.verticalSpeed;
             
-            p.vx = Math.cos(angle) * this.flowStrength * 0.5;
-            p.vy = this.verticalSpeed + noiseY * 0.5;
+            // Pulse effect
+            const pulse = Math.sin(this.time * 2 + p.pulsePhase);
+            p.currentSize = p.baseSize * (0.7 + 0.3 * pulse);
+            p.currentBrightness = p.baseBrightness * (0.5 + 0.5 * pulse);
             
-            p.x += p.vx;
-            p.y += p.vy;
-            
-            // Pulse
-            const pulse = Math.sin(this.time * 3 + p.pulsePhase);
-            p.size = p.baseSize * (0.7 + 0.3 * pulse);
-            p.brightness = p.baseBrightness * (0.6 + 0.4 * pulse);
-            
-            // Wrap
+            // Wrap around
             if (p.y > this.canvas.height + 20) {
               p.y = -20;
               p.x = Math.random() * this.canvas.width;
-              p.color = this.getColor(p.x / this.canvas.width);
             }
             if (p.x < -50) p.x = this.canvas.width + 50;
             if (p.x > this.canvas.width + 50) p.x = -50;
@@ -607,70 +524,54 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
         }
 
         render() {
-          // Dark background with subtle purple tint
+          // Clear with dark background
           this.ctx.fillStyle = '#030108';
           this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
           
-          // Background glow
-          const centerGlow = this.ctx.createRadialGradient(
-            this.canvas.width / 2, this.canvas.height / 2, 0,
-            this.canvas.width / 2, this.canvas.height / 2, this.canvas.width * 0.6
+          // Background ambient glow
+          const bgGlow = this.ctx.createRadialGradient(
+            this.canvas.width * 0.5, this.canvas.height * 0.5, 0,
+            this.canvas.width * 0.5, this.canvas.height * 0.5, this.canvas.width * 0.7
           );
-          centerGlow.addColorStop(0, 'rgba(80, 20, 100, 0.15)');
-          centerGlow.addColorStop(0.5, 'rgba(50, 10, 70, 0.08)');
-          centerGlow.addColorStop(1, 'transparent');
-          this.ctx.fillStyle = centerGlow;
+          bgGlow.addColorStop(0, 'rgba(80, 20, 120, 0.2)');
+          bgGlow.addColorStop(0.5, 'rgba(50, 10, 80, 0.1)');
+          bgGlow.addColorStop(1, 'transparent');
+          this.ctx.fillStyle = bgGlow;
           this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
           
-          // Draw tendrils (flowing smoke/gas)
+          // Draw clouds (nebula gas)
           this.ctx.globalCompositeOperation = 'screen';
           
-          this.tendrils.forEach(tendril => {
+          this.clouds.forEach(cloud => {
+            const gradient = this.ctx.createRadialGradient(
+              cloud.x, cloud.y, 0,
+              cloud.x, cloud.y, cloud.size
+            );
+            gradient.addColorStop(0, `rgba(${cloud.color.r}, ${cloud.color.g}, ${cloud.color.b}, ${cloud.opacity})`);
+            gradient.addColorStop(0.4, `rgba(${cloud.color.r}, ${cloud.color.g}, ${cloud.color.b}, ${cloud.opacity * 0.5})`);
+            gradient.addColorStop(0.7, `rgba(${cloud.color.r * 0.8}, ${cloud.color.g * 0.8}, ${cloud.color.b}, ${cloud.opacity * 0.2})`);
+            gradient.addColorStop(1, 'transparent');
+            
+            this.ctx.fillStyle = gradient;
             this.ctx.beginPath();
-            
-            const offsetY = tendril.offset;
-            
-            for (let i = 0; i < tendril.points.length; i++) {
-              const p = tendril.points[i];
-              const y = p.y + offsetY;
-              
-              if (y < -100 || y > this.canvas.height + 100) continue;
-              
-              const noiseOffset = this.noise(p.x * 0.005, y * 0.005, this.time + i * 0.01) * 30;
-              const x = p.x + noiseOffset;
-              
-              if (i === 0) {
-                this.ctx.moveTo(x, y);
-              } else {
-                this.ctx.lineTo(x, y);
-              }
-            }
-            
-            const gradient = this.ctx.createLinearGradient(0, offsetY, 0, offsetY + tendril.points.length * 5);
-            gradient.addColorStop(0, `rgba(${tendril.color.r}, ${tendril.color.g}, ${tendril.color.b}, 0)`);
-            gradient.addColorStop(0.2, `rgba(${tendril.color.r}, ${tendril.color.g}, ${tendril.color.b}, ${tendril.opacity})`);
-            gradient.addColorStop(0.8, `rgba(${tendril.color.r}, ${tendril.color.g}, ${tendril.color.b}, ${tendril.opacity})`);
-            gradient.addColorStop(1, `rgba(${tendril.color.r}, ${tendril.color.g}, ${tendril.color.b}, 0)`);
-            
-            this.ctx.strokeStyle = gradient;
-            this.ctx.lineWidth = tendril.width;
-            this.ctx.lineCap = 'round';
-            this.ctx.lineJoin = 'round';
-            this.ctx.filter = `blur(${tendril.width / 3}px)`;
-            this.ctx.stroke();
-            this.ctx.filter = 'none';
+            this.ctx.arc(cloud.x, cloud.y, cloud.size, 0, Math.PI * 2);
+            this.ctx.fill();
           });
           
           // Draw particles
           this.ctx.globalCompositeOperation = 'lighter';
           
           this.particles.forEach(p => {
+            const r = Math.min(255, p.color.r + 60);
+            const g = Math.min(255, p.color.g + 40);
+            const b = Math.min(255, p.color.b + 40);
+            
             // Glow for larger particles
-            if (p.size > 1) {
-              const glowSize = p.size * 4;
+            if (p.currentSize > 1.2) {
+              const glowSize = p.currentSize * 5;
               const glow = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowSize);
-              glow.addColorStop(0, `rgba(${p.color.r + 50}, ${p.color.g + 30}, ${p.color.b + 30}, ${p.brightness * 0.5})`);
-              glow.addColorStop(0.4, `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${p.brightness * 0.2})`);
+              glow.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${p.currentBrightness * 0.4})`);
+              glow.addColorStop(0.3, `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${p.currentBrightness * 0.15})`);
               glow.addColorStop(1, 'transparent');
               
               this.ctx.fillStyle = glow;
@@ -681,8 +582,8 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
             
             // Core particle
             this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            this.ctx.fillStyle = `rgba(${p.color.r + 80}, ${p.color.g + 60}, ${p.color.b + 60}, ${p.brightness})`;
+            this.ctx.arc(p.x, p.y, p.currentSize, 0, Math.PI * 2);
+            this.ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${p.currentBrightness})`;
             this.ctx.fill();
           });
           
@@ -698,7 +599,9 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
 
       document.addEventListener('DOMContentLoaded', () => {
         const canvas = document.getElementById('bg-particles');
-        if (canvas) new FlowingNebula(canvas);
+        if (canvas) {
+          new FlowingNebula(canvas);
+        }
       });
     </script>
   </body>
