@@ -33,17 +33,6 @@ try {
   }
 } catch (e) {}
 
-let announcements: any[] = [];
-try {
-  const { data } = await supabase
-    .from('messages')
-    .select('id, subject, body, created_at')
-    .eq('is_announcement', true)
-    .order('created_at', { ascending: false })
-    .limit(5);
-  if (data) announcements = data;
-} catch (e) {}
-
 let campaigns: any[] = [];
 const showCampaigns = !user || isApproved;
 if (showCampaigns) {
@@ -72,7 +61,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <canvas id="galaxy-canvas"></canvas>
+  <canvas id="nebula-canvas"></canvas>
   
   <div class="page-wrapper">
     <nav class="main-nav">
@@ -99,16 +88,6 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
         </div>
       </div>
     </nav>
-
-    {announcements.length > 0 && (
-      <div class="announcements-ticker">
-        <div class="ticker-content">
-          {announcements.map((a) => (
-            <span class="ticker-item">◆ {a.subject}</span>
-          ))}
-        </div>
-      </div>
-    )}
 
     {isPending && (
       <div class="pending-banner">
@@ -249,7 +228,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
           </div>
 
           <div class="process-step">
-            <div class="step-marker"><span class="marker-number">02</span><span class="marker-dot"></span></div>
+            <div class="step-marker"><span class="marker-number">02</span><span class="marker-dot pink"></span></div>
             <div class="step-content">
               <h3>Discover Campaigns</h3>
               <p>Browse curated brand collaborations that match your niche.</p>
@@ -257,7 +236,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
           </div>
 
           <div class="process-step">
-            <div class="step-marker"><span class="marker-number">03</span><span class="marker-dot"></span></div>
+            <div class="step-marker"><span class="marker-number">03</span><span class="marker-dot magenta"></span></div>
             <div class="step-content">
               <h3>Create & Submit</h3>
               <p>Produce authentic content and submit for brand review.</p>
@@ -265,7 +244,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
           </div>
 
           <div class="process-step">
-            <div class="step-marker"><span class="marker-number">04</span><span class="marker-dot"></span></div>
+            <div class="step-marker"><span class="marker-number">04</span><span class="marker-dot violet"></span></div>
             <div class="step-content">
               <h3>Get Paid Fast</h3>
               <p>Receive payment directly to your account upon approval.</p>
@@ -308,17 +287,20 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
 
   <style>
     :root {
-      --void: #020206;
-      --nebula: #080812;
-      --stardust: #12121f;
-      --cosmic-blue: #4f8bff;
-      --cosmic-purple: #a855f7;
+      --void: #030108;
+      --nebula: #0a0510;
+      --stardust: #150a20;
+      --surface: #1a1025;
+      --surface-light: #251535;
+      --cosmic-purple: #c026d3;
       --cosmic-pink: #ec4899;
-      --cosmic-cyan: #22d3ee;
+      --cosmic-magenta: #d946ef;
+      --cosmic-violet: #8b5cf6;
       --star-white: #f8fafc;
-      --star-dim: #94a3b8;
-      --glow-blue: rgba(79, 139, 255, 0.5);
-      --glow-purple: rgba(168, 85, 247, 0.5);
+      --star-dim: #c4b5fd;
+      --glow-purple: rgba(192, 38, 211, 0.5);
+      --glow-pink: rgba(236, 72, 153, 0.5);
+      --glow-magenta: rgba(217, 70, 239, 0.5);
       --font-display: 'Syne', system-ui, sans-serif;
       --font-mono: 'Space Mono', monospace;
     }
@@ -334,7 +316,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       line-height: 1.6;
     }
 
-    #galaxy-canvas {
+    #nebula-canvas {
       position: fixed;
       top: 0;
       left: 0;
@@ -354,7 +336,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       right: 0;
       z-index: 1000;
       padding: 1.25rem 2rem;
-      background: linear-gradient(180deg, rgba(2, 2, 6, 0.95) 0%, rgba(2, 2, 6, 0.4) 70%, transparent 100%);
+      background: linear-gradient(180deg, rgba(3, 1, 8, 0.95) 0%, rgba(3, 1, 8, 0.5) 70%, transparent 100%);
       backdrop-filter: blur(12px);
     }
 
@@ -376,13 +358,13 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
 
     .logo-icon {
       font-size: 1.5rem;
-      color: var(--cosmic-blue);
+      color: var(--cosmic-purple);
       animation: pulse-glow 3s ease-in-out infinite;
     }
 
     @keyframes pulse-glow {
-      0%, 100% { text-shadow: 0 0 20px var(--glow-blue); }
-      50% { text-shadow: 0 0 40px var(--glow-blue), 0 0 60px var(--glow-purple); }
+      0%, 100% { text-shadow: 0 0 20px var(--glow-purple); }
+      50% { text-shadow: 0 0 30px var(--glow-purple), 0 0 50px var(--glow-pink); }
     }
 
     .logo-text { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; }
@@ -390,7 +372,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     .nav-links { display: flex; align-items: center; gap: 2rem; }
 
     .nav-links a:not(.nav-btn) {
-      color: var(--star-dim);
+      color: rgba(255, 255, 255, 0.6);
       text-decoration: none;
       font-size: 0.9375rem;
       font-weight: 500;
@@ -398,50 +380,35 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     }
 
     .nav-links a:not(.nav-btn):hover { color: var(--star-white); }
-    .nav-link-subtle { color: var(--star-dim) !important; }
+    .nav-link-subtle { color: rgba(255, 255, 255, 0.5) !important; }
 
     .nav-btn {
       padding: 0.625rem 1.5rem;
-      background: linear-gradient(135deg, var(--cosmic-blue), var(--cosmic-purple));
+      background: linear-gradient(135deg, var(--cosmic-purple), var(--cosmic-pink));
       border-radius: 100px;
       color: white !important;
       text-decoration: none;
       font-weight: 600;
       font-size: 0.875rem;
       transition: all 0.3s;
+      box-shadow: 0 4px 20px rgba(192, 38, 211, 0.3);
     }
 
     .nav-btn:hover {
       transform: translateY(-2px);
-      box-shadow: 0 10px 40px var(--glow-blue);
+      box-shadow: 0 8px 30px rgba(192, 38, 211, 0.5);
     }
 
     .nav-btn.pending {
       background: var(--stardust);
       color: var(--star-dim) !important;
       cursor: default;
+      box-shadow: none;
     }
-
-    /* ANNOUNCEMENTS */
-    .announcements-ticker {
-      position: fixed;
-      top: 70px;
-      left: 0;
-      right: 0;
-      z-index: 999;
-      padding: 0.5rem 2rem;
-      background: linear-gradient(90deg, var(--cosmic-purple), var(--cosmic-blue));
-      overflow: hidden;
-      white-space: nowrap;
-    }
-
-    .ticker-content { display: flex; gap: 3rem; animation: ticker-scroll 30s linear infinite; }
-    @keyframes ticker-scroll { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
-    .ticker-item { font-size: 0.8125rem; font-weight: 600; color: white; }
 
     .pending-banner {
       position: fixed;
-      top: 110px;
+      top: 80px;
       left: 50%;
       transform: translateX(-50%);
       z-index: 998;
@@ -472,8 +439,8 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       align-items: center;
       gap: 0.75rem;
       padding: 0.5rem 1.25rem;
-      background: rgba(79, 139, 255, 0.1);
-      border: 1px solid rgba(79, 139, 255, 0.3);
+      background: rgba(192, 38, 211, 0.15);
+      border: 1px solid rgba(192, 38, 211, 0.3);
       border-radius: 100px;
       margin-bottom: 2rem;
       animation: fade-in-up 1s ease-out;
@@ -482,9 +449,10 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     .badge-dot {
       width: 8px;
       height: 8px;
-      background: var(--cosmic-blue);
+      background: var(--cosmic-purple);
       border-radius: 50%;
       animation: pulse 2s ease-in-out infinite;
+      box-shadow: 0 0 10px var(--glow-purple);
     }
 
     @keyframes pulse {
@@ -495,7 +463,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     .hero-badge span:last-child {
       font-size: 0.875rem;
       font-weight: 600;
-      color: var(--cosmic-blue);
+      color: var(--cosmic-magenta);
       letter-spacing: 0.05em;
       text-transform: uppercase;
     }
@@ -512,7 +480,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     .title-line:nth-child(2) { animation-delay: 0.2s; }
 
     .title-line.accent {
-      background: linear-gradient(135deg, var(--cosmic-blue), var(--cosmic-purple), var(--cosmic-pink));
+      background: linear-gradient(135deg, var(--cosmic-purple), var(--cosmic-pink), var(--cosmic-magenta));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
@@ -525,7 +493,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
 
     .hero-subtitle {
       font-size: 1.25rem;
-      color: var(--star-dim);
+      color: rgba(255, 255, 255, 0.6);
       max-width: 600px;
       margin: 0 auto 2.5rem;
       animation: fade-in-up 1s ease-out 0.4s backwards;
@@ -545,18 +513,19 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       align-items: center;
       gap: 0.75rem;
       padding: 1rem 2rem;
-      background: linear-gradient(135deg, var(--cosmic-blue), var(--cosmic-purple));
+      background: linear-gradient(135deg, var(--cosmic-purple), var(--cosmic-pink));
       border-radius: 100px;
       color: white;
       text-decoration: none;
       font-weight: 700;
       font-size: 1rem;
       transition: all 0.3s;
+      box-shadow: 0 4px 30px rgba(192, 38, 211, 0.4);
     }
 
     .cta-primary:hover {
       transform: translateY(-3px);
-      box-shadow: 0 20px 60px var(--glow-purple);
+      box-shadow: 0 10px 50px rgba(192, 38, 211, 0.6);
     }
 
     .cta-secondary {
@@ -564,7 +533,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       align-items: center;
       padding: 1rem 2rem;
       background: transparent;
-      border: 2px solid rgba(255, 255, 255, 0.2);
+      border: 2px solid rgba(192, 38, 211, 0.4);
       border-radius: 100px;
       color: var(--star-white);
       text-decoration: none;
@@ -573,8 +542,8 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     }
 
     .cta-secondary:hover {
-      border-color: var(--cosmic-blue);
-      background: rgba(79, 139, 255, 0.1);
+      border-color: var(--cosmic-purple);
+      background: rgba(192, 38, 211, 0.1);
     }
 
     .cta-pending {
@@ -605,7 +574,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
 
     .stat-label {
       font-size: 0.8125rem;
-      color: var(--star-dim);
+      color: rgba(255, 255, 255, 0.5);
       text-transform: uppercase;
       letter-spacing: 0.1em;
     }
@@ -613,7 +582,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     .stat-divider {
       width: 1px;
       height: 40px;
-      background: linear-gradient(180deg, transparent, rgba(255,255,255,0.2), transparent);
+      background: linear-gradient(180deg, transparent, rgba(192, 38, 211, 0.4), transparent);
     }
 
     .scroll-indicator {
@@ -629,7 +598,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
 
     .scroll-text {
       font-size: 0.75rem;
-      color: var(--star-dim);
+      color: rgba(255, 255, 255, 0.4);
       text-transform: uppercase;
       letter-spacing: 0.15em;
     }
@@ -637,7 +606,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     .scroll-line {
       width: 1px;
       height: 60px;
-      background: linear-gradient(180deg, var(--cosmic-blue), transparent);
+      background: linear-gradient(180deg, var(--cosmic-purple), transparent);
       animation: scroll-pulse 2s ease-in-out infinite;
     }
 
@@ -658,14 +627,14 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       gap: 1rem;
       margin-bottom: 1rem;
       font-size: 0.8125rem;
-      color: var(--cosmic-blue);
+      color: var(--cosmic-purple);
       text-transform: uppercase;
       letter-spacing: 0.15em;
       font-weight: 600;
     }
 
     .section-header.center .header-label { justify-content: center; }
-    .label-line { width: 30px; height: 1px; background: var(--cosmic-blue); }
+    .label-line { width: 30px; height: 1px; background: var(--cosmic-purple); }
 
     .section-title {
       font-size: clamp(2rem, 5vw, 3rem);
@@ -674,7 +643,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       margin-bottom: 0.75rem;
     }
 
-    .section-desc { font-size: 1.125rem; color: var(--star-dim); }
+    .section-desc { font-size: 1.125rem; color: rgba(255, 255, 255, 0.5); }
 
     /* CAMPAIGNS */
     .campaigns-grid {
@@ -685,8 +654,8 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
 
     .campaign-card {
       position: relative;
-      background: linear-gradient(135deg, rgba(18, 18, 31, 0.7), rgba(8, 8, 18, 0.7));
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: linear-gradient(135deg, rgba(26, 16, 37, 0.7), rgba(10, 5, 16, 0.7));
+      border: 1px solid rgba(192, 38, 211, 0.1);
       border-radius: 24px;
       overflow: hidden;
       animation: card-in 0.8s ease-out var(--delay) backwards;
@@ -701,7 +670,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
 
     .campaign-card:hover {
       transform: translateY(-8px);
-      border-color: rgba(79, 139, 255, 0.3);
+      border-color: rgba(192, 38, 211, 0.4);
     }
 
     .card-glow {
@@ -710,7 +679,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       left: -50%;
       width: 200%;
       height: 200%;
-      background: radial-gradient(circle, var(--glow-blue) 0%, transparent 70%);
+      background: radial-gradient(circle, var(--glow-purple) 0%, transparent 70%);
       opacity: 0;
       transition: opacity 0.4s;
       pointer-events: none;
@@ -738,15 +707,15 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       font-family: var(--font-mono);
       font-size: 1.25rem;
       font-weight: 700;
-      color: var(--cosmic-cyan);
+      color: var(--cosmic-magenta);
     }
 
     .card-title { font-size: 1.375rem; font-weight: 700; margin-bottom: 0.75rem; line-height: 1.3; }
-    .card-desc { font-size: 0.9375rem; color: var(--star-dim); line-height: 1.6; margin-bottom: 1rem; }
+    .card-desc { font-size: 0.9375rem; color: rgba(255, 255, 255, 0.5); line-height: 1.6; margin-bottom: 1rem; }
     .card-meta { margin-bottom: 1.5rem; }
-    .meta-item { font-size: 0.8125rem; color: var(--star-dim); }
+    .meta-item { font-size: 0.8125rem; color: rgba(255, 255, 255, 0.4); }
 
-    .card-footer { padding-top: 1.25rem; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+    .card-footer { padding-top: 1.25rem; border-top: 1px solid rgba(192, 38, 211, 0.1); }
 
     .card-btn {
       display: flex;
@@ -754,8 +723,8 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       justify-content: center;
       width: 100%;
       padding: 0.875rem 1.25rem;
-      background: linear-gradient(135deg, rgba(79, 139, 255, 0.2), rgba(168, 85, 247, 0.2));
-      border: 1px solid rgba(79, 139, 255, 0.3);
+      background: linear-gradient(135deg, rgba(192, 38, 211, 0.2), rgba(236, 72, 153, 0.2));
+      border: 1px solid rgba(192, 38, 211, 0.3);
       border-radius: 12px;
       color: var(--star-white);
       text-decoration: none;
@@ -765,14 +734,14 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     }
 
     .card-btn:hover {
-      background: linear-gradient(135deg, var(--cosmic-blue), var(--cosmic-purple));
+      background: linear-gradient(135deg, var(--cosmic-purple), var(--cosmic-pink));
       border-color: transparent;
     }
 
     .card-btn.disabled {
       background: rgba(255, 255, 255, 0.05);
       border-color: rgba(255, 255, 255, 0.1);
-      color: var(--star-dim);
+      color: rgba(255, 255, 255, 0.3);
       cursor: default;
     }
 
@@ -783,7 +752,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       align-items: center;
       gap: 0.75rem;
       padding: 0.875rem 2rem;
-      border: 2px solid rgba(255, 255, 255, 0.2);
+      border: 2px solid rgba(192, 38, 211, 0.3);
       border-radius: 100px;
       color: var(--star-white);
       text-decoration: none;
@@ -792,12 +761,12 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     }
 
     .view-all-btn:hover {
-      border-color: var(--cosmic-blue);
-      background: rgba(79, 139, 255, 0.1);
+      border-color: var(--cosmic-purple);
+      background: rgba(192, 38, 211, 0.1);
     }
 
     /* PROCESS */
-    .process-section { background: linear-gradient(180deg, transparent, rgba(79, 139, 255, 0.02), transparent); }
+    .process-section { background: linear-gradient(180deg, transparent, rgba(192, 38, 211, 0.02), transparent); }
 
     .process-timeline { position: relative; max-width: 800px; margin: 0 auto; }
 
@@ -807,8 +776,8 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       top: 0;
       bottom: 0;
       width: 1px;
-      background: linear-gradient(180deg, rgba(79, 139, 255, 0.6), rgba(168, 85, 247, 0.6), rgba(236, 72, 153, 0.4), rgba(34, 211, 238, 0.4));
-      box-shadow: 0 0 10px rgba(79, 139, 255, 0.3);
+      background: linear-gradient(180deg, var(--cosmic-purple), var(--cosmic-pink), var(--cosmic-magenta), var(--cosmic-violet));
+      box-shadow: 0 0 10px rgba(192, 38, 211, 0.3);
     }
 
     .process-step { position: relative; display: flex; gap: 2rem; padding: 2rem 0; }
@@ -826,7 +795,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       font-family: var(--font-mono);
       font-size: 0.75rem;
       font-weight: 700;
-      color: var(--cosmic-blue);
+      color: var(--cosmic-purple);
       letter-spacing: 0.1em;
     }
 
@@ -834,21 +803,21 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       width: 12px;
       height: 12px;
       background: var(--void);
-      border: 2px solid var(--cosmic-blue);
+      border: 2px solid var(--cosmic-purple);
       border-radius: 50%;
-      box-shadow: 0 0 8px rgba(79, 139, 255, 0.5);
+      box-shadow: 0 0 10px var(--glow-purple);
       transition: all 0.3s;
     }
 
-    .process-step:nth-child(3) .marker-dot { border-color: var(--cosmic-purple); box-shadow: 0 0 8px rgba(168, 85, 247, 0.5); }
-    .process-step:nth-child(4) .marker-dot { border-color: var(--cosmic-pink); box-shadow: 0 0 8px rgba(236, 72, 153, 0.5); }
-    .process-step:nth-child(5) .marker-dot { border-color: var(--cosmic-cyan); box-shadow: 0 0 8px rgba(34, 211, 238, 0.5); }
+    .marker-dot.pink { border-color: var(--cosmic-pink); box-shadow: 0 0 10px var(--glow-pink); }
+    .marker-dot.magenta { border-color: var(--cosmic-magenta); box-shadow: 0 0 10px var(--glow-magenta); }
+    .marker-dot.violet { border-color: var(--cosmic-violet); box-shadow: 0 0 10px rgba(139, 92, 246, 0.5); }
 
     .process-step:hover .marker-dot { background: currentColor; transform: scale(1.3); }
 
     .step-content { flex: 1; padding-top: 0.25rem; }
     .step-content h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; }
-    .step-content p { color: var(--star-dim); line-height: 1.7; }
+    .step-content p { color: rgba(255, 255, 255, 0.5); line-height: 1.7; }
 
     /* CTA */
     .cta-section { padding: 8rem 2rem; position: relative; overflow: hidden; }
@@ -861,7 +830,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       transform: translate(-50%, -50%);
       width: 600px;
       height: 600px;
-      background: radial-gradient(circle, var(--glow-purple) 0%, var(--glow-blue) 30%, transparent 70%);
+      background: radial-gradient(circle, var(--glow-pink) 0%, var(--glow-purple) 30%, transparent 70%);
       opacity: 0.3;
       filter: blur(80px);
       pointer-events: none;
@@ -877,32 +846,33 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
       margin-bottom: 1.5rem;
     }
 
-    .cta-content p { font-size: 1.125rem; color: var(--star-dim); margin-bottom: 2.5rem; }
+    .cta-content p { font-size: 1.125rem; color: rgba(255, 255, 255, 0.5); margin-bottom: 2.5rem; }
 
     .cta-main-btn {
       display: inline-flex;
       align-items: center;
       gap: 1rem;
       padding: 1.25rem 3rem;
-      background: linear-gradient(135deg, var(--cosmic-blue), var(--cosmic-purple));
+      background: linear-gradient(135deg, var(--cosmic-purple), var(--cosmic-pink));
       border-radius: 100px;
       color: white;
       text-decoration: none;
       font-weight: 700;
       font-size: 1.125rem;
       transition: all 0.4s;
+      box-shadow: 0 4px 30px rgba(192, 38, 211, 0.4);
     }
 
     .cta-main-btn:hover {
       transform: scale(1.05);
-      box-shadow: 0 30px 80px var(--glow-purple);
+      box-shadow: 0 10px 60px rgba(192, 38, 211, 0.6);
     }
 
     /* FOOTER */
     .main-footer {
       padding: 4rem 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.03);
-      background: linear-gradient(180deg, transparent, rgba(2, 2, 6, 0.8));
+      border-top: 1px solid rgba(192, 38, 211, 0.1);
+      background: linear-gradient(180deg, transparent, rgba(3, 1, 8, 0.8));
     }
 
     .footer-content {
@@ -916,24 +886,23 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
     }
 
     .footer-logo { font-size: 1.25rem; font-weight: 700; color: var(--star-white); }
-    .footer-brand p { margin-top: 0.5rem; font-size: 0.875rem; color: var(--star-dim); }
+    .footer-brand p { margin-top: 0.5rem; font-size: 0.875rem; color: rgba(255, 255, 255, 0.4); }
     .footer-links { display: flex; gap: 2rem; }
-    .footer-links a { color: var(--star-dim); text-decoration: none; font-size: 0.9375rem; transition: color 0.3s; }
+    .footer-links a { color: rgba(255, 255, 255, 0.4); text-decoration: none; font-size: 0.9375rem; transition: color 0.3s; }
     .footer-links a:hover { color: var(--star-white); }
 
     .footer-copy {
       width: 100%;
       text-align: center;
       padding-top: 2rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      border-top: 1px solid rgba(192, 38, 211, 0.1);
       margin-top: 1rem;
     }
 
-    .footer-copy span { font-size: 0.8125rem; color: var(--star-dim); }
+    .footer-copy span { font-size: 0.8125rem; color: rgba(255, 255, 255, 0.3); }
 
     /* RESPONSIVE */
     @media (max-width: 768px) {
-      .nav-links { gap: 1rem; }
       .nav-links a:not(.nav-btn):not(.nav-link-subtle) { display: none; }
       .hero-stats { flex-direction: column; gap: 1.5rem; }
       .stat-divider { width: 40px; height: 1px; }
@@ -944,341 +913,252 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
   </style>
 
   <script is:inline>
-    class CosmicGalaxy {
+    class NebulaSystem {
       constructor(canvas) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
-        this.stars = [];
+        this.particles = [];
+        this.nebulaClouds = [];
+        this.sparkles = [];
         this.time = 0;
-        this.mouseX = 0;
-        this.mouseY = 0;
-        this.scrollY = 0;
-        this.expansionFactor = 1;
-        this.centerX = 0;
-        this.centerY = 0;
-        this.baseRadius = 280;
-        this.tiltAngle = 0.32;
+        this.flowSpeed = 0.4;
         
         this.init();
-        this.bindEvents();
         this.animate();
       }
 
       init() {
         this.resize();
-        this.createBackgroundStars();
-        this.createGalaxyStars();
-        this.createBrightStars();
-        this.createDustClouds();
+        this.createNebulaClouds();
+        this.createParticles();
+        this.createSparkles();
+        
+        window.addEventListener('resize', () => {
+          this.resize();
+          this.createNebulaClouds();
+          this.createParticles();
+          this.createSparkles();
+        });
       }
 
       resize() {
         this.canvas.width = window.innerWidth;
         this.canvas.height = window.innerHeight;
-        this.centerX = this.canvas.width / 2;
-        this.centerY = this.canvas.height / 2;
       }
 
-      createBackgroundStars() {
-        this.backgroundStars = [];
-        for (let i = 0; i < 800; i++) {
-          this.backgroundStars.push({
+      createNebulaClouds() {
+        this.nebulaClouds = [];
+        for (let i = 0; i < 25; i++) {
+          this.nebulaClouds.push({
             x: Math.random() * this.canvas.width,
             y: Math.random() * this.canvas.height,
-            size: Math.random() * 1.2 + 0.3,
-            brightness: Math.random() * 0.6 + 0.2,
-            twinkleSpeed: Math.random() * 0.03 + 0.01,
-            twinklePhase: Math.random() * Math.PI * 2,
-            color: this.getStarColor(Math.random())
+            size: Math.random() * 300 + 150,
+            color: this.getNebulaColor(),
+            opacity: Math.random() * 0.15 + 0.05,
+            speedY: Math.random() * 0.3 + 0.1,
+            wobbleSpeed: Math.random() * 0.001 + 0.0005,
+            wobbleAmount: Math.random() * 50 + 20,
+            phase: Math.random() * Math.PI * 2,
+            pulseSpeed: Math.random() * 0.002 + 0.001,
+            pulsePhase: Math.random() * Math.PI * 2
           });
         }
       }
 
-      createGalaxyStars() {
-        this.stars = [];
-        for (let i = 0; i < 6000; i++) {
-          const arm = i % 2;
-          const armOffset = (arm / 2) * Math.PI * 2;
-          const t = Math.pow(Math.random(), 0.45);
-          const baseDistance = t * this.baseRadius;
-          const spiralAngle = baseDistance * 0.22 + armOffset;
-          const spread = (Math.random() - 0.5) * 0.6 * (0.3 + t * 0.7);
-          const angle = spiralAngle + spread;
-          const zSpread = (Math.random() - 0.5) * 60 * t;
-          const starColor = this.getStarColor(baseDistance / this.baseRadius);
+      createParticles() {
+        this.particles = [];
+        for (let i = 0; i < 15000; i++) {
+          const layer = Math.random();
+          let size, speed, opacity;
           
-          this.stars.push({
-            baseAngle: angle,
-            baseDistance: baseDistance,
-            z: zSpread,
-            x: 0, y: 0,
-            size: Math.random() * 1.5 + 0.4,
-            color: starColor,
-            brightness: Math.random() * 0.7 + 0.3,
-            orbitSpeed: (Math.random() * 0.0002 + 0.00005) * (1 - t * 0.5),
-            floatRadius: Math.random() * 8 + 2,
-            floatSpeed: Math.random() * 0.0008 + 0.0002,
-            floatPhase: Math.random() * Math.PI * 2,
-            floatPhase2: Math.random() * Math.PI * 2,
-            twinkleSpeed: Math.random() * 0.04 + 0.01,
-            twinklePhase: Math.random() * Math.PI * 2,
-            distanceRatio: baseDistance / this.baseRadius
+          if (layer < 0.3) {
+            size = Math.random() * 0.8 + 0.3;
+            speed = Math.random() * 0.8 + 0.3;
+            opacity = Math.random() * 0.3 + 0.1;
+          } else if (layer < 0.7) {
+            size = Math.random() * 1.2 + 0.5;
+            speed = Math.random() * 0.5 + 0.2;
+            opacity = Math.random() * 0.5 + 0.2;
+          } else {
+            size = Math.random() * 1.8 + 0.8;
+            speed = Math.random() * 0.3 + 0.1;
+            opacity = Math.random() * 0.7 + 0.3;
+          }
+          
+          this.particles.push({
+            x: Math.random() * this.canvas.width,
+            y: Math.random() * this.canvas.height,
+            size: size,
+            baseSize: size,
+            color: this.getParticleColor(),
+            opacity: opacity,
+            baseOpacity: opacity,
+            speedY: speed * this.flowSpeed,
+            wobbleX: Math.random() * 0.5 + 0.1,
+            wobblePhase: Math.random() * Math.PI * 2,
+            pulseSpeed: Math.random() * 0.03 + 0.01,
+            pulsePhase: Math.random() * Math.PI * 2
           });
         }
-        
-        for (let i = 0; i < 1200; i++) {
-          const distance = Math.pow(Math.random(), 2) * 40;
-          const angle = Math.random() * Math.PI * 2;
-          
-          this.stars.push({
-            baseAngle: angle,
-            baseDistance: distance,
-            z: (Math.random() - 0.5) * 20,
-            x: 0, y: 0,
-            size: Math.random() * 1.8 + 0.5,
-            color: this.getStarColor(0.05 + Math.random() * 0.15),
-            brightness: Math.random() * 0.4 + 0.6,
-            orbitSpeed: Math.random() * 0.0006 + 0.0002,
-            floatRadius: Math.random() * 4 + 1,
-            floatSpeed: Math.random() * 0.001 + 0.0005,
-            floatPhase: Math.random() * Math.PI * 2,
-            floatPhase2: Math.random() * Math.PI * 2,
+      }
+
+      createSparkles() {
+        this.sparkles = [];
+        for (let i = 0; i < 500; i++) {
+          this.sparkles.push({
+            x: Math.random() * this.canvas.width,
+            y: Math.random() * this.canvas.height,
+            size: Math.random() * 2 + 1,
+            brightness: Math.random(),
             twinkleSpeed: Math.random() * 0.05 + 0.02,
             twinklePhase: Math.random() * Math.PI * 2,
-            distanceRatio: 0.1,
-            isCore: true
+            speedY: Math.random() * 0.2 + 0.05
           });
         }
       }
 
-      createBrightStars() {
-        this.brightStars = [];
-        for (let i = 0; i < 150; i++) {
-          const arm = i % 2;
-          const armOffset = (arm / 2) * Math.PI * 2;
-          const t = Math.pow(Math.random(), 0.6);
-          const distance = t * this.baseRadius * 1.1;
-          const angle = distance * 0.22 + armOffset + (Math.random() - 0.5) * 0.8;
-          
-          this.brightStars.push({
-            baseAngle: angle,
-            baseDistance: distance,
-            z: (Math.random() - 0.5) * 40,
-            x: 0, y: 0,
-            size: Math.random() * 2 + 1.5,
-            color: this.getStarColor(Math.random() * 0.4),
-            brightness: Math.random() * 0.3 + 0.7,
-            orbitSpeed: Math.random() * 0.0002 + 0.00008,
-            floatRadius: Math.random() * 6 + 3,
-            floatSpeed: Math.random() * 0.0006 + 0.0002,
-            floatPhase: Math.random() * Math.PI * 2,
-            floatPhase2: Math.random() * Math.PI * 2,
-            twinkleSpeed: Math.random() * 0.02 + 0.005,
-            twinklePhase: Math.random() * Math.PI * 2,
-            glowSize: Math.random() * 8 + 4,
-            distanceRatio: t
-          });
-        }
-      }
-
-      createDustClouds() {
-        this.dustClouds = [];
+      getNebulaColor() {
         const colors = [
-          { r: 79, g: 139, b: 255 },
-          { r: 168, g: 85, b: 247 },
+          { r: 147, g: 51, b: 234 },
+          { r: 192, g: 38, b: 211 },
+          { r: 236, g: 72, b: 153 },
           { r: 139, g: 92, b: 246 },
-          { r: 59, g: 130, b: 246 }
+          { r: 168, g: 85, b: 247 },
+          { r: 217, g: 70, b: 239 }
         ];
-        
-        for (let i = 0; i < 80; i++) {
-          const arm = i % 2;
-          const armOffset = (arm / 2) * Math.PI * 2;
-          const t = Math.random();
-          const distance = t * this.baseRadius * 1.3 + 30;
-          const angle = distance * 0.22 + armOffset + (Math.random() - 0.5);
-          
-          this.dustClouds.push({
-            baseAngle: angle,
-            baseDistance: distance,
-            x: 0, y: 0,
-            size: Math.random() * 80 + 40,
-            color: colors[Math.floor(Math.random() * colors.length)],
-            opacity: Math.random() * 0.025 + 0.01,
-            orbitSpeed: Math.random() * 0.00008 + 0.00002
-          });
-        }
+        return colors[Math.floor(Math.random() * colors.length)];
       }
 
-      getStarColor(distanceRatio) {
-        if (distanceRatio < 0.15) {
-          return { r: 255, g: 240 + Math.random() * 15, b: 210 + Math.random() * 30 };
-        } else if (distanceRatio < 0.35) {
-          return { r: 220 + Math.random() * 35, g: 230 + Math.random() * 25, b: 255 };
-        } else if (distanceRatio < 0.6) {
-          return { r: 180 + Math.random() * 50, g: 200 + Math.random() * 40, b: 255 };
+      getParticleColor() {
+        const rand = Math.random();
+        if (rand < 0.35) {
+          return { r: 192 + Math.random() * 40, g: 38 + Math.random() * 30, b: 211 + Math.random() * 44 };
+        } else if (rand < 0.65) {
+          return { r: 147 + Math.random() * 50, g: 51 + Math.random() * 40, b: 234 + Math.random() * 21 };
+        } else if (rand < 0.85) {
+          return { r: 236 + Math.random() * 19, g: 72 + Math.random() * 50, b: 153 + Math.random() * 60 };
         } else {
-          return { r: 150 + Math.random() * 60, g: 160 + Math.random() * 60, b: 230 + Math.random() * 25 };
+          return { r: 200 + Math.random() * 55, g: 180 + Math.random() * 75, b: 255 };
         }
       }
 
-      bindEvents() {
-        window.addEventListener('resize', () => { this.resize(); this.createBackgroundStars(); });
-        window.addEventListener('scroll', () => {
-          this.scrollY = window.scrollY;
-          const scrollMax = Math.max(1, document.body.scrollHeight - window.innerHeight);
-          this.expansionFactor = 1 + (this.scrollY / scrollMax) * 3.5;
-        });
-        window.addEventListener('mousemove', (e) => {
-          this.targetMouseX = (e.clientX - this.centerX) / this.canvas.width;
-          this.targetMouseY = (e.clientY - this.centerY) / this.canvas.height;
-        });
-        this.targetMouseX = 0;
-        this.targetMouseY = 0;
-      }
-
-      updateStars() {
+      update() {
         this.time += 0.016;
-        this.mouseX += ((this.targetMouseX || 0) - this.mouseX) * 0.05;
-        this.mouseY += ((this.targetMouseY || 0) - this.mouseY) * 0.05;
         
-        const perspective = 600;
-        const tiltX = this.tiltAngle + this.mouseY * 0.1;
-        const tiltY = this.mouseX * 0.15;
+        this.nebulaClouds.forEach(cloud => {
+          cloud.y += cloud.speedY * this.flowSpeed;
+          cloud.x = cloud.x + Math.sin(this.time * cloud.wobbleSpeed + cloud.phase) * 0.3;
+          cloud.currentOpacity = cloud.opacity * (0.7 + 0.3 * Math.sin(this.time * cloud.pulseSpeed + cloud.pulsePhase));
+          
+          if (cloud.y - cloud.size > this.canvas.height) {
+            cloud.y = -cloud.size;
+            cloud.x = Math.random() * this.canvas.width;
+          }
+        });
         
-        this.stars.forEach(star => {
-          star.baseAngle += star.orbitSpeed;
-          const floatX = Math.sin(this.time * star.floatSpeed + star.floatPhase) * star.floatRadius;
-          const floatY = Math.cos(this.time * star.floatSpeed * 0.7 + star.floatPhase2) * star.floatRadius * 0.6;
-          const expandedDistance = star.baseDistance * this.expansionFactor;
+        this.particles.forEach(p => {
+          p.y += p.speedY;
+          p.x += Math.sin(this.time * p.wobbleX + p.wobblePhase) * 0.2;
           
-          const x = Math.cos(star.baseAngle) * expandedDistance + floatX;
-          const y = Math.sin(star.baseAngle) * expandedDistance;
-          const z = star.z * (1 + (this.expansionFactor - 1) * 0.3);
+          const pulse = Math.sin(this.time * p.pulseSpeed + p.pulsePhase);
+          p.size = p.baseSize * (0.8 + 0.4 * pulse);
+          p.opacity = p.baseOpacity * (0.6 + 0.4 * pulse);
           
-          const y2 = y * Math.cos(tiltX) - z * Math.sin(tiltX);
-          const z2 = y * Math.sin(tiltX) + z * Math.cos(tiltX);
-          const x2 = x * Math.cos(tiltY) + z2 * Math.sin(tiltY);
-          const z3 = -x * Math.sin(tiltY) + z2 * Math.cos(tiltY);
-          
-          const scale = perspective / (perspective + z3);
-          star.x = this.centerX + x2 * scale + floatY * scale;
-          star.y = this.centerY + y2 * scale;
-          star.scale = scale;
-          star.twinkle = 0.6 + 0.4 * Math.sin(this.time * star.twinkleSpeed + star.twinklePhase);
+          if (p.y > this.canvas.height + 10) {
+            p.y = -10;
+            p.x = Math.random() * this.canvas.width;
+          }
         });
-
-        this.brightStars.forEach(star => {
-          star.baseAngle += star.orbitSpeed;
-          const floatX = Math.sin(this.time * star.floatSpeed + star.floatPhase) * star.floatRadius;
-          const floatY = Math.cos(this.time * star.floatSpeed * 0.8 + star.floatPhase2) * star.floatRadius * 0.5;
-          const expandedDistance = star.baseDistance * this.expansionFactor;
+        
+        this.sparkles.forEach(s => {
+          s.y += s.speedY * this.flowSpeed;
+          s.currentBrightness = s.brightness * (0.3 + 0.7 * Math.abs(Math.sin(this.time * s.twinkleSpeed + s.twinklePhase)));
           
-          const x = Math.cos(star.baseAngle) * expandedDistance + floatX;
-          const y = Math.sin(star.baseAngle) * expandedDistance;
-          const z = star.z * (1 + (this.expansionFactor - 1) * 0.3);
-          
-          const y2 = y * Math.cos(tiltX) - z * Math.sin(tiltX);
-          const z2 = y * Math.sin(tiltX) + z * Math.cos(tiltX);
-          const x2 = x * Math.cos(tiltY) + z2 * Math.sin(tiltY);
-          const z3 = -x * Math.sin(tiltY) + z2 * Math.cos(tiltY);
-          
-          const scale = perspective / (perspective + z3);
-          star.x = this.centerX + x2 * scale + floatY * scale;
-          star.y = this.centerY + y2 * scale;
-          star.scale = scale;
-          star.twinkle = 0.7 + 0.3 * Math.sin(this.time * star.twinkleSpeed + star.twinklePhase);
-        });
-
-        this.dustClouds.forEach(cloud => {
-          cloud.baseAngle += cloud.orbitSpeed;
-          const expandedDistance = cloud.baseDistance * this.expansionFactor;
-          cloud.x = this.centerX + Math.cos(cloud.baseAngle) * expandedDistance;
-          cloud.y = this.centerY + Math.sin(cloud.baseAngle) * expandedDistance * Math.cos(tiltX);
+          if (s.y > this.canvas.height + 5) {
+            s.y = -5;
+            s.x = Math.random() * this.canvas.width;
+          }
         });
       }
 
       render() {
-        this.ctx.fillStyle = '#020206';
+        this.ctx.fillStyle = '#030108';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-
-        this.backgroundStars.forEach(star => {
-          const twinkle = 0.5 + 0.5 * Math.sin(this.time * star.twinkleSpeed + star.twinklePhase);
-          this.ctx.beginPath();
-          this.ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
-          this.ctx.fillStyle = `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${star.brightness * twinkle})`;
-          this.ctx.fill();
-        });
-
-        this.ctx.globalCompositeOperation = 'lighter';
-        this.dustClouds.forEach(cloud => {
-          const expandedSize = cloud.size * Math.pow(this.expansionFactor, 0.6);
-          const gradient = this.ctx.createRadialGradient(cloud.x, cloud.y, 0, cloud.x, cloud.y, expandedSize);
-          gradient.addColorStop(0, `rgba(${cloud.color.r}, ${cloud.color.g}, ${cloud.color.b}, ${cloud.opacity})`);
-          gradient.addColorStop(0.5, `rgba(${cloud.color.r}, ${cloud.color.g}, ${cloud.color.b}, ${cloud.opacity * 0.3})`);
+        
+        const bgGradient = this.ctx.createRadialGradient(
+          this.canvas.width / 2, this.canvas.height / 2, 0,
+          this.canvas.width / 2, this.canvas.height / 2, this.canvas.width * 0.7
+        );
+        bgGradient.addColorStop(0, 'rgba(75, 0, 90, 0.15)');
+        bgGradient.addColorStop(0.5, 'rgba(40, 0, 60, 0.1)');
+        bgGradient.addColorStop(1, 'transparent');
+        this.ctx.fillStyle = bgGradient;
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        this.ctx.globalCompositeOperation = 'screen';
+        
+        this.nebulaClouds.forEach(cloud => {
+          const gradient = this.ctx.createRadialGradient(cloud.x, cloud.y, 0, cloud.x, cloud.y, cloud.size);
+          gradient.addColorStop(0, `rgba(${cloud.color.r}, ${cloud.color.g}, ${cloud.color.b}, ${cloud.currentOpacity * 0.8})`);
+          gradient.addColorStop(0.3, `rgba(${cloud.color.r}, ${cloud.color.g}, ${cloud.color.b}, ${cloud.currentOpacity * 0.4})`);
+          gradient.addColorStop(0.6, `rgba(${cloud.color.r * 0.8}, ${cloud.color.g * 0.8}, ${cloud.color.b}, ${cloud.currentOpacity * 0.15})`);
           gradient.addColorStop(1, 'transparent');
+          
           this.ctx.fillStyle = gradient;
           this.ctx.beginPath();
-          this.ctx.arc(cloud.x, cloud.y, expandedSize, 0, Math.PI * 2);
+          this.ctx.arc(cloud.x, cloud.y, cloud.size, 0, Math.PI * 2);
           this.ctx.fill();
         });
-        this.ctx.globalCompositeOperation = 'source-over';
-
-        const sortedStars = [...this.stars].sort((a, b) => (a.scale || 0) - (b.scale || 0));
-        sortedStars.forEach(star => {
-          if (star.x < -50 || star.x > this.canvas.width + 50 || star.y < -50 || star.y > this.canvas.height + 50) return;
-          const size = star.size * (star.scale || 1);
-          const alpha = star.brightness * star.twinkle * (star.scale || 1);
-          this.ctx.beginPath();
-          this.ctx.arc(star.x, star.y, Math.max(0.3, size), 0, Math.PI * 2);
-          this.ctx.fillStyle = `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${Math.min(1, alpha)})`;
-          this.ctx.fill();
-        });
-
+        
         this.ctx.globalCompositeOperation = 'lighter';
-        this.brightStars.forEach(star => {
-          if (star.x < -50 || star.x > this.canvas.width + 50 || star.y < -50 || star.y > this.canvas.height + 50) return;
-          const size = star.size * (star.scale || 1);
-          const alpha = star.brightness * star.twinkle;
-          const glowSize = star.glowSize * (star.scale || 1) * this.expansionFactor * 0.5;
-          
-          const gradient = this.ctx.createRadialGradient(star.x, star.y, 0, star.x, star.y, glowSize);
-          gradient.addColorStop(0, `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${alpha * 0.4})`);
-          gradient.addColorStop(0.4, `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${alpha * 0.1})`);
-          gradient.addColorStop(1, 'transparent');
-          this.ctx.fillStyle = gradient;
-          this.ctx.beginPath();
-          this.ctx.arc(star.x, star.y, glowSize, 0, Math.PI * 2);
-          this.ctx.fill();
+        
+        this.particles.forEach(p => {
+          if (p.size > 1.2) {
+            const glowGradient = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3);
+            glowGradient.addColorStop(0, `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${p.opacity * 0.4})`);
+            glowGradient.addColorStop(0.5, `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${p.opacity * 0.1})`);
+            glowGradient.addColorStop(1, 'transparent');
+            this.ctx.fillStyle = glowGradient;
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.size * 3, 0, Math.PI * 2);
+            this.ctx.fill();
+          }
           
           this.ctx.beginPath();
-          this.ctx.arc(star.x, star.y, size, 0, Math.PI * 2);
-          this.ctx.fillStyle = `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${Math.min(1, alpha + 0.2)})`;
+          this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          this.ctx.fillStyle = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${p.opacity})`;
           this.ctx.fill();
         });
+        
+        this.sparkles.forEach(s => {
+          const sparkleGradient = this.ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.size * 2);
+          sparkleGradient.addColorStop(0, `rgba(255, 255, 255, ${s.currentBrightness})`);
+          sparkleGradient.addColorStop(0.3, `rgba(230, 200, 255, ${s.currentBrightness * 0.5})`);
+          sparkleGradient.addColorStop(1, 'transparent');
+          this.ctx.fillStyle = sparkleGradient;
+          this.ctx.beginPath();
+          this.ctx.arc(s.x, s.y, s.size * 2, 0, Math.PI * 2);
+          this.ctx.fill();
+          
+          this.ctx.beginPath();
+          this.ctx.arc(s.x, s.y, s.size * 0.5, 0, Math.PI * 2);
+          this.ctx.fillStyle = `rgba(255, 255, 255, ${s.currentBrightness})`;
+          this.ctx.fill();
+        });
+        
         this.ctx.globalCompositeOperation = 'source-over';
-
-        const coreSize = 60 * Math.pow(this.expansionFactor, 0.4);
-        const coreGradient = this.ctx.createRadialGradient(this.centerX, this.centerY, 0, this.centerX, this.centerY, coreSize);
-        coreGradient.addColorStop(0, 'rgba(255, 250, 240, 0.15)');
-        coreGradient.addColorStop(0.3, 'rgba(255, 240, 220, 0.08)');
-        coreGradient.addColorStop(0.6, 'rgba(200, 180, 255, 0.03)');
-        coreGradient.addColorStop(1, 'transparent');
-        this.ctx.fillStyle = coreGradient;
-        this.ctx.beginPath();
-        this.ctx.arc(this.centerX, this.centerY, coreSize, 0, Math.PI * 2);
-        this.ctx.fill();
       }
 
       animate() {
-        this.updateStars();
+        this.update();
         this.render();
         requestAnimationFrame(() => this.animate());
       }
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-      const canvas = document.getElementById('galaxy-canvas');
-      if (canvas) new CosmicGalaxy(canvas);
+      const canvas = document.getElementById('nebula-canvas');
+      if (canvas) new NebulaSystem(canvas);
     });
   </script>
 </body>
