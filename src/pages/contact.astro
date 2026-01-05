@@ -3,521 +3,207 @@
 export const prerender = false;
 
 import Layout from "../layouts/Layout.astro";
-import { getPageContent } from "../lib/content";
+import { supabase } from "../lib/supabase";
 
-const content = await getPageContent('contact');
+let general = {
+  siteName: 'Banity',
+  supportEmail: 'support@banity.com',
+  contactEmail: 'hello@banity.com',
+};
 
-let successMessage = '';
-let errorMessage = '';
+try {
+  const { data: rows } = await supabase.from('site_settings').select('key, value');
+  if (rows) {
+    for (const row of rows) {
+      if (row.key === 'general') general = { ...general, ...row.value };
+    }
+  }
+} catch (e) {}
+
+let success = false;
+let error = '';
 
 if (Astro.request.method === 'POST') {
   try {
     const formData = await Astro.request.formData();
-    const name = formData.get('name') as string;
-    const email = formData.get('email') as string;
-    const subject = formData.get('subject') as string;
-    const message = formData.get('message') as string;
+    const name = formData.get('name')?.toString() || '';
+    const email = formData.get('email')?.toString() || '';
+    const subject = formData.get('subject')?.toString() || '';
+    const message = formData.get('message')?.toString() || '';
 
-    // Validate
     if (!name || !email || !message) {
-      errorMessage = 'Please fill in all required fields.';
-    } else if (!email.includes('@')) {
-      errorMessage = 'Please enter a valid email address.';
+      error = 'Please fill in all required fields.';
     } else {
-      // In production, you would send this to an email service or save to database
-      // For now, we'll just show a success message
+      // Store in database or send email
+      const { error: dbError } = await supabase.from('contact_submissions').insert({
+        name, email, subject, message, created_at: new Date().toISOString()
+      });
       
-      // Optional: Send via Resend if configured
-      const RESEND_API_KEY = import.meta.env.RESEND_API_KEY;
-      const EMAIL_FROM = import.meta.env.EMAIL_FROM;
-      const CONTACT_EMAIL = 'contact@yourdomain.com'; // Change this
-      
-      if (RESEND_API_KEY && EMAIL_FROM) {
-        try {
-          await fetch('https://api.resend.com/emails', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${RESEND_API_KEY}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              from: EMAIL_FROM,
-              to: CONTACT_EMAIL,
-              subject: `Contact Form: ${subject || 'General Inquiry'}`,
-              html: `
-                <h2>New Contact Form Submission</h2>
-                <p><strong>Name:</strong> ${name}</p>
-                <p><strong>Email:</strong> ${email}</p>
-                <p><strong>Subject:</strong> ${subject || 'N/A'}</p>
-                <p><strong>Message:</strong></p>
-                <p>${message.replace(/\n/g, '<br>')}</p>
-              `,
-              reply_to: email,
-            }),
-          });
-        } catch (e) {
-          console.error('Failed to send email:', e);
-        }
+      if (dbError) {
+        console.error('Contact form error:', dbError);
       }
-      
-      successMessage = 'Thank you for your message! We\'ll get back to you soon.';
+      success = true;
     }
   } catch (e) {
-    errorMessage = 'Something went wrong. Please try again.';
+    error = 'Something went wrong. Please try again.';
   }
 }
 ---
 
-<Layout title="Contact Us">
+<Layout title="Contact">
   <div class="contact-page">
-    <!-- Hero -->
-    <section class="hero">
-      <div class="hero-content">
-        {content.hero?.badge && <span class="hero-badge">{content.hero.badge}</span>}
-        <h1>{content.hero?.title || "Get in Touch"}</h1>
-        <p>{content.hero?.subtitle || "Have a question or want to learn more? We'd love to hear from you."}</p>
-      </div>
-    </section>
+    <div class="page-header">
+      <span class="header-label"><span class="label-line"></span> Get in Touch</span>
+      <h1>Contact Us</h1>
+      <p>Have questions? We'd love to hear from you.</p>
+    </div>
 
-    <!-- Main Content -->
-    <section class="contact-section">
-      <div class="container">
-        <div class="contact-grid">
-          <!-- Contact Form -->
-          <div class="contact-form-wrapper">
-            <h2>Send Us a Message</h2>
-            
-            {successMessage && (
-              <div class="alert success">
-                <span>✓</span> {successMessage}
-              </div>
-            )}
-            
-            {errorMessage && (
-              <div class="alert error">
-                <span>!</span> {errorMessage}
-              </div>
-            )}
+    <div class="contact-grid">
+      <div class="contact-info">
+        <div class="info-card">
+          <div class="info-icon">✉️</div>
+          <h3>Email Us</h3>
+          <p>For general inquiries</p>
+          <a href={`mailto:${general.contactEmail}`} class="info-link">{general.contactEmail}</a>
+        </div>
 
-            {!successMessage && (
-              <form method="POST" class="contact-form">
-                <div class="form-row">
-                  <div class="form-group">
-                    <label for="name">Name *</label>
-                    <input type="text" id="name" name="name" required placeholder="Your name" />
-                  </div>
-                  <div class="form-group">
-                    <label for="email">Email *</label>
-                    <input type="email" id="email" name="email" required placeholder="you@example.com" />
-                  </div>
-                </div>
-                
-                <div class="form-group">
-                  <label for="subject">Subject</label>
-                  <select id="subject" name="subject">
-                    <option value="">Select a topic</option>
-                    <option value="general">General Inquiry</option>
-                    <option value="creator">Creator Questions</option>
-                    <option value="brand">Brand Partnership</option>
-                    <option value="support">Technical Support</option>
-                    <option value="feedback">Feedback</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-                
-                <div class="form-group">
-                  <label for="message">Message *</label>
-                  <textarea id="message" name="message" rows="5" required placeholder="How can we help you?"></textarea>
-                </div>
-                
-                <button type="submit" class="btn btn-primary">Send Message</button>
-              </form>
-            )}
-          </div>
+        <div class="info-card">
+          <div class="info-icon">🛟</div>
+          <h3>Support</h3>
+          <p>Need help with your account?</p>
+          <a href={`mailto:${general.supportEmail}`} class="info-link">{general.supportEmail}</a>
+        </div>
 
-          <!-- Contact Info -->
-          <div class="contact-info">
-            <div class="info-card">
-              <div class="info-icon">📧</div>
-              <h3>Email Us</h3>
-              <p>For general inquiries</p>
-              <a href={`mailto:${content.info?.email || "hello@banity.com"}`}>{content.info?.email || "hello@banity.com"}</a>
-            </div>
-            
-            <div class="info-card">
-              <div class="info-icon">💬</div>
-              <h3>Support</h3>
-              <p>Need help with your account?</p>
-              <a href={`mailto:${content.info?.support_email || "support@banity.com"}`}>{content.info?.support_email || "support@banity.com"}</a>
-            </div>
-            
-            <div class="info-card">
-              <div class="info-icon">🤝</div>
-              <h3>Partnerships</h3>
-              <p>Interested in working together?</p>
-              <a href={`mailto:${content.info?.partnerships_email || "partners@banity.com"}`}>{content.info?.partnerships_email || "partners@banity.com"}</a>
-            </div>
-
-            <div class="social-links">
-              <h3>Follow Us</h3>
-              <div class="social-icons">
-                <a href="#" class="social-icon" title="Twitter">𝕏</a>
-                <a href="#" class="social-icon" title="Instagram">📸</a>
-                <a href="#" class="social-icon" title="LinkedIn">in</a>
-                <a href="#" class="social-icon" title="TikTok">🎵</a>
-              </div>
-            </div>
-          </div>
+        <div class="info-card">
+          <div class="info-icon">💬</div>
+          <h3>Community</h3>
+          <p>Join our creator community</p>
+          <a href="/forum" class="info-link">Visit Forum →</a>
         </div>
       </div>
-    </section>
 
-    <!-- FAQ Quick Links -->
-    <section class="faq-links">
-      <div class="container">
-        <h2>Common Questions</h2>
-        <div class="faq-grid">
-          <a href="/creators#faq" class="faq-link">
-            <span class="faq-icon">🎨</span>
-            <div>
-              <strong>Creator FAQ</strong>
-              <p>Questions about creating content and getting paid</p>
+      <div class="contact-form-wrapper">
+        {success ? (
+          <div class="success-message">
+            <div class="success-icon">✓</div>
+            <h3>Message Sent!</h3>
+            <p>We'll get back to you as soon as possible.</p>
+            <a href="/" class="btn btn-primary">Back to Home</a>
+          </div>
+        ) : (
+          <form method="POST" class="contact-form">
+            {error && <div class="error-message">{error}</div>}
+            
+            <div class="form-group">
+              <label for="name">Name *</label>
+              <input type="text" id="name" name="name" required placeholder="Your name" />
             </div>
-          </a>
-          <a href="/campaigns" class="faq-link">
-            <span class="faq-icon">📢</span>
-            <div>
-              <strong>Browse Campaigns</strong>
-              <p>See available opportunities</p>
+
+            <div class="form-group">
+              <label for="email">Email *</label>
+              <input type="email" id="email" name="email" required placeholder="your@email.com" />
             </div>
-          </a>
-          <a href="/about" class="faq-link">
-            <span class="faq-icon">ℹ️</span>
-            <div>
-              <strong>About Us</strong>
-              <p>Learn more about our mission</p>
+
+            <div class="form-group">
+              <label for="subject">Subject</label>
+              <input type="text" id="subject" name="subject" placeholder="What's this about?" />
             </div>
-          </a>
-        </div>
+
+            <div class="form-group">
+              <label for="message">Message *</label>
+              <textarea id="message" name="message" rows="5" required placeholder="Tell us more..."></textarea>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Send Message →</button>
+          </form>
+        )}
       </div>
-    </section>
+    </div>
   </div>
 
   <style>
-    .contact-page {
-      background: #f8fafc;
+    .contact-page { max-width: 1000px; margin: 0 auto; padding: 2rem; }
+
+    .page-header { text-align: center; margin-bottom: 4rem; }
+
+    .header-label {
+      display: inline-flex; align-items: center; gap: 1rem; margin-bottom: 1rem;
+      font-size: 0.8125rem; color: var(--cosmic-blue); text-transform: uppercase;
+      letter-spacing: 0.15em; font-weight: 600;
     }
 
-    .container {
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 0 2rem;
-    }
+    .label-line { width: 30px; height: 1px; background: var(--cosmic-blue); }
+    .page-header h1 { font-size: 2.5rem; font-weight: 800; color: var(--star-white); margin-bottom: 0.5rem; }
+    .page-header p { color: var(--star-dim); font-size: 1.125rem; }
 
-    /* Hero */
-    .hero {
-      padding: 5rem 2rem 3rem;
-      text-align: center;
-      background: linear-gradient(135deg, #1a1a2e, #2d2d4a);
-    }
+    .contact-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 3rem; }
 
-    .hero-content {
-      max-width: 600px;
-      margin: 0 auto;
-    }
-
-    .hero-badge {
-      display: inline-block;
-      background: rgba(255,255,255,0.15);
-      color: white;
-      padding: 0.5rem 1.25rem;
-      border-radius: 100px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      margin-bottom: 1.5rem;
-      border: 1px solid rgba(255,255,255,0.2);
-    }
-
-    .hero h1 {
-      font-size: 2.5rem;
-      color: white;
-      margin-bottom: 1rem;
-    }
-
-    .hero p {
-      font-size: 1.125rem;
-      color: rgba(255,255,255,0.8);
-    }
-
-    /* Contact Section */
-    .contact-section {
-      padding: 4rem 0;
-    }
-
-    .contact-grid {
-      display: grid;
-      grid-template-columns: 1.5fr 1fr;
-      gap: 4rem;
-    }
-
-    /* Form */
-    .contact-form-wrapper {
-      background: white;
-      padding: 2.5rem;
-      border-radius: 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }
-
-    .contact-form-wrapper h2 {
-      font-size: 1.5rem;
-      color: #1a1a2e;
-      margin-bottom: 1.5rem;
-    }
-
-    .alert {
-      padding: 1rem 1.25rem;
-      border-radius: 10px;
-      margin-bottom: 1.5rem;
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-
-    .alert.success {
-      background: #d1fae5;
-      color: #065f46;
-    }
-
-    .alert.error {
-      background: #fee2e2;
-      color: #991b1b;
-    }
-
-    .alert span {
-      font-weight: 700;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: #374151;
-      margin-bottom: 0.5rem;
-    }
-
-    .form-group input,
-    .form-group select,
-    .form-group textarea {
-      width: 100%;
-      padding: 0.75rem 1rem;
-      border: 2px solid #e5e7eb;
-      border-radius: 10px;
-      font-size: 1rem;
-      transition: border-color 0.2s;
-    }
-
-    .form-group input:focus,
-    .form-group select:focus,
-    .form-group textarea:focus {
-      outline: none;
-      border-color: #2563eb;
-    }
-
-    .form-group textarea {
-      resize: vertical;
-      font-family: inherit;
-    }
-
-    .btn {
-      display: inline-flex;
-      padding: 0.875rem 2rem;
-      border-radius: 10px;
-      font-weight: 600;
-      font-size: 1rem;
-      text-decoration: none;
-      border: none;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .btn-primary {
-      background: #2563eb;
-      color: white;
-    }
-
-    .btn-primary:hover {
-      background: #1d4ed8;
-    }
-
-    /* Contact Info */
-    .contact-info {
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
-    }
+    .contact-info { display: flex; flex-direction: column; gap: 1.5rem; }
 
     .info-card {
-      background: white;
-      padding: 1.5rem;
-      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(26, 26, 46, 0.6), rgba(8, 8, 18, 0.6));
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 16px; padding: 1.5rem;
+      transition: all 0.3s;
     }
 
-    .info-icon {
-      font-size: 1.5rem;
-      margin-bottom: 0.75rem;
+    .info-card:hover { border-color: rgba(79, 139, 255, 0.3); }
+
+    .info-icon { font-size: 2rem; margin-bottom: 0.75rem; }
+    .info-card h3 { font-size: 1rem; color: var(--star-white); margin-bottom: 0.25rem; }
+    .info-card p { font-size: 0.875rem; color: var(--star-dim); margin-bottom: 0.5rem; }
+    .info-link { color: var(--cosmic-blue); text-decoration: none; font-weight: 600; font-size: 0.875rem; }
+    .info-link:hover { text-decoration: underline; }
+
+    .contact-form-wrapper {
+      background: linear-gradient(135deg, rgba(26, 26, 46, 0.7), rgba(8, 8, 18, 0.7));
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 20px; padding: 2rem;
     }
 
-    .info-card h3 {
-      font-size: 1rem;
-      color: #1a1a2e;
-      margin-bottom: 0.25rem;
+    .contact-form { display: flex; flex-direction: column; gap: 1.5rem; }
+
+    .form-group { display: flex; flex-direction: column; gap: 0.5rem; }
+    .form-group label { font-size: 0.875rem; font-weight: 600; color: var(--star-white); }
+
+    .form-group input, .form-group textarea {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px; padding: 0.875rem 1rem;
+      color: var(--star-white); font-size: 0.9375rem;
+      font-family: inherit; transition: all 0.3s;
     }
 
-    .info-card p {
-      font-size: 0.875rem;
-      color: #6b7280;
-      margin-bottom: 0.5rem;
+    .form-group input::placeholder, .form-group textarea::placeholder { color: var(--star-muted); }
+
+    .form-group input:focus, .form-group textarea:focus {
+      outline: none; border-color: var(--cosmic-blue);
+      background: rgba(79, 139, 255, 0.05);
     }
 
-    .info-card a {
-      color: #2563eb;
-      text-decoration: none;
-      font-weight: 500;
+    .form-group textarea { resize: vertical; min-height: 120px; }
+
+    .error-message {
+      background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 10px; padding: 0.875rem; color: #f87171; font-size: 0.875rem;
     }
 
-    .info-card a:hover {
-      text-decoration: underline;
+    .success-message {
+      text-align: center; padding: 3rem 2rem;
     }
 
-    .social-links {
-      background: white;
-      padding: 1.5rem;
-      border-radius: 12px;
+    .success-icon {
+      width: 60px; height: 60px; margin: 0 auto 1.5rem;
+      background: linear-gradient(135deg, var(--cosmic-blue), var(--cosmic-purple));
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem; color: white;
     }
 
-    .social-links h3 {
-      font-size: 1rem;
-      color: #1a1a2e;
-      margin-bottom: 1rem;
-    }
+    .success-message h3 { font-size: 1.5rem; color: var(--star-white); margin-bottom: 0.5rem; }
+    .success-message p { color: var(--star-dim); margin-bottom: 1.5rem; }
 
-    .social-icons {
-      display: flex;
-      gap: 0.75rem;
-    }
-
-    .social-icon {
-      width: 44px;
-      height: 44px;
-      background: #f3f4f6;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-decoration: none;
-      font-size: 1.25rem;
-      transition: all 0.2s;
-    }
-
-    .social-icon:hover {
-      background: #2563eb;
-      color: white;
-    }
-
-    /* FAQ Links */
-    .faq-links {
-      padding: 4rem 0;
-      background: white;
-    }
-
-    .faq-links h2 {
-      font-size: 1.5rem;
-      color: #1a1a2e;
-      text-align: center;
-      margin-bottom: 2rem;
-    }
-
-    .faq-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1.5rem;
-    }
-
-    .faq-link {
-      display: flex;
-      align-items: flex-start;
-      gap: 1rem;
-      padding: 1.5rem;
-      background: #f8fafc;
-      border-radius: 12px;
-      text-decoration: none;
-      transition: all 0.2s;
-      border: 2px solid transparent;
-    }
-
-    .faq-link:hover {
-      border-color: #2563eb;
-      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
-    }
-
-    .faq-icon {
-      font-size: 1.5rem;
-      flex-shrink: 0;
-    }
-
-    .faq-link strong {
-      display: block;
-      color: #1a1a2e;
-      margin-bottom: 0.25rem;
-    }
-
-    .faq-link p {
-      color: #6b7280;
-      font-size: 0.875rem;
-      margin: 0;
-    }
-
-    /* Responsive */
-    @media (max-width: 900px) {
-      .contact-grid {
-        grid-template-columns: 1fr;
-        gap: 2rem;
-      }
-
-      .contact-info {
-        flex-direction: row;
-        flex-wrap: wrap;
-      }
-
-      .info-card,
-      .social-links {
-        flex: 1;
-        min-width: 200px;
-      }
-    }
-
-    @media (max-width: 640px) {
-      .form-row {
-        grid-template-columns: 1fr;
-      }
-
-      .faq-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .contact-info {
-        flex-direction: column;
-      }
+    @media (max-width: 768px) {
+      .contact-grid { grid-template-columns: 1fr; }
     }
   </style>
 </Layout>
