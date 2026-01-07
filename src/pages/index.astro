@@ -919,6 +919,7 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
         this.ctx = canvas.getContext('2d');
         this.time = 0;
         this.particles = [];
+        this.ambientParticles = [];
         this.nebulaLayers = [];
         
         this.init();
@@ -929,11 +930,13 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
         this.resize();
         this.createNebula();
         this.createParticles();
+        this.createAmbientParticles();
         
         window.addEventListener('resize', () => {
           this.resize();
           this.createNebula();
           this.createParticles();
+          this.createAmbientParticles();
         });
       }
 
@@ -1000,6 +1003,38 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
         }
       }
 
+      createAmbientParticles() {
+        this.ambientParticles = [];
+        const count = 800;
+        
+        for (let i = 0; i < count; i++) {
+          let x = Math.random() * this.canvas.width;
+          const distFromCenter = Math.abs(x - this.centerX);
+          
+          if (distFromCenter < 250) {
+            x = x < this.centerX 
+              ? Math.random() * (this.centerX - 300)
+              : this.centerX + 300 + Math.random() * (this.canvas.width - this.centerX - 300);
+          }
+          
+          this.ambientParticles.push({
+            x: x,
+            y: Math.random() * this.canvas.height,
+            size: Math.random() * 2 + 0.5,
+            alpha: Math.random() * 0.4 + 0.1,
+            color: this.getParticleColor(),
+            vx: (Math.random() - 0.5) * 2,
+            vy: (Math.random() - 0.5) * 2,
+            targetVx: (Math.random() - 0.5) * 2,
+            targetVy: (Math.random() - 0.5) * 2,
+            changeTimer: Math.random() * 100,
+            changeInterval: 50 + Math.random() * 100,
+            twinkleSpeed: Math.random() * 0.05 + 0.02,
+            twinklePhase: Math.random() * Math.PI * 2
+          });
+        }
+      }
+
       gaussianRandom() {
         let u = 0, v = 0;
         while (u === 0) u = Math.random();
@@ -1053,6 +1088,29 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
             p.baseX = this.centerX + this.gaussianRandom() * 200;
           }
         });
+        
+        this.ambientParticles.forEach(p => {
+          p.changeTimer++;
+          if (p.changeTimer > p.changeInterval) {
+            p.targetVx = (Math.random() - 0.5) * 3;
+            p.targetVy = (Math.random() - 0.5) * 3;
+            p.changeTimer = 0;
+            p.changeInterval = 50 + Math.random() * 100;
+          }
+          
+          p.vx += (p.targetVx - p.vx) * 0.02;
+          p.vy += (p.targetVy - p.vy) * 0.02;
+          
+          p.x += p.vx;
+          p.y += p.vy;
+          
+          p.currentAlpha = p.alpha * (0.5 + 0.5 * Math.sin(this.time * p.twinkleSpeed + p.twinklePhase));
+          
+          if (p.x < -20) p.x = this.canvas.width + 20;
+          if (p.x > this.canvas.width + 20) p.x = -20;
+          if (p.y < -20) p.y = this.canvas.height + 20;
+          if (p.y > this.canvas.height + 20) p.y = -20;
+        });
       }
 
       render() {
@@ -1095,6 +1153,13 @@ const { count: campaignCount } = await supabase.from('campaigns').select('*', { 
         
         this.particles.forEach(p => {
           ctx.fillStyle = `rgba(${p.color[0]}, ${p.color[1]}, ${p.color[2]}, ${p.alpha})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        
+        this.ambientParticles.forEach(p => {
+          ctx.fillStyle = `rgba(${p.color[0]}, ${p.color[1]}, ${p.color[2]}, ${p.currentAlpha})`;
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
           ctx.fill();
