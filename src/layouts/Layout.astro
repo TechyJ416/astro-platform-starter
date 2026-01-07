@@ -387,6 +387,7 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
           this.ctx = canvas.getContext('2d');
           this.time = 0;
           this.particles = [];
+          this.ambientParticles = [];
           this.nebulaLayers = [];
           
           this.init();
@@ -397,11 +398,13 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
           this.resize();
           this.createNebula();
           this.createParticles();
+          this.createAmbientParticles();
           
           window.addEventListener('resize', () => {
             this.resize();
             this.createNebula();
             this.createParticles();
+            this.createAmbientParticles();
           });
         }
 
@@ -414,10 +417,8 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
         createNebula() {
           this.nebulaLayers = [];
           
-          // Create layered nebula clouds that form a vertical column
           const layerCount = 12;
           for (let i = 0; i < layerCount; i++) {
-            // Multiple blobs per layer for complex shape
             const blobsInLayer = 3 + Math.floor(Math.random() * 3);
             for (let j = 0; j < blobsInLayer; j++) {
               const yOffset = (i / layerCount) * this.canvas.height * 1.5;
@@ -441,15 +442,13 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
 
         createParticles() {
           this.particles = [];
-          const count = 3000; // Reduced count for performance
+          const count = 3000;
           
           for (let i = 0; i < count; i++) {
-            // Gaussian distribution to cluster particles in nebula
             const gaussX = this.gaussianRandom() * 200;
             const x = this.centerX + gaussX;
             const y = Math.random() * this.canvas.height * 1.5 - this.canvas.height * 0.25;
             
-            // Particles closer to center are brighter/larger
             const distFromCenter = Math.abs(gaussX);
             const centralness = 1 - Math.min(distFromCenter / 300, 1);
             
@@ -472,6 +471,42 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
           }
         }
 
+        createAmbientParticles() {
+          this.ambientParticles = [];
+          const count = 800;
+          
+          for (let i = 0; i < count; i++) {
+            // Spread across full width but avoid center
+            let x = Math.random() * this.canvas.width;
+            const distFromCenter = Math.abs(x - this.centerX);
+            
+            // Push particles toward edges if they're near center
+            if (distFromCenter < 250) {
+              x = x < this.centerX 
+                ? Math.random() * (this.centerX - 300)
+                : this.centerX + 300 + Math.random() * (this.canvas.width - this.centerX - 300);
+            }
+            
+            this.ambientParticles.push({
+              x: x,
+              y: Math.random() * this.canvas.height,
+              size: Math.random() * 2 + 0.5,
+              alpha: Math.random() * 0.4 + 0.1,
+              color: this.getParticleColor(),
+              // Erratic movement
+              vx: (Math.random() - 0.5) * 2,
+              vy: (Math.random() - 0.5) * 2,
+              targetVx: (Math.random() - 0.5) * 2,
+              targetVy: (Math.random() - 0.5) * 2,
+              changeTimer: Math.random() * 100,
+              changeInterval: 50 + Math.random() * 100,
+              // Twinkle
+              twinkleSpeed: Math.random() * 0.05 + 0.02,
+              twinklePhase: Math.random() * Math.PI * 2
+            });
+          }
+        }
+
         gaussianRandom() {
           let u = 0, v = 0;
           while (u === 0) u = Math.random();
@@ -481,22 +516,22 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
 
         getNebulaColor() {
           const colors = [
-            [180, 40, 220],  // Magenta
-            [150, 30, 200],  // Purple  
-            [200, 50, 180],  // Pink-magenta
-            [130, 40, 190],  // Deep purple
-            [170, 60, 210],  // Bright purple
+            [180, 40, 220],
+            [150, 30, 200],
+            [200, 50, 180],
+            [130, 40, 190],
+            [170, 60, 210],
           ];
           return colors[Math.floor(Math.random() * colors.length)];
         }
 
         getParticleColor() {
           const colors = [
-            [220, 180, 255], // Light purple
-            [255, 150, 220], // Pink
-            [200, 160, 255], // Lavender
-            [255, 200, 240], // Light pink
-            [180, 140, 255], // Violet
+            [220, 180, 255],
+            [255, 150, 220],
+            [200, 160, 255],
+            [255, 200, 240],
+            [180, 140, 255],
           ];
           return colors[Math.floor(Math.random() * colors.length)];
         }
@@ -505,7 +540,6 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
           this.time += 0.016;
           
           // Update nebula layers
-          const totalHeight = this.canvas.height * 1.5;
           this.nebulaLayers.forEach(layer => {
             layer.y += layer.speed;
             layer.x = this.centerX + (layer.baseY !== undefined ? 
@@ -518,7 +552,7 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
             }
           });
           
-          // Update particles
+          // Update central particles
           this.particles.forEach(p => {
             p.y += p.speed;
             p.x = p.baseX + Math.sin(this.time * p.wobbleFreq + p.phase) * p.wobbleAmp;
@@ -528,16 +562,43 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
               p.baseX = this.centerX + this.gaussianRandom() * 200;
             }
           });
+          
+          // Update ambient particles with erratic movement
+          this.ambientParticles.forEach(p => {
+            // Change direction randomly
+            p.changeTimer++;
+            if (p.changeTimer > p.changeInterval) {
+              p.targetVx = (Math.random() - 0.5) * 3;
+              p.targetVy = (Math.random() - 0.5) * 3;
+              p.changeTimer = 0;
+              p.changeInterval = 50 + Math.random() * 100;
+            }
+            
+            // Smooth interpolation toward target velocity
+            p.vx += (p.targetVx - p.vx) * 0.02;
+            p.vy += (p.targetVy - p.vy) * 0.02;
+            
+            p.x += p.vx;
+            p.y += p.vy;
+            
+            // Twinkle effect
+            p.currentAlpha = p.alpha * (0.5 + 0.5 * Math.sin(this.time * p.twinkleSpeed + p.twinklePhase));
+            
+            // Wrap around screen
+            if (p.x < -20) p.x = this.canvas.width + 20;
+            if (p.x > this.canvas.width + 20) p.x = -20;
+            if (p.y < -20) p.y = this.canvas.height + 20;
+            if (p.y > this.canvas.height + 20) p.y = -20;
+          });
         }
 
         render() {
           const ctx = this.ctx;
           
-          // Clear
           ctx.fillStyle = '#030108';
           ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
           
-          // Ambient center glow (static, cheap)
+          // Ambient center glow
           const ambientGlow = ctx.createRadialGradient(
             this.centerX, this.canvas.height / 2, 0,
             this.centerX, this.canvas.height / 2, 400
@@ -548,7 +609,7 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
           ctx.fillStyle = ambientGlow;
           ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
           
-          // Draw nebula layers with screen blend
+          // Draw nebula layers
           ctx.globalCompositeOperation = 'screen';
           
           this.nebulaLayers.forEach(layer => {
@@ -569,12 +630,20 @@ const impersonatedUser = Astro.locals?.impersonatedUser;
             ctx.restore();
           });
           
-          // Draw particles with additive blend - batch by color for efficiency
+          // Draw particles with additive blend
           ctx.globalCompositeOperation = 'lighter';
           
-          // Draw all particles in one pass with simple circles
+          // Central nebula particles
           this.particles.forEach(p => {
             ctx.fillStyle = `rgba(${p.color[0]}, ${p.color[1]}, ${p.color[2]}, ${p.alpha})`;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+          });
+          
+          // Ambient floating particles
+          this.ambientParticles.forEach(p => {
+            ctx.fillStyle = `rgba(${p.color[0]}, ${p.color[1]}, ${p.color[2]}, ${p.currentAlpha})`;
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
             ctx.fill();
