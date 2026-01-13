@@ -61,17 +61,17 @@ if (Astro.request.method === 'POST') {
         category,
         content_type: contentType,
         status,
-        manager_id: session.user.id,
+        manager_id: profile.id,
       })
       .select()
       .single();
 
     if (error) {
-      errorMessage = error.message;
-    } else {
-      return Astro.redirect(`/manager/campaigns/${data.id}?created=true`);
-    }
+    errorMessage = 'Create failed: ' + error.message;
+  } else {
+    return Astro.redirect(`/manager/campaigns/${data.id}?created=true`);
   }
+}
 }
 ---
 
