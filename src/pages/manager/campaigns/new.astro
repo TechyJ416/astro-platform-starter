@@ -5,25 +5,53 @@ export const prerender = false;
 import Layout from "../../../layouts/Layout.astro";
 import { createClient } from "@supabase/supabase-js";
 
+// Get session from locals
 const session = Astro.locals.session;
 const profile = Astro.locals.profile;
 
+// Redirect if not logged in
 if (!session) {
   return Astro.redirect('/login?redirect=/manager/campaigns/new');
 }
 
-if (profile?.role !== 'manager' && profile?.role !== 'admin') {
-  return Astro.redirect('/dashboard');
-}
-
+// Create admin client for database operations
 const supabase = createClient(
-  import.meta.env.SUPABASE_URL,
-  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  import.meta.env.PUBLIC_SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY,
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
+// Get user ID - try multiple sources
+let userId = session?.user?.id || profile?.id || null;
+
+// If still no user ID, fetch from database using session
+if (!userId && session?.user?.email) {
+  const { data: userProfile } = await supabase
+    .from('profiles')
+    .select('id, role')
+    .eq('email', session.user.email)
+    .single();
+  
+  if (userProfile) {
+    userId = userProfile.id;
+  }
+}
+
+// If STILL no user ID, try to get from auth
+if (!userId) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
+    userId = user.id;
+  }
+}
+
+// Check role
+const userRole = profile?.role || null;
+if (userRole !== 'manager' && userRole !== 'admin') {
+  return Astro.redirect('/dashboard');
+}
+
 let errorMessage = '';
-let createdCampaign: any = null;
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
@@ -45,33 +73,41 @@ if (Astro.request.method === 'POST') {
 
   if (!title) {
     errorMessage = 'Campaign title is required.';
-  } else if (budget < 0) {
-    errorMessage = 'Budget must be a positive number.';
+  } else if (!userId) {
+    errorMessage = 'Unable to identify user. Please log out and log back in.';
   } else {
+    // Build campaign data
+    const campaignData: Record<string, any> = {
+      title,
+      slug,
+      description,
+      requirements,
+      budget,
+      payout_per_post: payoutPerPost,
+      budget_total: budget,
+      budget_per_creator: payoutPerPost,
+      payment_per_post: payoutPerPost,
+      deadline: deadline || null,
+      application_deadline: deadline || null,
+      category,
+      content_type: contentType,
+      status,
+      manager_id: userId,
+    };
+
     const { data, error } = await supabase
       .from('campaigns')
-      .insert({
-        title,
-        slug,
-        description,
-        requirements,
-        budget,
-        payout_per_post: payoutPerPost,
-        deadline: deadline || null,
-        category,
-        content_type: contentType,
-        status,
-        manager_id: profile.id,
-      })
+      .insert(campaignData)
       .select()
       .single();
 
     if (error) {
-    errorMessage = 'Create failed: ' + error.message;
-  } else {
-    return Astro.redirect(`/manager/campaigns/${data.id}?created=true`);
+      console.error('Campaign creation error:', error);
+      errorMessage = 'Create failed: ' + error.message;
+    } else {
+      return Astro.redirect(`/manager/campaigns/${data.id}?created=true`);
+    }
   }
-}
 }
 ---
 
@@ -90,6 +126,11 @@ if (Astro.request.method === 'POST') {
       {errorMessage && (
         <div class="alert error">{errorMessage}</div>
       )}
+
+      <!-- Debug info - remove in production -->
+      <div class="alert" style="background: #e0f2fe; color: #0369a1; margin-bottom: 1rem; font-size: 0.75rem;">
+        Debug: User ID = {userId || 'NOT FOUND'} | Role = {userRole || 'NOT FOUND'}
+      </div>
 
       <form method="POST" class="campaign-form">
         <!-- Basic Info -->
