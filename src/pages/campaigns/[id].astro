@@ -1,0 +1,485 @@
+---
+// src/pages/campaigns/[id].astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+const { id } = Astro.params;
+
+const supabase = createClient(
+  import.meta.env.PUBLIC_SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+let successMessage = '';
+let errorMessage = '';
+
+// Load campaign
+const { data: campaign, error: campaignError } = await supabase
+  .from('campaigns')
+  .select('*, manager:profiles!campaigns_manager_id_fkey(id, full_name, username, avatar_url)')
+  .eq('id', id)
+  .single();
+
+if (campaignError || !campaign) {
+  return Astro.redirect('/campaigns?error=not_found');
+}
+
+// Check if user already applied
+let existingApplication = null;
+if (session && profile) {
+  const { data: app } = await supabase
+    .from('applications')
+    .select('*')
+    .eq('campaign_id', id)
+    .eq('creator_id', profile.id)
+    .single();
+  existingApplication = app;
+}
+
+// Handle application submission
+if (Astro.request.method === 'POST' && session && profile) {
+  const form = await Astro.request.formData();
+  const action = form.get('action') as string;
+
+  if (action === 'apply') {
+    const pitch = (form.get('pitch') as string)?.trim();
+    const proposedContent = (form.get('proposed_content') as string)?.trim();
+    const proposedRate = parseFloat(form.get('proposed_rate') as string) || null;
+    const instagram = (form.get('instagram') as string)?.trim();
+    const tiktok = (form.get('tiktok') as string)?.trim();
+    const youtube = (form.get('youtube') as string)?.trim();
+
+    if (!pitch) {
+      errorMessage = 'Please write a pitch explaining why you\'re a great fit!';
+    } else if (existingApplication) {
+      errorMessage = 'You have already applied to this campaign.';
+    } else {
+      const { data, error } = await supabase
+        .from('applications')
+        .insert({
+          campaign_id: id,
+          creator_id: profile.id,
+          pitch,
+          proposed_content: proposedContent,
+          proposed_rate: proposedRate,
+          social_links: { instagram, tiktok, youtube },
+          status: 'pending'
+        })
+        .select()
+        .single();
+
+      if (error) {
+        errorMessage = error.message;
+      } else {
+        existingApplication = data;
+        successMessage = 'Application submitted! You\'ll be notified when it\'s reviewed.';
+        
+        // Notify manager
+        if (campaign.manager_id) {
+          await supabase.from('notifications').insert({
+            user_id: campaign.manager_id,
+            type: 'application_received',
+            title: 'New Application 📝',
+            body: `${profile.full_name || profile.username} applied to "${campaign.title}"`,
+            data: { campaign_id: id, application_id: data.id }
+          });
+        }
+
+        // Award EXP for applying
+        await supabase.from('profiles').update({
+          creator_exp: (profile.creator_exp || 0) + 5
+        }).eq('id', profile.id);
+      }
+    }
+  }
+
+  if (action === 'withdraw' && existingApplication) {
+    const { error } = await supabase
+      .from('applications')
+      .update({ status: 'withdrawn' })
+      .eq('id', existingApplication.id);
+    
+    if (error) {
+      errorMessage = error.message;
+    } else {
+      existingApplication = { ...existingApplication, status: 'withdrawn' };
+      successMessage = 'Application withdrawn.';
+    }
+  }
+}
+
+// Get stats
+const { count: applicantsCount } = await supabase
+  .from('applications')
+  .select('*', { count: 'exact', head: true })
+  .eq('campaign_id', id);
+
+const { count: acceptedCount } = await supabase
+  .from('applications')
+  .select('*', { count: 'exact', head: true })
+  .eq('campaign_id', id)
+  .eq('status', 'accepted');
+
+const spotsRemaining = campaign.max_creators ? campaign.max_creators - (acceptedCount || 0) : null;
+const paymentAmount = campaign.payment_per_post || campaign.payout_per_post || campaign.budget_per_creator || 0;
+
+const isCreator = profile?.role === 'creator';
+const canApply = session && isCreator && campaign.status === 'active' && !existingApplication;
+const hasApplied = !!existingApplication;
+---
+
+<Layout title={campaign.title}>
+  <div class="campaign-page">
+    <!-- Hero -->
+    <div class="hero">
+      <div class="hero-content">
+        <a href="/campaigns" class="back-link">← Browse Campaigns</a>
+        <div class="hero-badge">
+          {campaign.category && <span class="category">{campaign.category}</span>}
+          <span class={`status ${campaign.status}`}>{campaign.status}</span>
+        </div>
+        <h1>{campaign.title}</h1>
+        {campaign.manager && (
+          <div class="manager-info">
+            <img src={campaign.manager.avatar_url || `https://ui-avatars.com/api/?name=${campaign.manager.full_name || 'Brand'}`} alt="" />
+            <span>by {campaign.manager.full_name || campaign.manager.username || 'Brand'}</span>
+          </div>
+        )}
+      </div>
+    </div>
+
+    <div class="page-content">
+      {successMessage && <div class="alert success">{successMessage}</div>}
+      {errorMessage && <div class="alert error">{errorMessage}</div>}
+
+      <div class="content-grid">
+        <!-- Main Content -->
+        <div class="main-content">
+          <!-- Quick Stats -->
+          <div class="quick-stats">
+            <div class="stat">
+              <span class="value">${paymentAmount}</span>
+              <span class="label">Per Post</span>
+            </div>
+            <div class="stat">
+              <span class="value">{applicantsCount || 0}</span>
+              <span class="label">Applicants</span>
+            </div>
+            {spotsRemaining !== null && (
+              <div class="stat">
+                <span class="value">{spotsRemaining > 0 ? spotsRemaining : 'Full'}</span>
+                <span class="label">Spots Left</span>
+              </div>
+            )}
+            {campaign.deadline && (
+              <div class="stat">
+                <span class="value">{new Date(campaign.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                <span class="label">Deadline</span>
+              </div>
+            )}
+          </div>
+
+          <!-- Description -->
+          <div class="section">
+            <h2>📋 About This Campaign</h2>
+            <p class="description">{campaign.description || 'No description provided.'}</p>
+          </div>
+
+          <!-- Requirements -->
+          {campaign.requirements && (
+            <div class="section">
+              <h2>✅ Requirements</h2>
+              <div class="requirements">{campaign.requirements}</div>
+            </div>
+          )}
+
+          <!-- Content Type -->
+          {campaign.content_type && (
+            <div class="section">
+              <h2>🎬 Content Type</h2>
+              <span class="content-type-badge">{campaign.content_type}</span>
+            </div>
+          )}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="sidebar">
+          {/* Application Status Card */}
+          {hasApplied ? (
+            <div class={`status-card ${existingApplication.status}`}>
+              <div class="status-header">
+                {existingApplication.status === 'pending' && <span class="icon">⏳</span>}
+                {existingApplication.status === 'accepted' && <span class="icon">🎉</span>}
+                {existingApplication.status === 'rejected' && <span class="icon">😔</span>}
+                {existingApplication.status === 'withdrawn' && <span class="icon">↩️</span>}
+                <h3>
+                  {existingApplication.status === 'pending' && 'Application Pending'}
+                  {existingApplication.status === 'accepted' && 'You\'re In!'}
+                  {existingApplication.status === 'rejected' && 'Not Selected'}
+                  {existingApplication.status === 'withdrawn' && 'Withdrawn'}
+                </h3>
+              </div>
+              
+              {existingApplication.status === 'pending' && (
+                <p>Your application is being reviewed. We'll notify you when there's an update!</p>
+              )}
+              
+              {existingApplication.status === 'accepted' && (
+                <>
+                  <p>Congratulations! You've been accepted to this campaign. Submit your content to get paid!</p>
+                  <a href={`/creator/campaigns/${id}/submit`} class="btn btn-primary btn-block">
+                    📤 Submit Content
+                  </a>
+                </>
+              )}
+              
+              {existingApplication.status === 'rejected' && existingApplication.rejection_reason && (
+                <p class="rejection-reason">{existingApplication.rejection_reason}</p>
+              )}
+
+              {existingApplication.status === 'pending' && (
+                <form method="POST" class="withdraw-form">
+                  <input type="hidden" name="action" value="withdraw" />
+                  <button type="submit" class="btn btn-text">Withdraw Application</button>
+                </form>
+              )}
+            </div>
+          ) : canApply ? (
+            <div class="apply-card">
+              <h3>🚀 Apply Now</h3>
+              <p>Show the brand why you're perfect for this campaign!</p>
+              
+              <form method="POST" class="apply-form">
+                <input type="hidden" name="action" value="apply" />
+                
+                <div class="form-group">
+                  <label for="pitch">Your Pitch *</label>
+                  <textarea 
+                    id="pitch" 
+                    name="pitch" 
+                    rows="4" 
+                    required
+                    placeholder="Explain why you're a great fit for this campaign..."
+                  ></textarea>
+                </div>
+
+                <div class="form-group">
+                  <label for="proposed_content">Content Idea</label>
+                  <textarea 
+                    id="proposed_content" 
+                    name="proposed_content" 
+                    rows="3"
+                    placeholder="Describe your content idea (optional)..."
+                  ></textarea>
+                </div>
+
+                <div class="form-group">
+                  <label for="proposed_rate">Your Rate ($)</label>
+                  <input 
+                    type="number" 
+                    id="proposed_rate" 
+                    name="proposed_rate" 
+                    min="0" 
+                    step="0.01"
+                    placeholder={paymentAmount.toString()}
+                  />
+                  <span class="hint">Leave blank to accept campaign rate (${paymentAmount})</span>
+                </div>
+
+                <div class="form-divider">
+                  <span>Your Social Links</span>
+                </div>
+
+                <div class="form-group">
+                  <label for="instagram">Instagram</label>
+                  <div class="input-with-prefix">
+                    <span>@</span>
+                    <input type="text" id="instagram" name="instagram" placeholder="username" value={profile?.instagram || ''} />
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="tiktok">TikTok</label>
+                  <div class="input-with-prefix">
+                    <span>@</span>
+                    <input type="text" id="tiktok" name="tiktok" placeholder="username" value={profile?.tiktok || ''} />
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="youtube">YouTube</label>
+                  <input type="text" id="youtube" name="youtube" placeholder="Channel name or URL" value={profile?.youtube || ''} />
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block">
+                  Submit Application
+                </button>
+              </form>
+            </div>
+          ) : !session ? (
+            <div class="login-card">
+              <h3>Want to Apply?</h3>
+              <p>Log in or create an account to apply for this campaign.</p>
+              <a href={`/login?redirect=/campaigns/${id}`} class="btn btn-primary btn-block">Log In</a>
+              <a href={`/register?redirect=/campaigns/${id}`} class="btn btn-secondary btn-block">Create Account</a>
+            </div>
+          ) : !isCreator ? (
+            <div class="info-card">
+              <h3>Creator Account Required</h3>
+              <p>Only creators can apply to campaigns. Switch to a creator account to apply.</p>
+            </div>
+          ) : campaign.status !== 'active' ? (
+            <div class="info-card">
+              <h3>Campaign Not Active</h3>
+              <p>This campaign is not currently accepting applications.</p>
+            </div>
+          ) : null}
+
+          {/* Campaign Info */}
+          <div class="info-card">
+            <h3>Campaign Details</h3>
+            <ul class="details-list">
+              <li>
+                <span class="label">Payment</span>
+                <span class="value">${paymentAmount} per post</span>
+              </li>
+              {campaign.budget && (
+                <li>
+                  <span class="label">Total Budget</span>
+                  <span class="value">${campaign.budget.toLocaleString()}</span>
+                </li>
+              )}
+              {campaign.max_creators && (
+                <li>
+                  <span class="label">Creator Spots</span>
+                  <span class="value">{acceptedCount || 0} / {campaign.max_creators}</span>
+                </li>
+              )}
+              {campaign.deadline && (
+                <li>
+                  <span class="label">Deadline</span>
+                  <span class="value">{new Date(campaign.deadline).toLocaleDateString()}</span>
+                </li>
+              )}
+              {campaign.content_type && (
+                <li>
+                  <span class="label">Content Type</span>
+                  <span class="value">{campaign.content_type}</span>
+                </li>
+              )}
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .campaign-page { min-height: 100vh; background: #f8fafc; }
+    
+    .hero { background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%); padding: 3rem 0; }
+    .hero-content { max-width: 1000px; margin: 0 auto; padding: 0 1.5rem; }
+    .back-link { color: rgba(255,255,255,0.7); text-decoration: none; font-size: 0.875rem; }
+    .hero-badge { display: flex; gap: 0.5rem; margin: 1rem 0; }
+    .category { background: rgba(255,255,255,0.15); color: white; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; text-transform: capitalize; }
+    .status { padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+    .status.active { background: #22c55e; color: white; }
+    .status.draft { background: rgba(255,255,255,0.2); color: white; }
+    .status.paused { background: #f59e0b; color: white; }
+    .status.completed { background: #3b82f6; color: white; }
+    .hero h1 { font-size: 2rem; color: white; margin: 0 0 1rem 0; }
+    .manager-info { display: flex; align-items: center; gap: 0.75rem; }
+    .manager-info img { width: 36px; height: 36px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+    .manager-info span { color: rgba(255,255,255,0.8); }
+    
+    .page-content { max-width: 1000px; margin: 0 auto; padding: 2rem 1.5rem; }
+    
+    .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; }
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+    
+    .content-grid { display: grid; grid-template-columns: 1fr 360px; gap: 2rem; }
+    
+    .main-content { display: flex; flex-direction: column; gap: 1.5rem; }
+    
+    .quick-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; background: white; padding: 1.5rem; border-radius: 12px; }
+    .quick-stats .stat { text-align: center; }
+    .quick-stats .value { display: block; font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
+    .quick-stats .label { font-size: 0.75rem; color: #6b7280; }
+    
+    .section { background: white; padding: 1.5rem; border-radius: 12px; }
+    .section h2 { margin: 0 0 1rem 0; font-size: 1.125rem; color: #1a1a2e; }
+    .description { color: #374151; line-height: 1.7; margin: 0; }
+    .requirements { white-space: pre-line; color: #374151; line-height: 1.7; }
+    .content-type-badge { background: #dbeafe; color: #1e40af; padding: 0.5rem 1rem; border-radius: 8px; font-weight: 500; text-transform: capitalize; }
+    
+    .sidebar { display: flex; flex-direction: column; gap: 1rem; }
+    
+    .status-card, .apply-card, .login-card, .info-card {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 12px;
+    }
+    
+    .status-card { border-left: 4px solid #e5e7eb; }
+    .status-card.pending { border-left-color: #f59e0b; background: linear-gradient(135deg, #fffbeb, #fef3c7); }
+    .status-card.accepted { border-left-color: #22c55e; background: linear-gradient(135deg, #f0fdf4, #dcfce7); }
+    .status-card.rejected { border-left-color: #ef4444; background: linear-gradient(135deg, #fef2f2, #fee2e2); }
+    .status-card.withdrawn { border-left-color: #6b7280; }
+    
+    .status-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+    .status-header .icon { font-size: 1.5rem; }
+    .status-header h3 { margin: 0; font-size: 1.125rem; }
+    .status-card p { margin: 0 0 1rem 0; color: #4b5563; font-size: 0.9375rem; }
+    .rejection-reason { font-style: italic; }
+    .withdraw-form { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(0,0,0,0.1); }
+    
+    .apply-card h3 { margin: 0 0 0.5rem 0; }
+    .apply-card > p { color: #6b7280; margin: 0 0 1.5rem 0; }
+    
+    .apply-form { display: flex; flex-direction: column; gap: 1rem; }
+    .form-group { display: flex; flex-direction: column; gap: 0.375rem; }
+    .form-group label { font-size: 0.875rem; font-weight: 500; color: #374151; }
+    .form-group input, .form-group textarea { padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.9375rem; }
+    .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+    .form-group textarea { resize: vertical; font-family: inherit; }
+    .hint { font-size: 0.75rem; color: #9ca3af; }
+    
+    .form-divider { display: flex; align-items: center; gap: 1rem; margin: 0.5rem 0; }
+    .form-divider::before, .form-divider::after { content: ''; flex: 1; height: 1px; background: #e5e7eb; }
+    .form-divider span { font-size: 0.75rem; color: #9ca3af; text-transform: uppercase; }
+    
+    .input-with-prefix { display: flex; align-items: stretch; }
+    .input-with-prefix span { background: #f3f4f6; border: 1px solid #d1d5db; border-right: 0; border-radius: 8px 0 0 8px; padding: 0.75rem; color: #6b7280; }
+    .input-with-prefix input { border-radius: 0 8px 8px 0; flex: 1; }
+    
+    .login-card h3, .info-card h3 { margin: 0 0 0.5rem 0; }
+    .login-card p, .info-card p { color: #6b7280; margin: 0 0 1rem 0; }
+    .login-card .btn { margin-bottom: 0.5rem; }
+    
+    .details-list { list-style: none; padding: 0; margin: 0; }
+    .details-list li { display: flex; justify-content: space-between; padding: 0.75rem 0; border-bottom: 1px solid #e5e7eb; }
+    .details-list li:last-child { border-bottom: 0; }
+    .details-list .label { color: #6b7280; font-size: 0.875rem; }
+    .details-list .value { font-weight: 500; color: #1a1a2e; }
+    
+    .btn { padding: 0.75rem 1.5rem; border-radius: 8px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; text-align: center; font-size: 0.9375rem; display: inline-block; }
+    .btn-block { display: block; width: 100%; }
+    .btn-primary { background: linear-gradient(135deg, #2563eb, #3b82f6); color: white; }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+    .btn-text { background: transparent; color: #6b7280; padding: 0.5rem; }
+    .btn-text:hover { color: #ef4444; }
+    
+    @media (max-width: 768px) {
+      .content-grid { grid-template-columns: 1fr; }
+      .quick-stats { grid-template-columns: repeat(2, 1fr); }
+      .sidebar { order: -1; }
+    }
+  </style>
+</Layout>
