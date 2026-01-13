@@ -7,906 +7,772 @@ import { createClient } from "@supabase/supabase-js";
 
 const session = Astro.locals.session;
 const profile = Astro.locals.profile;
-const { id } = Astro.params;
 
 if (!session) {
-  return Astro.redirect('/login?redirect=/manager/campaigns/' + id);
+  return Astro.redirect('/login');
 }
 
 if (profile?.role !== 'manager' && profile?.role !== 'admin') {
   return Astro.redirect('/dashboard');
 }
 
+const { id } = Astro.params;
+
 const supabase = createClient(
-  import.meta.env.SUPABASE_URL,
-  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  import.meta.env.PUBLIC_SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY,
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
 let successMessage = Astro.url.searchParams.get('created') ? 'Campaign created successfully!' : '';
 let errorMessage = '';
 
-// Fetch campaign
-const { data: campaign, error } = await supabase
-  .from('campaigns')
-  .select('*')
-  .eq('id', id)
-  .eq('manager_id', session.user.id)
-  .single();
-
-if (error || !campaign) {
-  return Astro.redirect('/manager/campaigns');
-}
-
-// Handle status updates
+// Handle POST actions
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const action = form.get('action') as string;
 
+  if (action === 'accept_application') {
+    const appId = form.get('application_id') as string;
+    const { error } = await supabase
+      .from('applications')
+      .update({ 
+        status: 'accepted', 
+        reviewed_at: new Date().toISOString(),
+        reviewed_by: profile.id 
+      })
+      .eq('id', appId);
+    
+    if (error) errorMessage = error.message;
+    else {
+      successMessage = 'Application accepted!';
+      // Create notification for creator
+      const { data: app } = await supabase.from('applications').select('creator_id').eq('id', appId).single();
+      if (app) {
+        await supabase.from('notifications').insert({
+          user_id: app.creator_id,
+          type: 'application_accepted',
+          title: 'Application Accepted! 🎉',
+          body: 'Your application has been accepted. You can now submit content!',
+          data: { campaign_id: id, application_id: appId }
+        });
+      }
+    }
+  }
+
+  if (action === 'reject_application') {
+    const appId = form.get('application_id') as string;
+    const reason = form.get('reason') as string;
+    const { error } = await supabase
+      .from('applications')
+      .update({ 
+        status: 'rejected', 
+        rejection_reason: reason || 'Not selected for this campaign',
+        reviewed_at: new Date().toISOString(),
+        reviewed_by: profile.id 
+      })
+      .eq('id', appId);
+    
+    if (error) errorMessage = error.message;
+    else successMessage = 'Application rejected.';
+  }
+
+  if (action === 'approve_submission') {
+    const subId = form.get('submission_id') as string;
+    const { data: submission } = await supabase
+      .from('submissions')
+      .select('*, campaign:campaigns(payment_per_post, payout_per_post, budget_per_creator)')
+      .eq('id', subId)
+      .single();
+    
+    const paymentAmount = submission?.campaign?.payment_per_post || 
+                          submission?.campaign?.payout_per_post || 
+                          submission?.campaign?.budget_per_creator || 0;
+
+    const { error } = await supabase
+      .from('submissions')
+      .update({ 
+        status: 'approved',
+        verified_at: new Date().toISOString(),
+        verified_by: profile.id,
+        payment_status: 'approved',
+        payment_amount: paymentAmount
+      })
+      .eq('id', subId);
+    
+    if (error) errorMessage = error.message;
+    else {
+      successMessage = 'Submission approved!';
+      // Award creator EXP
+      if (submission) {
+        const { data: creatorProfile } = await supabase
+          .from('profiles')
+          .select('creator_exp')
+          .eq('id', submission.creator_id)
+          .single();
+        
+        await supabase.from('profiles').update({
+          creator_exp: (creatorProfile?.creator_exp || 0) + 50
+        }).eq('id', submission.creator_id);
+
+        await supabase.from('notifications').insert({
+          user_id: submission.creator_id,
+          type: 'submission_approved',
+          title: 'Submission Approved! 💰',
+          body: `Your submission has been approved! Payment of $${paymentAmount} is being processed.`,
+          data: { campaign_id: id, submission_id: subId }
+        });
+      }
+    }
+  }
+
+  if (action === 'reject_submission') {
+    const subId = form.get('submission_id') as string;
+    const reason = form.get('reason') as string;
+    const { error } = await supabase
+      .from('submissions')
+      .update({ 
+        status: 'rejected',
+        rejection_reason: reason || 'Does not meet campaign requirements',
+        verified_at: new Date().toISOString(),
+        verified_by: profile.id
+      })
+      .eq('id', subId);
+    
+    if (error) errorMessage = error.message;
+    else successMessage = 'Submission rejected.';
+  }
+
   if (action === 'update_status') {
     const newStatus = form.get('status') as string;
-    const { error: updateError } = await supabase
+    const { error } = await supabase
       .from('campaigns')
       .update({ status: newStatus })
       .eq('id', id);
     
-    if (updateError) errorMessage = updateError.message;
-    else {
-      campaign.status = newStatus;
-      successMessage = `Campaign ${newStatus === 'active' ? 'launched' : newStatus}!`;
-    }
-  }
-
-  if (action === 'delete') {
-    const { error: deleteError } = await supabase
-      .from('campaigns')
-      .delete()
-      .eq('id', id);
-    
-    if (deleteError) errorMessage = deleteError.message;
-    else return Astro.redirect('/manager/campaigns?deleted=true');
+    if (error) errorMessage = error.message;
+    else successMessage = `Campaign ${newStatus}!`;
   }
 }
 
-// Fetch applications
+// Load campaign with all related data
+const { data: campaign, error: campaignError } = await supabase
+  .from('campaigns')
+  .select('*')
+  .eq('id', id)
+  .single();
+
+if (campaignError || !campaign) {
+  return Astro.redirect('/manager/campaigns?error=not_found');
+}
+
+// Verify ownership (managers can only see their own, admins see all)
+if (profile.role === 'manager' && campaign.manager_id !== profile.id) {
+  return Astro.redirect('/manager/campaigns?error=unauthorized');
+}
+
+// Load applications
 const { data: applications } = await supabase
-  .from('campaign_applications')
+  .from('applications')
   .select(`
     *,
-    creator:profiles!campaign_applications_creator_id_fkey(id, full_name, email, avatar_url, level, is_verified)
+    creator:profiles!applications_creator_id_fkey(
+      id, full_name, username, avatar_url, email,
+      creator_level, creator_exp, instagram, tiktok, youtube,
+      followers, follower_count
+    )
   `)
   .eq('campaign_id', id)
   .order('created_at', { ascending: false });
 
-// Fetch submissions
+// Load submissions
 const { data: submissions } = await supabase
-  .from('posts')
+  .from('submissions')
   .select(`
     *,
-    creator:profiles!posts_creator_id_fkey(id, full_name, avatar_url)
+    creator:profiles!submissions_creator_id_fkey(
+      id, full_name, username, avatar_url
+    ),
+    captures:submission_captures(*)
   `)
   .eq('campaign_id', id)
   .order('created_at', { ascending: false });
 
-// Stats
-const pendingApps = applications?.filter(a => a.status === 'pending').length || 0;
-const approvedApps = applications?.filter(a => a.status === 'approved').length || 0;
-const pendingSubs = submissions?.filter(s => s.status === 'pending').length || 0;
-const approvedSubs = submissions?.filter(s => s.status === 'approved').length || 0;
-const budgetUsed = campaign.budget > 0 ? Math.round(((campaign.amount_spent || 0) / campaign.budget) * 100) : 0;
+// Calculate stats
+const stats = {
+  applications: {
+    total: applications?.length || 0,
+    pending: applications?.filter(a => a.status === 'pending').length || 0,
+    accepted: applications?.filter(a => a.status === 'accepted').length || 0,
+    rejected: applications?.filter(a => a.status === 'rejected').length || 0,
+  },
+  submissions: {
+    total: submissions?.length || 0,
+    pending: submissions?.filter(s => s.status === 'pending' || s.status === 'monitoring' || s.status === 'in_review').length || 0,
+    approved: submissions?.filter(s => s.status === 'approved').length || 0,
+    rejected: submissions?.filter(s => s.status === 'rejected').length || 0,
+  },
+  budget: {
+    total: campaign.budget || campaign.budget_total || 0,
+    perPost: campaign.payment_per_post || campaign.payout_per_post || campaign.budget_per_creator || 0,
+    spent: (submissions?.filter(s => s.status === 'approved').length || 0) * 
+           (campaign.payment_per_post || campaign.payout_per_post || campaign.budget_per_creator || 0),
+  }
+};
 
+stats.budget.remaining = stats.budget.total - stats.budget.spent;
+stats.budget.percentage = stats.budget.total > 0 ? Math.min(100, (stats.budget.spent / stats.budget.total) * 100) : 0;
+
+const pendingApplications = applications?.filter(a => a.status === 'pending') || [];
+const pendingSubmissions = submissions?.filter(s => ['pending', 'monitoring', 'in_review'].includes(s.status)) || [];
+
+// Tab handling
 const tab = Astro.url.searchParams.get('tab') || 'overview';
 ---
 
 <Layout title={campaign.title}>
-  <div class="campaign-detail-page">
+  <div class="campaign-detail">
     <!-- Header -->
     <div class="page-header">
       <div class="header-content">
+        <a href="/manager/campaigns" class="back-link">← Back to Campaigns</a>
         <div class="header-top">
-          <a href="/manager/campaigns" class="back-link">← Back to Campaigns</a>
+          <div>
+            <h1>{campaign.title}</h1>
+            <div class="header-meta">
+              <span class={`status-badge ${campaign.status || 'draft'}`}>{campaign.status || 'draft'}</span>
+              {campaign.category && <span class="category-badge">{campaign.category}</span>}
+              {campaign.deadline && <span class="deadline">📅 Due {new Date(campaign.deadline).toLocaleDateString()}</span>}
+            </div>
+          </div>
           <div class="header-actions">
-            <a href={`/campaigns/${campaign.slug}`} target="_blank" class="btn btn-outline">
-              👁️ Preview
-            </a>
-            <a href={`/manager/campaigns/${id}/edit`} class="btn btn-secondary">
-              ✏️ Edit
-            </a>
-            {campaign.status === 'draft' && (
-              <form method="POST" style="display: contents;">
+            {campaign.status !== 'active' && (
+              <form method="POST" class="inline">
                 <input type="hidden" name="action" value="update_status" />
                 <input type="hidden" name="status" value="active" />
-                <button type="submit" class="btn btn-primary">🚀 Launch Campaign</button>
+                <button type="submit" class="btn btn-success">🚀 Launch Campaign</button>
               </form>
             )}
+            {campaign.status === 'active' && (
+              <form method="POST" class="inline">
+                <input type="hidden" name="action" value="update_status" />
+                <input type="hidden" name="status" value="paused" />
+                <button type="submit" class="btn btn-warning">⏸️ Pause</button>
+              </form>
+            )}
+            <a href={`/manager/campaigns/${id}/edit`} class="btn btn-secondary">✏️ Edit</a>
           </div>
         </div>
-        
-        <div class="campaign-title-row">
-          <h1>{campaign.title}</h1>
-          <span class={`status-badge ${campaign.status}`}>{campaign.status}</span>
-        </div>
-        
-        <p class="campaign-description">{campaign.description?.substring(0, 200)}</p>
-      </div>
-    </div>
-
-    {successMessage && <div class="alert success container">{successMessage}</div>}
-    {errorMessage && <div class="alert error container">{errorMessage}</div>}
-
-    <!-- Stats Bar -->
-    <div class="stats-bar">
-      <div class="stat-item">
-        <span class="stat-value">${campaign.budget?.toLocaleString() || 0}</span>
-        <span class="stat-label">Budget</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-value">${campaign.amount_spent?.toLocaleString() || 0}</span>
-        <span class="stat-label">Spent</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-value">{applications?.length || 0}</span>
-        <span class="stat-label">Applications</span>
-        {pendingApps > 0 && <span class="stat-pending">{pendingApps} pending</span>}
-      </div>
-      <div class="stat-item">
-        <span class="stat-value">{approvedApps}</span>
-        <span class="stat-label">Creators</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-value">{submissions?.length || 0}</span>
-        <span class="stat-label">Submissions</span>
-        {pendingSubs > 0 && <span class="stat-pending">{pendingSubs} pending</span>}
-      </div>
-      <div class="stat-item">
-        <span class="stat-value">{approvedSubs}</span>
-        <span class="stat-label">Approved</span>
-      </div>
-    </div>
-
-    <!-- Tabs -->
-    <div class="tabs-container">
-      <div class="tabs">
-        <a href={`?tab=overview`} class={`tab ${tab === 'overview' ? 'active' : ''}`}>Overview</a>
-        <a href={`?tab=applications`} class={`tab ${tab === 'applications' ? 'active' : ''}`}>
-          Applications
-          {pendingApps > 0 && <span class="tab-badge">{pendingApps}</span>}
-        </a>
-        <a href={`?tab=submissions`} class={`tab ${tab === 'submissions' ? 'active' : ''}`}>
-          Submissions
-          {pendingSubs > 0 && <span class="tab-badge">{pendingSubs}</span>}
-        </a>
-        <a href={`?tab=creators`} class={`tab ${tab === 'creators' ? 'active' : ''}`}>Creators ({approvedApps})</a>
-        <a href={`?tab=settings`} class={`tab ${tab === 'settings' ? 'active' : ''}`}>Settings</a>
       </div>
     </div>
 
     <div class="page-content">
-      <!-- Overview Tab -->
-      {tab === 'overview' && (
-        <div class="overview-grid">
-          <div class="main-content">
-            <!-- Budget Progress -->
-            <div class="panel">
-              <h2>💰 Budget Progress</h2>
-              <div class="budget-progress">
-                <div class="budget-header">
-                  <span>${(campaign.amount_spent || 0).toLocaleString()} spent</span>
-                  <span>${campaign.budget?.toLocaleString() || 0} total</span>
-                </div>
-                <div class="progress-bar large">
-                  <div class="progress-fill" style={`width: ${Math.min(budgetUsed, 100)}%`}></div>
-                </div>
-                <div class="budget-info">
-                  <span>{budgetUsed}% used</span>
-                  <span>${((campaign.budget || 0) - (campaign.amount_spent || 0)).toLocaleString()} remaining</span>
-                </div>
-              </div>
-              <div class="payout-info">
-                <span class="payout-label">Payout per post:</span>
-                <span class="payout-value">${campaign.payout_per_post || 0}</span>
-              </div>
-            </div>
+      {successMessage && <div class="alert success">{successMessage}</div>}
+      {errorMessage && <div class="alert error">{errorMessage}</div>}
 
-            <!-- Recent Activity -->
-            <div class="panel">
-              <h2>📊 Recent Activity</h2>
-              <div class="activity-list">
-                {applications?.slice(0, 3).map(app => (
-                  <div class="activity-item">
-                    <span class="activity-icon">📝</span>
-                    <div class="activity-content">
-                      <strong>{app.creator?.full_name}</strong> applied
-                      <span class="activity-time">{new Date(app.created_at).toLocaleDateString()}</span>
-                    </div>
-                    <span class={`status-dot ${app.status}`}></span>
-                  </div>
-                ))}
-                {submissions?.slice(0, 3).map(sub => (
-                  <div class="activity-item">
-                    <span class="activity-icon">📤</span>
-                    <div class="activity-content">
-                      <strong>{sub.creator?.full_name}</strong> submitted content
-                      <span class="activity-time">{new Date(sub.created_at).toLocaleDateString()}</span>
-                    </div>
-                    <span class={`status-dot ${sub.status}`}></span>
-                  </div>
-                ))}
-                {(!applications?.length && !submissions?.length) && (
-                  <p class="empty-text">No activity yet</p>
-                )}
-              </div>
-            </div>
+      <!-- Budget Progress -->
+      <div class="budget-card">
+        <div class="budget-header">
+          <h3>💰 Budget Progress</h3>
+          <span class="budget-amount">${stats.budget.spent.toLocaleString()} / ${stats.budget.total.toLocaleString()}</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" style={`width: ${stats.budget.percentage}%`}></div>
+        </div>
+        <div class="budget-details">
+          <div class="budget-stat">
+            <span class="label">Per Post</span>
+            <span class="value">${stats.budget.perPost}</span>
           </div>
+          <div class="budget-stat">
+            <span class="label">Spent</span>
+            <span class="value">${stats.budget.spent.toLocaleString()}</span>
+          </div>
+          <div class="budget-stat">
+            <span class="label">Remaining</span>
+            <span class="value">${stats.budget.remaining.toLocaleString()}</span>
+          </div>
+          <div class="budget-stat">
+            <span class="label">Approved Posts</span>
+            <span class="value">{stats.submissions.approved}</span>
+          </div>
+        </div>
+      </div>
 
-          <div class="sidebar">
-            <!-- Quick Actions -->
+      <!-- Quick Stats -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">📝</div>
+          <div class="stat-info">
+            <span class="stat-value">{stats.applications.total}</span>
+            <span class="stat-label">Applications</span>
+          </div>
+          {stats.applications.pending > 0 && (
+            <span class="stat-badge pending">{stats.applications.pending} pending</span>
+          )}
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">✅</div>
+          <div class="stat-info">
+            <span class="stat-value">{stats.applications.accepted}</span>
+            <span class="stat-label">Accepted</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📤</div>
+          <div class="stat-info">
+            <span class="stat-value">{stats.submissions.total}</span>
+            <span class="stat-label">Submissions</span>
+          </div>
+          {stats.submissions.pending > 0 && (
+            <span class="stat-badge pending">{stats.submissions.pending} to review</span>
+          )}
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">💰</div>
+          <div class="stat-info">
+            <span class="stat-value">{stats.submissions.approved}</span>
+            <span class="stat-label">Approved & Paid</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <a href={`?tab=overview`} class:list={["tab", { active: tab === 'overview' }]}>Overview</a>
+        <a href={`?tab=applications`} class:list={["tab", { active: tab === 'applications' }]}>
+          Applications
+          {stats.applications.pending > 0 && <span class="tab-badge">{stats.applications.pending}</span>}
+        </a>
+        <a href={`?tab=submissions`} class:list={["tab", { active: tab === 'submissions' }]}>
+          Submissions
+          {stats.submissions.pending > 0 && <span class="tab-badge">{stats.submissions.pending}</span>}
+        </a>
+        <a href={`?tab=creators`} class:list={["tab", { active: tab === 'creators' }]}>Creators</a>
+      </div>
+
+      <!-- Tab Content -->
+      {tab === 'overview' && (
+        <div class="tab-content">
+          <div class="overview-grid">
             <div class="panel">
-              <h2>Quick Actions</h2>
-              <div class="quick-actions">
-                {pendingApps > 0 && (
-                  <a href={`?tab=applications`} class="action-btn warning">
-                    📝 Review {pendingApps} Application{pendingApps > 1 ? 's' : ''}
-                  </a>
-                )}
-                {pendingSubs > 0 && (
-                  <a href={`?tab=submissions`} class="action-btn success">
-                    ✅ Review {pendingSubs} Submission{pendingSubs > 1 ? 's' : ''}
-                  </a>
-                )}
-                <a href="/manager/creators" class="action-btn">
-                  🔍 Find More Creators
-                </a>
+              <h3>📋 Campaign Details</h3>
+              <div class="detail-row">
+                <span class="label">Description</span>
+                <p>{campaign.description || 'No description'}</p>
+              </div>
+              {campaign.requirements && (
+                <div class="detail-row">
+                  <span class="label">Requirements</span>
+                  <p class="requirements">{campaign.requirements}</p>
+                </div>
+              )}
+              <div class="detail-row">
+                <span class="label">Content Type</span>
+                <span>{campaign.content_type || 'Any'}</span>
+              </div>
+              <div class="detail-row">
+                <span class="label">Max Creators</span>
+                <span>{campaign.max_creators || 'Unlimited'}</span>
               </div>
             </div>
 
-            <!-- Campaign Details -->
             <div class="panel">
-              <h2>Details</h2>
-              <div class="details-list">
-                <div class="detail-item">
-                  <span class="detail-label">Category</span>
-                  <span class="detail-value">{campaign.category || 'Not set'}</span>
+              <h3>⏳ Pending Actions</h3>
+              {pendingApplications.length === 0 && pendingSubmissions.length === 0 ? (
+                <p class="empty-text">No pending actions! 🎉</p>
+              ) : (
+                <div class="pending-list">
+                  {pendingApplications.slice(0, 3).map(app => (
+                    <div class="pending-item">
+                      <img src={app.creator?.avatar_url || `https://ui-avatars.com/api/?name=${app.creator?.full_name || 'User'}`} alt="" class="avatar" />
+                      <div class="pending-info">
+                        <span class="name">{app.creator?.full_name || app.creator?.username}</span>
+                        <span class="type">Application</span>
+                      </div>
+                      <a href={`?tab=applications`} class="btn btn-sm btn-primary">Review</a>
+                    </div>
+                  ))}
+                  {pendingSubmissions.slice(0, 3).map(sub => (
+                    <div class="pending-item">
+                      <img src={sub.creator?.avatar_url || `https://ui-avatars.com/api/?name=${sub.creator?.full_name || 'User'}`} alt="" class="avatar" />
+                      <div class="pending-info">
+                        <span class="name">{sub.creator?.full_name || sub.creator?.username}</span>
+                        <span class="type">Submission</span>
+                      </div>
+                      <a href={`?tab=submissions`} class="btn btn-sm btn-primary">Review</a>
+                    </div>
+                  ))}
                 </div>
-                <div class="detail-item">
-                  <span class="detail-label">Content Type</span>
-                  <span class="detail-value">{campaign.content_type || 'Any'}</span>
-                </div>
-                <div class="detail-item">
-                  <span class="detail-label">Deadline</span>
-                  <span class="detail-value">
-                    {campaign.deadline ? new Date(campaign.deadline).toLocaleDateString() : 'No deadline'}
-                  </span>
-                </div>
-                <div class="detail-item">
-                  <span class="detail-label">Created</span>
-                  <span class="detail-value">{new Date(campaign.created_at).toLocaleDateString()}</span>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      <!-- Applications Tab -->
       {tab === 'applications' && (
-        <div class="applications-section">
+        <div class="tab-content">
           {applications && applications.length > 0 ? (
             <div class="applications-list">
               {applications.map(app => (
                 <div class={`application-card ${app.status}`}>
-                  <div class="app-creator">
-                    <div class="creator-avatar">
-                      {app.creator?.avatar_url ? (
-                        <img src={app.creator.avatar_url} alt="" />
-                      ) : (
-                        <span>{app.creator?.full_name?.charAt(0) || '?'}</span>
-                      )}
-                    </div>
-                    <div class="creator-info">
-                      <strong>{app.creator?.full_name}</strong>
-                      {app.creator?.is_verified && <span class="verified">✓</span>}
-                      <span class="level">Lvl {app.creator?.level || 1}</span>
-                      <p>{app.creator?.email}</p>
+                  <div class="applicant-info">
+                    <img src={app.creator?.avatar_url || `https://ui-avatars.com/api/?name=${app.creator?.full_name || 'User'}`} alt="" class="avatar-lg" />
+                    <div class="applicant-details">
+                      <h4>{app.creator?.full_name || app.creator?.username || 'Unknown'}</h4>
+                      <div class="applicant-meta">
+                        {app.creator?.creator_level && (
+                          <span class="level">Level {app.creator.creator_level}</span>
+                        )}
+                        {(app.creator?.followers || app.creator?.follower_count) && (
+                          <span class="followers">
+                            {((app.creator.followers || app.creator.follower_count) / 1000).toFixed(1)}K followers
+                          </span>
+                        )}
+                        <span class="email">{app.creator?.email}</span>
+                      </div>
+                      <div class="social-links">
+                        {app.creator?.instagram && <a href={`https://instagram.com/${app.creator.instagram}`} target="_blank">📸 IG</a>}
+                        {app.creator?.tiktok && <a href={`https://tiktok.com/@${app.creator.tiktok}`} target="_blank">🎵 TT</a>}
+                        {app.creator?.youtube && <a href={`https://youtube.com/${app.creator.youtube}`} target="_blank">📺 YT</a>}
+                      </div>
                     </div>
                   </div>
-                  <div class="app-status">
+                  
+                  {app.pitch && (
+                    <div class="pitch">
+                      <strong>Pitch:</strong> {app.pitch}
+                    </div>
+                  )}
+                  
+                  {app.proposed_rate && (
+                    <div class="proposed-rate">
+                      <strong>Proposed Rate:</strong> ${app.proposed_rate}
+                    </div>
+                  )}
+
+                  <div class="application-footer">
+                    <span class="date">Applied {new Date(app.created_at).toLocaleDateString()}</span>
                     <span class={`status-badge ${app.status}`}>{app.status}</span>
-                    <span class="app-date">{new Date(app.created_at).toLocaleDateString()}</span>
                   </div>
-                  <div class="app-actions">
-                    <a href={`/profile/${app.creator?.id}`} target="_blank" class="btn btn-sm">View Profile</a>
-                    <a href={`/manager/applications?filter=pending`} class="btn btn-sm btn-primary">Review</a>
-                  </div>
+
+                  {app.status === 'pending' && (
+                    <div class="action-buttons">
+                      <form method="POST" class="inline">
+                        <input type="hidden" name="action" value="accept_application" />
+                        <input type="hidden" name="application_id" value={app.id} />
+                        <button type="submit" class="btn btn-success">✓ Accept</button>
+                      </form>
+                      <form method="POST" class="inline reject-form">
+                        <input type="hidden" name="action" value="reject_application" />
+                        <input type="hidden" name="application_id" value={app.id} />
+                        <input type="text" name="reason" placeholder="Reason (optional)" class="reason-input" />
+                        <button type="submit" class="btn btn-danger">✗ Reject</button>
+                      </form>
+                    </div>
+                  )}
+
+                  {app.status === 'rejected' && app.rejection_reason && (
+                    <div class="rejection-reason">
+                      <strong>Reason:</strong> {app.rejection_reason}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           ) : (
             <div class="empty-state">
-              <span>📝</span>
-              <h3>No applications yet</h3>
-              <p>Creators will apply once your campaign is active.</p>
+              <span class="empty-icon">📝</span>
+              <h3>No Applications Yet</h3>
+              <p>Share your campaign to start receiving applications from creators.</p>
             </div>
           )}
         </div>
       )}
 
-      <!-- Submissions Tab -->
       {tab === 'submissions' && (
-        <div class="submissions-section">
+        <div class="tab-content">
           {submissions && submissions.length > 0 ? (
             <div class="submissions-grid">
               {submissions.map(sub => (
                 <div class={`submission-card ${sub.status}`}>
-                  <div class="sub-preview">
-                    {sub.thumbnail_url || sub.media_url ? (
-                      <img src={sub.thumbnail_url || sub.media_url} alt="" />
-                    ) : (
-                      <div class="no-preview">📄</div>
-                    )}
+                  <div class="submission-header">
+                    <img src={sub.creator?.avatar_url || `https://ui-avatars.com/api/?name=${sub.creator?.full_name || 'User'}`} alt="" class="avatar" />
+                    <div>
+                      <h4>{sub.creator?.full_name || sub.creator?.username}</h4>
+                      <span class="platform-badge">{sub.platform}</span>
+                    </div>
                     <span class={`status-badge ${sub.status}`}>{sub.status}</span>
                   </div>
-                  <div class="sub-info">
-                    <h4>{sub.title}</h4>
-                    <p>{sub.creator?.full_name}</p>
-                    <span class="sub-date">{new Date(sub.created_at).toLocaleDateString()}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div class="empty-state">
-              <span>📤</span>
-              <h3>No submissions yet</h3>
-              <p>Approved creators will submit content here.</p>
-            </div>
-          )}
-          <a href="/manager/submissions" class="btn btn-primary" style="margin-top: 1rem;">
-            Review All Submissions
-          </a>
-        </div>
-      )}
 
-      <!-- Creators Tab -->
-      {tab === 'creators' && (
-        <div class="creators-section">
-          {applications?.filter(a => a.status === 'approved').length > 0 ? (
-            <div class="creators-grid">
-              {applications.filter(a => a.status === 'approved').map(app => (
-                <div class="creator-card">
-                  <div class="creator-avatar large">
-                    {app.creator?.avatar_url ? (
-                      <img src={app.creator.avatar_url} alt="" />
-                    ) : (
-                      <span>{app.creator?.full_name?.charAt(0) || '?'}</span>
+                  <a href={sub.url} target="_blank" class="submission-link">
+                    🔗 {sub.url.substring(0, 50)}...
+                  </a>
+
+                  {sub.captures && sub.captures.length > 0 && (
+                    <div class="screenshot-preview">
+                      <img src={sub.captures[0].screenshot_url} alt="Screenshot" />
+                    </div>
+                  )}
+
+                  <div class="submission-stats">
+                    {sub.latest_views > 0 && <span>👁️ {sub.latest_views.toLocaleString()}</span>}
+                    {sub.latest_likes > 0 && <span>❤️ {sub.latest_likes.toLocaleString()}</span>}
+                    {sub.latest_comments > 0 && <span>💬 {sub.latest_comments}</span>}
+                  </div>
+
+                  <div class="submission-footer">
+                    <span class="date">{new Date(sub.created_at).toLocaleDateString()}</span>
+                    {sub.payment_amount && sub.status === 'approved' && (
+                      <span class="payment">💰 ${sub.payment_amount}</span>
                     )}
                   </div>
-                  <h4>{app.creator?.full_name}</h4>
-                  {app.creator?.is_verified && <span class="verified-badge">✓ Verified</span>}
-                  <span class="level-badge">Level {app.creator?.level || 1}</span>
-                  <a href={`/profile/${app.creator?.id}`} target="_blank" class="btn btn-sm">View Profile</a>
+
+                  {['pending', 'monitoring', 'in_review'].includes(sub.status) && (
+                    <div class="action-buttons">
+                      <form method="POST" class="inline">
+                        <input type="hidden" name="action" value="approve_submission" />
+                        <input type="hidden" name="submission_id" value={sub.id} />
+                        <button type="submit" class="btn btn-success">✓ Approve</button>
+                      </form>
+                      <form method="POST" class="inline reject-form">
+                        <input type="hidden" name="action" value="reject_submission" />
+                        <input type="hidden" name="submission_id" value={sub.id} />
+                        <input type="text" name="reason" placeholder="Reason" class="reason-input" />
+                        <button type="submit" class="btn btn-danger">✗ Reject</button>
+                      </form>
+                    </div>
+                  )}
+
+                  {sub.status === 'rejected' && sub.rejection_reason && (
+                    <div class="rejection-reason">
+                      <strong>Reason:</strong> {sub.rejection_reason}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           ) : (
             <div class="empty-state">
-              <span>🎨</span>
-              <h3>No creators yet</h3>
-              <p>Approve applications to add creators to this campaign.</p>
+              <span class="empty-icon">📤</span>
+              <h3>No Submissions Yet</h3>
+              <p>Accepted creators will submit their content here.</p>
             </div>
           )}
         </div>
       )}
 
-      <!-- Settings Tab -->
-      {tab === 'settings' && (
-        <div class="settings-section">
-          <div class="panel">
-            <h2>Campaign Status</h2>
-            <div class="status-options">
-              {['draft', 'active', 'paused', 'completed'].map(status => (
-                <form method="POST" style="display: contents;">
-                  <input type="hidden" name="action" value="update_status" />
-                  <input type="hidden" name="status" value={status} />
-                  <button 
-                    type="submit" 
-                    class={`status-btn ${campaign.status === status ? 'active' : ''}`}
-                    disabled={campaign.status === status}
-                  >
-                    {status === 'draft' && '📝'}
-                    {status === 'active' && '🚀'}
-                    {status === 'paused' && '⏸️'}
-                    {status === 'completed' && '✅'}
-                    {status.charAt(0).toUpperCase() + status.slice(1)}
-                  </button>
-                </form>
-              ))}
+      {tab === 'creators' && (
+        <div class="tab-content">
+          {applications?.filter(a => a.status === 'accepted').length > 0 ? (
+            <div class="creators-grid">
+              {applications.filter(a => a.status === 'accepted').map(app => {
+                const creatorSubmissions = submissions?.filter(s => s.creator_id === app.creator_id) || [];
+                const approved = creatorSubmissions.filter(s => s.status === 'approved').length;
+                const pending = creatorSubmissions.filter(s => ['pending', 'monitoring', 'in_review'].includes(s.status)).length;
+                
+                return (
+                  <div class="creator-card">
+                    <img src={app.creator?.avatar_url || `https://ui-avatars.com/api/?name=${app.creator?.full_name || 'User'}`} alt="" class="avatar-lg" />
+                    <h4>{app.creator?.full_name || app.creator?.username}</h4>
+                    {app.creator?.creator_level && (
+                      <span class="level-badge">Level {app.creator.creator_level}</span>
+                    )}
+                    <div class="creator-stats">
+                      <div class="stat">
+                        <span class="value">{creatorSubmissions.length}</span>
+                        <span class="label">Submissions</span>
+                      </div>
+                      <div class="stat">
+                        <span class="value">{approved}</span>
+                        <span class="label">Approved</span>
+                      </div>
+                      <div class="stat">
+                        <span class="value">{pending}</span>
+                        <span class="label">Pending</span>
+                      </div>
+                    </div>
+                    <a href={`/manager/creators/${app.creator_id}`} class="btn btn-secondary btn-sm">View Profile</a>
+                  </div>
+                );
+              })}
             </div>
-          </div>
-
-          <div class="panel danger-zone">
-            <h2>⚠️ Danger Zone</h2>
-            <p>Once deleted, this campaign cannot be recovered.</p>
-            <form method="POST" onsubmit="return confirm('Are you sure you want to delete this campaign? This cannot be undone.');">
-              <input type="hidden" name="action" value="delete" />
-              <button type="submit" class="btn btn-danger">Delete Campaign</button>
-            </form>
-          </div>
+          ) : (
+            <div class="empty-state">
+              <span class="empty-icon">👥</span>
+              <h3>No Accepted Creators</h3>
+              <p>Accept applications to see creators here.</p>
+            </div>
+          )}
         </div>
       )}
     </div>
   </div>
 
   <style>
-    .campaign-detail-page {
-      min-height: 100vh;
-      background: #f8fafc;
-    }
-
-    .page-header {
-      background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%);
-      padding: 2rem 0;
-    }
-
-    .header-content {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 1.5rem;
-    }
-
-    .header-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 1rem;
-    }
-
-    .back-link {
-      color: rgba(255,255,255,0.7);
-      text-decoration: none;
-      font-size: 0.875rem;
-    }
-
-    .header-actions {
-      display: flex;
-      gap: 0.75rem;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.375rem;
-      padding: 0.625rem 1rem;
-      border-radius: 8px;
-      font-weight: 500;
-      text-decoration: none;
-      font-size: 0.875rem;
-      border: none;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .btn-primary { background: linear-gradient(135deg, #2563eb, #3b82f6); color: white; }
-    .btn-secondary { background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); }
-    .btn-outline { background: transparent; color: white; border: 1px solid rgba(255,255,255,0.3); }
-    .btn-danger { background: #ef4444; color: white; }
-    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
-
-    .campaign-title-row {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      margin-bottom: 0.5rem;
-    }
-
-    .campaign-title-row h1 {
-      margin: 0;
-      font-size: 1.75rem;
-      color: white;
-    }
-
-    .status-badge {
-      font-size: 0.6875rem;
-      padding: 0.25rem 0.75rem;
-      border-radius: 999px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-
-    .status-badge.active { background: #10b981; color: white; }
-    .status-badge.draft { background: #6b7280; color: white; }
+    .campaign-detail { min-height: 100vh; background: #f8fafc; }
+    
+    .page-header { background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%); padding: 2rem 0; }
+    .header-content { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
+    .back-link { color: rgba(255,255,255,0.7); text-decoration: none; font-size: 0.875rem; }
+    .header-top { display: flex; justify-content: space-between; align-items: start; margin-top: 1rem; gap: 1rem; flex-wrap: wrap; }
+    .page-header h1 { font-size: 1.75rem; color: white; margin: 0 0 0.5rem 0; }
+    .header-meta { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+    .header-actions { display: flex; gap: 0.5rem; }
+    
+    .status-badge { padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+    .status-badge.draft { background: rgba(255,255,255,0.2); color: white; }
+    .status-badge.active { background: #22c55e; color: white; }
     .status-badge.paused { background: #f59e0b; color: white; }
-    .status-badge.completed { background: #2563eb; color: white; }
-    .status-badge.pending { background: #fef3c7; color: #d97706; }
-    .status-badge.approved { background: #d1fae5; color: #059669; }
-    .status-badge.rejected { background: #fee2e2; color: #dc2626; }
-
-    .campaign-description {
-      color: rgba(255,255,255,0.7);
-      margin: 0;
-      max-width: 600px;
-    }
-
-    .alert {
-      padding: 1rem;
-      border-radius: 8px;
-      margin: 1rem auto;
-      max-width: 1200px;
-    }
-
+    .status-badge.completed { background: #3b82f6; color: white; }
+    .status-badge.pending { background: #fef3c7; color: #92400e; }
+    .status-badge.accepted { background: #d1fae5; color: #065f46; }
+    .status-badge.rejected { background: #fee2e2; color: #991b1b; }
+    .status-badge.approved { background: #d1fae5; color: #065f46; }
+    .status-badge.monitoring { background: #dbeafe; color: #1e40af; }
+    .status-badge.in_review { background: #fef3c7; color: #92400e; }
+    
+    .category-badge { background: rgba(255,255,255,0.15); color: white; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; }
+    .deadline { color: rgba(255,255,255,0.8); font-size: 0.875rem; }
+    
+    .page-content { max-width: 1200px; margin: 0 auto; padding: 2rem 1.5rem; }
+    
+    .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; }
     .alert.success { background: #d1fae5; color: #065f46; }
     .alert.error { background: #fee2e2; color: #991b1b; }
-    .container { padding: 0 1.5rem; }
-
-    /* Stats Bar */
-    .stats-bar {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 1.5rem;
-      display: flex;
-      gap: 2rem;
-      background: white;
-      border-radius: 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-      margin-top: -2rem;
-      position: relative;
-      z-index: 10;
-      flex-wrap: wrap;
-    }
-
-    .stat-item {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      flex: 1;
-      min-width: 80px;
-    }
-
-    .stat-value {
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: #1a1a2e;
-    }
-
-    .stat-label {
-      font-size: 0.75rem;
-      color: #6b7280;
-    }
-
-    .stat-pending {
-      font-size: 0.6875rem;
-      color: #f59e0b;
-      margin-top: 0.25rem;
-    }
-
+    
+    /* Budget Card */
+    .budget-card { background: white; border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .budget-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+    .budget-header h3 { margin: 0; font-size: 1rem; color: #1a1a2e; }
+    .budget-amount { font-size: 1.25rem; font-weight: 700; color: #1a1a2e; }
+    .progress-bar { height: 12px; background: #e5e7eb; border-radius: 6px; overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, #22c55e, #16a34a); border-radius: 6px; transition: width 0.5s ease; }
+    .budget-details { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; }
+    .budget-stat { text-align: center; }
+    .budget-stat .label { display: block; font-size: 0.75rem; color: #6b7280; margin-bottom: 0.25rem; }
+    .budget-stat .value { display: block; font-size: 1.125rem; font-weight: 600; color: #1a1a2e; }
+    
+    /* Stats Grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+    .stat-card { background: white; padding: 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 1rem; position: relative; }
+    .stat-icon { font-size: 1.5rem; width: 48px; height: 48px; background: #f3f4f6; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+    .stat-info { flex: 1; }
+    .stat-value { display: block; font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
+    .stat-label { font-size: 0.8125rem; color: #6b7280; }
+    .stat-badge { position: absolute; top: 0.75rem; right: 0.75rem; background: #fef3c7; color: #92400e; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.6875rem; font-weight: 600; }
+    
     /* Tabs */
-    .tabs-container {
-      max-width: 1200px;
-      margin: 2rem auto 0;
-      padding: 0 1.5rem;
-    }
-
-    .tabs {
-      display: flex;
-      gap: 0.5rem;
-      border-bottom: 1px solid #e5e7eb;
-      padding-bottom: 0.5rem;
-    }
-
-    .tab {
-      padding: 0.625rem 1rem;
-      color: #6b7280;
-      text-decoration: none;
-      font-size: 0.875rem;
-      border-radius: 8px 8px 0 0;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .tab:hover { color: #2563eb; }
-    .tab.active { color: #2563eb; background: white; font-weight: 500; }
-
-    .tab-badge {
-      background: #ef4444;
-      color: white;
-      font-size: 0.625rem;
-      padding: 0.125rem 0.375rem;
-      border-radius: 999px;
-    }
-
-    .page-content {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 2rem 1.5rem;
-    }
-
-    .panel {
-      background: white;
-      border-radius: 16px;
-      padding: 1.5rem;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-      margin-bottom: 1.5rem;
-    }
-
-    .panel h2 {
-      font-size: 1rem;
-      color: #1a1a2e;
-      margin: 0 0 1rem 0;
-    }
-
-    /* Overview Grid */
-    .overview-grid {
-      display: grid;
-      grid-template-columns: 1fr 340px;
-      gap: 1.5rem;
-    }
-
-    .budget-progress {
-      margin-bottom: 1rem;
-    }
-
-    .budget-header {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.875rem;
-      margin-bottom: 0.5rem;
-    }
-
-    .progress-bar {
-      height: 12px;
-      background: #e5e7eb;
-      border-radius: 6px;
-      overflow: hidden;
-    }
-
-    .progress-bar.large { height: 16px; border-radius: 8px; }
-
-    .progress-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #2563eb, #3b82f6);
-      border-radius: inherit;
-    }
-
-    .budget-info {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.75rem;
-      color: #6b7280;
-      margin-top: 0.5rem;
-    }
-
-    .payout-info {
-      padding-top: 1rem;
-      border-top: 1px solid #e5e7eb;
-      display: flex;
-      justify-content: space-between;
-    }
-
-    .payout-value {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #059669;
-    }
-
-    .activity-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .activity-item {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      padding: 0.75rem;
-      background: #f9fafb;
-      border-radius: 8px;
-    }
-
-    .activity-icon { font-size: 1.25rem; }
-
-    .activity-content {
-      flex: 1;
-      font-size: 0.875rem;
-    }
-
-    .activity-time {
-      display: block;
-      font-size: 0.75rem;
-      color: #9ca3af;
-    }
-
-    .status-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-
-    .status-dot.pending { background: #f59e0b; }
-    .status-dot.approved { background: #10b981; }
-    .status-dot.rejected { background: #ef4444; }
-
-    .quick-actions {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-
-    .action-btn {
-      display: block;
-      padding: 0.75rem 1rem;
-      background: #f3f4f6;
-      border-radius: 8px;
-      text-decoration: none;
-      color: #374151;
-      font-size: 0.875rem;
-      text-align: center;
-      transition: all 0.2s;
-    }
-
-    .action-btn:hover { background: #e5e7eb; }
-    .action-btn.warning { background: #fef3c7; color: #92400e; }
-    .action-btn.success { background: #d1fae5; color: #065f46; }
-
-    .details-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .detail-item {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.875rem;
-    }
-
-    .detail-label { color: #6b7280; }
-    .detail-value { color: #1a1a2e; font-weight: 500; }
-
-    .empty-state {
-      text-align: center;
-      padding: 3rem;
-      background: white;
-      border-radius: 16px;
-    }
-
-    .empty-state span { font-size: 3rem; display: block; margin-bottom: 1rem; }
-    .empty-state h3 { margin: 0 0 0.5rem 0; }
-    .empty-state p { color: #6b7280; margin: 0; }
-    .empty-text { color: #9ca3af; text-align: center; padding: 1rem; }
-
+    .tabs { display: flex; gap: 0.5rem; background: white; padding: 0.5rem; border-radius: 12px; margin-bottom: 1.5rem; }
+    .tab { padding: 0.75rem 1.25rem; border-radius: 8px; text-decoration: none; color: #6b7280; font-weight: 500; display: flex; align-items: center; gap: 0.5rem; }
+    .tab:hover { background: #f3f4f6; }
+    .tab.active { background: #2563eb; color: white; }
+    .tab-badge { background: rgba(255,255,255,0.3); padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; }
+    .tab:not(.active) .tab-badge { background: #fee2e2; color: #991b1b; }
+    
+    /* Panels */
+    .panel { background: white; border-radius: 12px; padding: 1.5rem; }
+    .panel h3 { margin: 0 0 1rem 0; font-size: 1rem; color: #1a1a2e; }
+    
+    .overview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    .detail-row { margin-bottom: 1rem; }
+    .detail-row:last-child { margin-bottom: 0; }
+    .detail-row .label { display: block; font-size: 0.75rem; font-weight: 600; color: #6b7280; text-transform: uppercase; margin-bottom: 0.25rem; }
+    .detail-row p { margin: 0; color: #374151; }
+    .requirements { white-space: pre-line; }
+    
+    .empty-text { color: #6b7280; text-align: center; padding: 2rem; }
+    
+    .pending-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    .pending-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 8px; }
+    .pending-info { flex: 1; }
+    .pending-info .name { display: block; font-weight: 500; color: #1a1a2e; }
+    .pending-info .type { font-size: 0.75rem; color: #6b7280; }
+    
     /* Applications */
-    .applications-list {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .application-card {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      padding: 1rem;
-      background: white;
-      border-radius: 12px;
-      border-left: 4px solid;
-    }
-
-    .application-card.pending { border-color: #f59e0b; }
-    .application-card.approved { border-color: #10b981; }
-    .application-card.rejected { border-color: #ef4444; }
-
-    .app-creator { display: flex; gap: 0.75rem; flex: 1; }
-
-    .creator-avatar {
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #2563eb, #8b5cf6);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-weight: 600;
-      overflow: hidden;
-    }
-
-    .creator-avatar img { width: 100%; height: 100%; object-fit: cover; }
-    .creator-avatar.large { width: 64px; height: 64px; font-size: 1.25rem; }
-
-    .creator-info strong { display: flex; align-items: center; gap: 0.375rem; }
-    .creator-info p { margin: 0.25rem 0 0; font-size: 0.8125rem; color: #6b7280; }
-    .verified { color: #10b981; font-size: 0.875rem; }
-    .level { font-size: 0.6875rem; background: #f3f4f6; padding: 0.125rem 0.375rem; border-radius: 4px; color: #6b7280; }
-
-    .app-status { text-align: right; }
-    .app-date { display: block; font-size: 0.75rem; color: #9ca3af; margin-top: 0.25rem; }
-
-    .app-actions { display: flex; gap: 0.5rem; }
-
-    /* Submissions Grid */
-    .submissions-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 1rem;
-    }
-
-    .submission-card {
-      background: white;
-      border-radius: 12px;
-      overflow: hidden;
-    }
-
-    .sub-preview {
-      aspect-ratio: 1;
-      background: #f3f4f6;
-      position: relative;
-    }
-
-    .sub-preview img { width: 100%; height: 100%; object-fit: cover; }
-    .no-preview { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 2rem; color: #9ca3af; }
-    .sub-preview .status-badge { position: absolute; top: 0.5rem; right: 0.5rem; }
-
-    .sub-info { padding: 0.75rem; }
-    .sub-info h4 { margin: 0 0 0.25rem; font-size: 0.875rem; }
-    .sub-info p { margin: 0; font-size: 0.8125rem; color: #6b7280; }
-    .sub-date { font-size: 0.75rem; color: #9ca3af; }
-
-    /* Creators Grid */
-    .creators-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-      gap: 1rem;
-    }
-
-    .creator-card {
-      background: white;
-      border-radius: 12px;
-      padding: 1.5rem;
-      text-align: center;
-    }
-
-    .creator-card h4 { margin: 0.75rem 0 0.25rem; }
-    .verified-badge { font-size: 0.6875rem; background: #d1fae5; color: #059669; padding: 0.125rem 0.5rem; border-radius: 4px; }
-    .level-badge { display: block; font-size: 0.75rem; color: #6b7280; margin: 0.5rem 0; }
-
-    /* Settings */
-    .status-options {
-      display: flex;
-      gap: 0.75rem;
-      flex-wrap: wrap;
-    }
-
-    .status-btn {
-      padding: 0.75rem 1.25rem;
-      border: 2px solid #e5e7eb;
-      border-radius: 8px;
-      background: white;
-      cursor: pointer;
-      font-size: 0.875rem;
-      transition: all 0.2s;
-    }
-
-    .status-btn:hover:not(:disabled) { border-color: #2563eb; }
-    .status-btn.active { border-color: #2563eb; background: #eff6ff; }
-    .status-btn:disabled { opacity: 0.5; cursor: default; }
-
-    .danger-zone {
-      border: 1px solid #fecaca;
-      background: #fef2f2;
-    }
-
-    .danger-zone p { color: #991b1b; font-size: 0.875rem; margin: 0 0 1rem; }
-
-    @media (max-width: 1024px) {
+    .applications-list { display: flex; flex-direction: column; gap: 1rem; }
+    .application-card { background: white; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #e5e7eb; }
+    .application-card.pending { border-left-color: #f59e0b; }
+    .application-card.accepted { border-left-color: #22c55e; }
+    .application-card.rejected { border-left-color: #ef4444; }
+    
+    .applicant-info { display: flex; gap: 1rem; margin-bottom: 1rem; }
+    .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+    .avatar-lg { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; }
+    .applicant-details h4 { margin: 0 0 0.25rem 0; color: #1a1a2e; }
+    .applicant-meta { display: flex; gap: 1rem; font-size: 0.8125rem; color: #6b7280; flex-wrap: wrap; }
+    .applicant-meta .level { background: #dbeafe; color: #1e40af; padding: 0.125rem 0.5rem; border-radius: 4px; }
+    .social-links { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+    .social-links a { font-size: 0.75rem; color: #6b7280; text-decoration: none; }
+    .social-links a:hover { color: #2563eb; }
+    
+    .pitch, .proposed-rate { background: #f9fafb; padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.875rem; }
+    
+    .application-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 1rem; border-top: 1px solid #e5e7eb; }
+    .date { font-size: 0.8125rem; color: #6b7280; }
+    
+    .action-buttons { display: flex; gap: 0.5rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; align-items: center; flex-wrap: wrap; }
+    .reject-form { display: flex; gap: 0.5rem; align-items: center; }
+    .reason-input { padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.875rem; width: 200px; }
+    
+    .rejection-reason { background: #fee2e2; color: #991b1b; padding: 0.75rem; border-radius: 8px; margin-top: 1rem; font-size: 0.875rem; }
+    
+    /* Submissions */
+    .submissions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
+    .submission-card { background: white; border-radius: 12px; padding: 1.25rem; border-left: 4px solid #e5e7eb; }
+    .submission-card.pending, .submission-card.monitoring, .submission-card.in_review { border-left-color: #f59e0b; }
+    .submission-card.approved { border-left-color: #22c55e; }
+    .submission-card.rejected { border-left-color: #ef4444; }
+    
+    .submission-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }
+    .submission-header h4 { margin: 0; font-size: 0.9375rem; }
+    .submission-header .status-badge { margin-left: auto; }
+    .platform-badge { background: #f3f4f6; color: #374151; padding: 0.125rem 0.5rem; border-radius: 4px; font-size: 0.6875rem; text-transform: uppercase; }
+    
+    .submission-link { display: block; color: #2563eb; font-size: 0.875rem; margin-bottom: 1rem; word-break: break-all; }
+    
+    .screenshot-preview { margin-bottom: 1rem; border-radius: 8px; overflow: hidden; background: #f3f4f6; }
+    .screenshot-preview img { width: 100%; height: 150px; object-fit: cover; }
+    
+    .submission-stats { display: flex; gap: 1rem; font-size: 0.8125rem; color: #6b7280; margin-bottom: 1rem; }
+    
+    .submission-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 0.75rem; border-top: 1px solid #e5e7eb; }
+    .payment { color: #059669; font-weight: 600; }
+    
+    /* Creators */
+    .creators-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+    .creator-card { background: white; border-radius: 12px; padding: 1.5rem; text-align: center; }
+    .creator-card .avatar-lg { margin-bottom: 0.75rem; }
+    .creator-card h4 { margin: 0 0 0.5rem 0; }
+    .level-badge { background: #dbeafe; color: #1e40af; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
+    .creator-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin: 1rem 0; padding: 1rem 0; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; }
+    .creator-stats .stat { text-align: center; }
+    .creator-stats .value { display: block; font-weight: 700; color: #1a1a2e; }
+    .creator-stats .label { font-size: 0.6875rem; color: #6b7280; }
+    
+    /* Empty State */
+    .empty-state { text-align: center; padding: 4rem 2rem; background: white; border-radius: 12px; }
+    .empty-icon { font-size: 3rem; display: block; margin-bottom: 1rem; }
+    .empty-state h3 { margin: 0 0 0.5rem 0; color: #1a1a2e; }
+    .empty-state p { color: #6b7280; margin: 0; }
+    
+    /* Buttons */
+    .btn { padding: 0.625rem 1.25rem; border-radius: 8px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
+    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+    .btn-success { background: #22c55e; color: white; }
+    .btn-warning { background: #f59e0b; color: white; }
+    .btn-danger { background: #ef4444; color: white; }
+    
+    .inline { display: inline; }
+    
+    @media (max-width: 768px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
       .overview-grid { grid-template-columns: 1fr; }
-    }
-
-    @media (max-width: 640px) {
-      .stats-bar { flex-direction: column; gap: 1rem; }
-      .application-card { flex-direction: column; align-items: flex-start; }
-      .app-status { text-align: left; margin: 0.5rem 0; }
+      .budget-details { grid-template-columns: repeat(2, 1fr); }
+      .header-top { flex-direction: column; }
+      .tabs { flex-wrap: wrap; }
     }
   </style>
 </Layout>
