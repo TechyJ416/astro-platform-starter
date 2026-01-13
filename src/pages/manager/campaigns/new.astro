@@ -5,51 +5,29 @@ export const prerender = false;
 import Layout from "../../../layouts/Layout.astro";
 import { createClient } from "@supabase/supabase-js";
 
-// Get session from locals
 const session = Astro.locals.session;
 const profile = Astro.locals.profile;
 
-// Redirect if not logged in
 if (!session) {
   return Astro.redirect('/login?redirect=/manager/campaigns/new');
 }
 
-// Create admin client for database operations
-const supabase = createClient(
-  import.meta.env.PUBLIC_SUPABASE_URL,
-  import.meta.env.SUPABASE_SERVICE_KEY,
-  { auth: { autoRefreshToken: false, persistSession: false } }
-);
-
-// Get user ID - try multiple sources
-let userId = session?.user?.id || profile?.id || null;
-
-// If still no user ID, fetch from database using session
-if (!userId && session?.user?.email) {
-  const { data: userProfile } = await supabase
-    .from('profiles')
-    .select('id, role')
-    .eq('email', session.user.email)
-    .single();
-  
-  if (userProfile) {
-    userId = userProfile.id;
-  }
-}
-
-// If STILL no user ID, try to get from auth
-if (!userId) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (user) {
-    userId = user.id;
-  }
-}
-
-// Check role
-const userRole = profile?.role || null;
-if (userRole !== 'manager' && userRole !== 'admin') {
+if (profile?.role !== 'manager' && profile?.role !== 'admin') {
   return Astro.redirect('/dashboard');
 }
+
+// Get user ID from profile (this is the reliable source)
+const userId = profile?.id;
+
+if (!userId) {
+  return Astro.redirect('/login?error=session_expired');
+}
+
+const supabase = createClient(
+  import.meta.env.PUBLIC_SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
 
 let errorMessage = '';
 
@@ -73,20 +51,18 @@ if (Astro.request.method === 'POST') {
 
   if (!title) {
     errorMessage = 'Campaign title is required.';
-  } else if (!userId) {
-    errorMessage = 'Unable to identify user. Please log out and log back in.';
   } else {
-    // Build campaign data
+    // Build campaign data with all field variations
     const campaignData: Record<string, any> = {
       title,
       slug,
       description,
       requirements,
       budget,
-      payout_per_post: payoutPerPost,
       budget_total: budget,
-      budget_per_creator: payoutPerPost,
+      payout_per_post: payoutPerPost,
       payment_per_post: payoutPerPost,
+      budget_per_creator: payoutPerPost,
       deadline: deadline || null,
       application_deadline: deadline || null,
       category,
@@ -102,7 +78,6 @@ if (Astro.request.method === 'POST') {
       .single();
 
     if (error) {
-      console.error('Campaign creation error:', error);
       errorMessage = 'Create failed: ' + error.message;
     } else {
       return Astro.redirect(`/manager/campaigns/${data.id}?created=true`);
@@ -126,11 +101,6 @@ if (Astro.request.method === 'POST') {
       {errorMessage && (
         <div class="alert error">{errorMessage}</div>
       )}
-
-      <!-- Debug info - remove in production -->
-      <div class="alert" style="background: #e0f2fe; color: #0369a1; margin-bottom: 1rem; font-size: 0.75rem;">
-        Debug: User ID = {userId || 'NOT FOUND'} | Role = {userRole || 'NOT FOUND'}
-      </div>
 
       <form method="POST" class="campaign-form">
         <!-- Basic Info -->
@@ -300,7 +270,6 @@ if (Astro.request.method === 'POST') {
   </div>
 
   <script>
-    // Budget calculator
     const budgetInput = document.getElementById('budget') as HTMLInputElement;
     const payoutInput = document.getElementById('payout_per_post') as HTMLInputElement;
     const creatorsSpan = document.getElementById('estimated-creators');
@@ -320,254 +289,45 @@ if (Astro.request.method === 'POST') {
   </script>
 
   <style>
-    .create-page {
-      min-height: 100vh;
-      background: #f8fafc;
-    }
-
-    .page-header {
-      background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%);
-      padding: 2rem 0;
-    }
-
-    .header-content {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 0 1.5rem;
-    }
-
-    .back-link {
-      color: rgba(255,255,255,0.7);
-      text-decoration: none;
-      font-size: 0.875rem;
-      display: inline-block;
-      margin-bottom: 0.5rem;
-    }
-
-    .back-link:hover {
-      color: white;
-    }
-
-    .page-header h1 {
-      font-size: 1.75rem;
-      color: white;
-      margin: 0 0 0.25rem 0;
-    }
-
-    .page-header p {
-      color: rgba(255,255,255,0.7);
-      margin: 0;
-    }
-
-    .page-content {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 2rem 1.5rem;
-    }
-
-    .alert {
-      padding: 1rem;
-      border-radius: 8px;
-      margin-bottom: 1.5rem;
-    }
-
-    .alert.error {
-      background: #fee2e2;
-      color: #991b1b;
-      border: 1px solid #fecaca;
-    }
-
-    .campaign-form {
-      display: flex;
-      flex-direction: column;
-      gap: 2rem;
-    }
-
-    .form-section {
-      background: white;
-      border-radius: 16px;
-      padding: 1.5rem;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }
-
-    .form-section h2 {
-      font-size: 1.125rem;
-      color: #1a1a2e;
-      margin: 0 0 1.25rem 0;
-      padding-bottom: 0.75rem;
-      border-bottom: 1px solid #e5e7eb;
-    }
-
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-group:last-child {
-      margin-bottom: 0;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 0.875rem;
-      font-weight: 500;
-      color: #374151;
-      margin-bottom: 0.5rem;
-    }
-
-    .form-group input,
-    .form-group textarea,
-    .form-group select {
-      width: 100%;
-      padding: 0.75rem 1rem;
-      border: 1px solid #d1d5db;
-      border-radius: 8px;
-      font-size: 0.9375rem;
-      transition: all 0.2s;
-    }
-
-    .form-group input:focus,
-    .form-group textarea:focus,
-    .form-group select:focus {
-      outline: none;
-      border-color: #2563eb;
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-    }
-
-    .form-group textarea {
-      resize: vertical;
-      font-family: inherit;
-    }
-
-    .hint {
-      display: block;
-      font-size: 0.75rem;
-      color: #9ca3af;
-      margin-top: 0.375rem;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 1rem;
-    }
-
-    .budget-preview {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 1rem;
-      margin-top: 1.5rem;
-      padding: 1rem;
-      background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
-      border-radius: 12px;
-    }
-
-    .budget-stat {
-      text-align: center;
-    }
-
-    .budget-label {
-      display: block;
-      font-size: 0.75rem;
-      color: #6b7280;
-      margin-bottom: 0.25rem;
-    }
-
-    .budget-value {
-      display: block;
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: #1a1a2e;
-    }
-
-    .status-options {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 1rem;
-    }
-
-    .status-option {
-      cursor: pointer;
-    }
-
-    .status-option input {
-      display: none;
-    }
-
-    .status-card {
-      display: flex;
-      gap: 1rem;
-      padding: 1rem;
-      border: 2px solid #e5e7eb;
-      border-radius: 12px;
-      transition: all 0.2s;
-    }
-
-    .status-option input:checked + .status-card {
-      border-color: #2563eb;
-      background: #f0f9ff;
-    }
-
-    .status-icon {
-      font-size: 1.5rem;
-    }
-
-    .status-card strong {
-      display: block;
-      color: #1a1a2e;
-      margin-bottom: 0.125rem;
-    }
-
-    .status-card p {
-      margin: 0;
-      font-size: 0.8125rem;
-      color: #6b7280;
-    }
-
-    .form-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 1rem;
-      padding-top: 1rem;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.75rem 1.5rem;
-      border-radius: 8px;
-      font-weight: 600;
-      text-decoration: none;
-      font-size: 0.9375rem;
-      transition: all 0.2s;
-      border: none;
-      cursor: pointer;
-    }
-
-    .btn-primary {
-      background: linear-gradient(135deg, #2563eb, #3b82f6);
-      color: white;
-    }
-
-    .btn-primary:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-    }
-
-    .btn-secondary {
-      background: #f3f4f6;
-      color: #374151;
-    }
-
-    .btn-secondary:hover {
-      background: #e5e7eb;
-    }
-
-    @media (max-width: 640px) {
-      .form-row,
-      .status-options {
-        grid-template-columns: 1fr;
-      }
-    }
+    .create-page { min-height: 100vh; background: #f8fafc; }
+    .page-header { background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%); padding: 2rem 0; }
+    .header-content { max-width: 800px; margin: 0 auto; padding: 0 1.5rem; }
+    .back-link { color: rgba(255,255,255,0.7); text-decoration: none; font-size: 0.875rem; display: inline-block; margin-bottom: 0.5rem; }
+    .back-link:hover { color: white; }
+    .page-header h1 { font-size: 1.75rem; color: white; margin: 0 0 0.25rem 0; }
+    .page-header p { color: rgba(255,255,255,0.7); margin: 0; }
+    .page-content { max-width: 800px; margin: 0 auto; padding: 2rem 1.5rem; }
+    .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; }
+    .alert.error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .campaign-form { display: flex; flex-direction: column; gap: 2rem; }
+    .form-section { background: white; border-radius: 16px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .form-section h2 { font-size: 1.125rem; color: #1a1a2e; margin: 0 0 1.25rem 0; padding-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; }
+    .form-group { margin-bottom: 1.25rem; }
+    .form-group:last-child { margin-bottom: 0; }
+    .form-group label { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.5rem; }
+    .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 0.75rem 1rem; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.9375rem; transition: all 0.2s; }
+    .form-group input:focus, .form-group textarea:focus, .form-group select:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+    .form-group textarea { resize: vertical; font-family: inherit; }
+    .hint { display: block; font-size: 0.75rem; color: #9ca3af; margin-top: 0.375rem; }
+    .form-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+    .budget-preview { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-top: 1.5rem; padding: 1rem; background: linear-gradient(135deg, #f0f9ff, #e0f2fe); border-radius: 12px; }
+    .budget-stat { text-align: center; }
+    .budget-label { display: block; font-size: 0.75rem; color: #6b7280; margin-bottom: 0.25rem; }
+    .budget-value { display: block; font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
+    .status-options { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+    .status-option { cursor: pointer; }
+    .status-option input { display: none; }
+    .status-card { display: flex; gap: 1rem; padding: 1rem; border: 2px solid #e5e7eb; border-radius: 12px; transition: all 0.2s; }
+    .status-option input:checked + .status-card { border-color: #2563eb; background: #f0f9ff; }
+    .status-icon { font-size: 1.5rem; }
+    .status-card strong { display: block; color: #1a1a2e; margin-bottom: 0.125rem; }
+    .status-card p { margin: 0; font-size: 0.8125rem; color: #6b7280; }
+    .form-actions { display: flex; justify-content: flex-end; gap: 1rem; padding-top: 1rem; }
+    .btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 0.9375rem; transition: all 0.2s; border: none; cursor: pointer; }
+    .btn-primary { background: linear-gradient(135deg, #2563eb, #3b82f6); color: white; }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+    .btn-secondary:hover { background: #e5e7eb; }
+    @media (max-width: 640px) { .form-row, .status-options { grid-template-columns: 1fr; } }
   </style>
 </Layout>
