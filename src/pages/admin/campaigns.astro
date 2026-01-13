@@ -7,13 +7,14 @@ import { createClient } from "@supabase/supabase-js";
 
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
 const session = Astro.locals.session;
+const profile = Astro.locals.profile;
 
 if (!isMasterKeySession && !session) {
   return Astro.redirect('/admin/login');
 }
 
 // Create admin client with service role - REQUIRED for bypassing RLS
-const supabaseUrl = import.meta.env.SUPABASE_URL;
+const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.SUPABASE_URL;
 const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_KEY;
 
 // Check if service key is available
@@ -25,6 +26,9 @@ const supabase = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
+// Get admin's user ID for optional manager assignment
+const adminUserId = profile?.id || session?.user?.id || null;
+
 let successMessage = '';
 let errorMessage = '';
 
@@ -35,6 +39,13 @@ if (!hasServiceKey) {
 
 const action = Astro.url.searchParams.get('action');
 const editId = Astro.url.searchParams.get('edit');
+
+// Get managers for assignment dropdown
+const { data: managers } = await supabase
+  .from('profiles')
+  .select('id, full_name, username, email')
+  .in('role', ['manager', 'admin'])
+  .order('full_name');
 
 // Get campaign being edited
 let editCampaign = null;
@@ -59,10 +70,12 @@ if (Astro.request.method === 'POST') {
       // Generate slug from title if not provided
       let slug = (form.get('slug') as string)?.trim();
       if (!slug) {
-        slug = title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+        slug = title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') + '-' + Date.now().toString(36);
       }
       
       const description = (form.get('description') as string)?.trim() || null;
+      const requirements = (form.get('requirements') as string)?.trim() || null;
+      const category = (form.get('category') as string) || null;
       const status = (form.get('status') as string) || 'draft';
       const budgetStr = form.get('budget') as string;
       const budget = budgetStr ? parseFloat(budgetStr) : null;
@@ -71,17 +84,29 @@ if (Astro.request.method === 'POST') {
       const maxCreatorsStr = form.get('maxCreators') as string;
       const maxCreators = maxCreatorsStr ? parseInt(maxCreatorsStr) : null;
       const deadline = (form.get('deadline') as string) || null;
+      const managerId = (form.get('manager_id') as string) || null;
 
-      const campaignData = {
+      const campaignData: Record<string, any> = {
         title,
         slug,
         description,
+        requirements,
+        category,
         status,
         budget,
+        budget_total: budget,
         payment_per_post: paymentPerPost,
+        payout_per_post: paymentPerPost,
+        budget_per_creator: paymentPerPost,
         max_creators: maxCreators,
         deadline: deadline || null,
+        application_deadline: deadline || null,
       };
+
+      // Only set manager_id if provided (allows null for admin-managed campaigns)
+      if (managerId && managerId !== 'none') {
+        campaignData.manager_id = managerId;
+      }
 
       if (formAction === 'update') {
         const campaignId = form.get('campaignId') as string;
@@ -114,11 +139,12 @@ if (Astro.request.method === 'POST') {
   if (formAction === 'delete') {
     const campaignId = form.get('campaignId') as string;
     
-    // Check for related posts first
-    const { count } = await supabase.from('posts').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId);
+    // Check for related applications/submissions first
+    const { count: appCount } = await supabase.from('applications').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId);
+    const { count: subCount } = await supabase.from('submissions').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId);
     
-    if (count && count > 0) {
-      errorMessage = `Cannot delete: ${count} post(s) are linked to this campaign. Remove or reassign them first.`;
+    if ((appCount && appCount > 0) || (subCount && subCount > 0)) {
+      errorMessage = `Cannot delete: Campaign has ${appCount || 0} application(s) and ${subCount || 0} submission(s). Remove them first.`;
     } else {
       const { error } = await supabase.from('campaigns').delete().eq('id', campaignId);
       if (error) errorMessage = error.message;
@@ -131,8 +157,11 @@ if (Astro.request.method === 'POST') {
 if (Astro.url.searchParams.get('created')) successMessage = 'Campaign created successfully!';
 if (Astro.url.searchParams.get('updated')) successMessage = 'Campaign updated successfully!';
 
-// Load campaigns
-const { data: campaigns, error: loadError } = await supabase.from('campaigns').select('*').order('created_at', { ascending: false });
+// Load campaigns with manager info
+const { data: campaigns, error: loadError } = await supabase
+  .from('campaigns')
+  .select('*, manager:profiles!campaigns_manager_id_fkey(id, full_name, username)')
+  .order('created_at', { ascending: false });
 
 if (loadError && loadError.code === '42P01') {
   errorMessage = 'Campaigns table not found. Please run the database migration.';
@@ -191,7 +220,41 @@ const showForm = action === 'new' || editId;
 
         <div class="form-group">
           <label>Description</label>
-          <textarea name="description" rows="4" placeholder="Describe the campaign requirements...">{editCampaign?.description || ''}</textarea>
+          <textarea name="description" rows="3" placeholder="Describe the campaign goals...">{editCampaign?.description || ''}</textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Requirements</label>
+          <textarea name="requirements" rows="3" placeholder="• Must include product&#10;• Minimum 30 seconds&#10;• Use hashtag #YourBrand">{editCampaign?.requirements || ''}</textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Assign Manager</label>
+            <select name="manager_id">
+              <option value="none">No Manager (Admin-managed)</option>
+              {managers?.map(m => (
+                <option value={m.id} selected={editCampaign?.manager_id === m.id}>
+                  {m.full_name || m.username || m.email}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Category</label>
+            <select name="category">
+              <option value="">Select category...</option>
+              <option value="fashion" selected={editCampaign?.category === 'fashion'}>Fashion & Beauty</option>
+              <option value="tech" selected={editCampaign?.category === 'tech'}>Technology</option>
+              <option value="food" selected={editCampaign?.category === 'food'}>Food & Beverage</option>
+              <option value="lifestyle" selected={editCampaign?.category === 'lifestyle'}>Lifestyle</option>
+              <option value="fitness" selected={editCampaign?.category === 'fitness'}>Health & Fitness</option>
+              <option value="travel" selected={editCampaign?.category === 'travel'}>Travel</option>
+              <option value="gaming" selected={editCampaign?.category === 'gaming'}>Gaming</option>
+              <option value="entertainment" selected={editCampaign?.category === 'entertainment'}>Entertainment</option>
+              <option value="other" selected={editCampaign?.category === 'other'}>Other</option>
+            </select>
+          </div>
         </div>
 
         <div class="form-row">
@@ -213,7 +276,7 @@ const showForm = action === 'new' || editId;
         <div class="form-row">
           <div class="form-group">
             <label>Payment Per Post ($)</label>
-            <input type="number" name="paymentPerPost" placeholder="100" min="0" step="0.01" value={editCampaign?.payment_per_post || ''} />
+            <input type="number" name="paymentPerPost" placeholder="100" min="0" step="0.01" value={editCampaign?.payment_per_post || editCampaign?.payout_per_post || ''} />
           </div>
           <div class="form-group">
             <label>Max Creators</label>
@@ -262,21 +325,23 @@ const showForm = action === 'new' || editId;
               </div>
               {c.description && <p class="card-desc">{c.description.substring(0, 100)}{c.description.length > 100 ? '...' : ''}</p>}
               <div class="card-meta">
+                {c.manager && <span>👤 {c.manager.full_name || c.manager.username}</span>}
+                {!c.manager && <span>👤 Admin-managed</span>}
                 {c.budget != null && <span>💰 ${c.budget}</span>}
-                {c.payment_per_post != null && <span>📄 ${c.payment_per_post}/post</span>}
+                {(c.payment_per_post || c.payout_per_post) != null && <span>📄 ${c.payment_per_post || c.payout_per_post}/post</span>}
                 {c.deadline && <span>📅 {new Date(c.deadline).toLocaleDateString()}</span>}
               </div>
               <div class="card-actions">
-                <a href={`/admin/campaigns/${c.id}/applications`} class="btn btn-sm btn-secondary">📝 Applications</a>
-                <a href={`/admin/campaigns/${c.id}/milestones`} class="btn btn-sm btn-secondary">📋 Milestones</a>
+                <a href={`/admin/campaigns/${c.id}/applications`} class="btn btn-sm btn-secondary">📝 Apps</a>
+                <a href={`/admin/campaigns/${c.id}/submissions`} class="btn btn-sm btn-secondary">📤 Subs</a>
                 <a href={`?edit=${c.id}`} class="btn btn-sm btn-secondary">✏️ Edit</a>
                 {c.status !== 'active' && (
-                  <form method="POST" class="inline"><input type="hidden" name="campaignId" value={c.id} /><button name="action" value="activate" class="btn btn-sm btn-success">Activate</button></form>
+                  <form method="POST" class="inline"><input type="hidden" name="campaignId" value={c.id} /><button name="action" value="activate" class="btn btn-sm btn-success">▶️</button></form>
                 )}
                 {c.status === 'active' && (
-                  <form method="POST" class="inline"><input type="hidden" name="campaignId" value={c.id} /><button name="action" value="pause" class="btn btn-sm btn-warning">Pause</button></form>
+                  <form method="POST" class="inline"><input type="hidden" name="campaignId" value={c.id} /><button name="action" value="pause" class="btn btn-sm btn-warning">⏸️</button></form>
                 )}
-                <form method="POST" class="inline" onsubmit="return confirm('Are you sure you want to delete this campaign? This cannot be undone.');">
+                <form method="POST" class="inline" onsubmit="return confirm('Delete this campaign?');">
                   <input type="hidden" name="campaignId" value={c.id} />
                   <button name="action" value="delete" class="btn btn-sm btn-danger">🗑️</button>
                 </form>
