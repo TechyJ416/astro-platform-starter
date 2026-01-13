@@ -1,0 +1,407 @@
+---
+// src/pages/creator/campaigns/[id]/submit.astro
+export const prerender = false;
+
+import Layout from "../../../../layouts/Layout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!session) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+
+const supabase = createClient(
+  import.meta.env.PUBLIC_SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+// Load campaign
+const { data: campaign } = await supabase
+  .from('campaigns')
+  .select('*')
+  .eq('id', id)
+  .single();
+
+if (!campaign) {
+  return Astro.redirect('/creator/dashboard?error=campaign_not_found');
+}
+
+// Check if user has accepted application
+const { data: application } = await supabase
+  .from('applications')
+  .select('*')
+  .eq('campaign_id', id)
+  .eq('creator_id', profile.id)
+  .eq('status', 'accepted')
+  .single();
+
+if (!application) {
+  return Astro.redirect(`/campaigns/${id}?error=not_accepted`);
+}
+
+// Load existing submissions
+const { data: submissions } = await supabase
+  .from('submissions')
+  .select('*, captures:submission_captures(*)')
+  .eq('campaign_id', id)
+  .eq('creator_id', profile.id)
+  .order('created_at', { ascending: false });
+
+let successMessage = '';
+let errorMessage = '';
+
+// Handle submission
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action') as string;
+
+  if (action === 'submit') {
+    const url = (form.get('url') as string)?.trim();
+    const contentType = form.get('content_type') as string;
+    const caption = (form.get('caption') as string)?.trim();
+
+    if (!url) {
+      errorMessage = 'Please enter the URL of your post.';
+    } else if (!url.startsWith('http')) {
+      errorMessage = 'Please enter a valid URL starting with http:// or https://';
+    } else {
+      // Detect platform from URL
+      let platform = 'other';
+      const urlLower = url.toLowerCase();
+      if (urlLower.includes('instagram.com')) platform = 'instagram';
+      else if (urlLower.includes('tiktok.com')) platform = 'tiktok';
+      else if (urlLower.includes('youtube.com') || urlLower.includes('youtu.be')) platform = 'youtube';
+      else if (urlLower.includes('twitter.com') || urlLower.includes('x.com')) platform = 'twitter';
+      else if (urlLower.includes('facebook.com')) platform = 'facebook';
+
+      // Create submission
+      const { data: submission, error } = await supabase
+        .from('submissions')
+        .insert({
+          campaign_id: id,
+          creator_id: profile.id,
+          application_id: application.id,
+          platform,
+          url,
+          content_type: contentType || campaign.content_type || 'post',
+          caption,
+          status: 'pending'
+        })
+        .select()
+        .single();
+
+      if (error) {
+        errorMessage = error.message;
+      } else {
+        // Create monitoring schedule
+        await supabase.from('monitoring_schedule').insert({
+          submission_id: submission.id,
+          next_check_at: new Date().toISOString(),
+          check_interval_hours: 24,
+          checks_remaining: 30,
+          is_active: true
+        });
+
+        // Queue capture job
+        await supabase.from('job_queue').insert({
+          job_type: 'capture_submission',
+          payload: {
+            submission_id: submission.id,
+            url,
+            platform,
+            capture_type: 'initial'
+          },
+          priority: 10
+        });
+
+        // Notify manager
+        if (campaign.manager_id) {
+          await supabase.from('notifications').insert({
+            user_id: campaign.manager_id,
+            type: 'submission_received',
+            title: 'New Submission 📤',
+            body: `${profile.full_name || profile.username} submitted content for "${campaign.title}"`,
+            data: { campaign_id: id, submission_id: submission.id }
+          });
+        }
+
+        // Award EXP
+        await supabase.from('profiles').update({
+          creator_exp: (profile.creator_exp || 0) + 10
+        }).eq('id', profile.id);
+
+        successMessage = 'Content submitted! It\'s being captured and will be reviewed soon.';
+        
+        // Refresh submissions
+        const { data: refreshed } = await supabase
+          .from('submissions')
+          .select('*, captures:submission_captures(*)')
+          .eq('campaign_id', id)
+          .eq('creator_id', profile.id)
+          .order('created_at', { ascending: false });
+        
+        if (refreshed) submissions.length = 0, submissions.push(...refreshed);
+      }
+    }
+  }
+}
+
+const paymentAmount = campaign.payment_per_post || campaign.payout_per_post || campaign.budget_per_creator || 0;
+const approvedSubmissions = submissions?.filter(s => s.status === 'approved') || [];
+const totalEarned = approvedSubmissions.length * paymentAmount;
+---
+
+<Layout title={`Submit to ${campaign.title}`}>
+  <div class="submit-page">
+    <!-- Header -->
+    <div class="page-header">
+      <div class="header-content">
+        <a href="/creator/dashboard" class="back-link">← Back to Dashboard</a>
+        <h1>Submit Content</h1>
+        <p>{campaign.title}</p>
+      </div>
+    </div>
+
+    <div class="page-content">
+      {successMessage && <div class="alert success">{successMessage}</div>}
+      {errorMessage && <div class="alert error">{errorMessage}</div>}
+
+      <div class="content-grid">
+        <!-- Submit Form -->
+        <div class="main-content">
+          <div class="submit-card">
+            <h2>📤 Submit Your Content</h2>
+            <p class="instructions">Post your content on social media, then paste the link below.</p>
+
+            <form method="POST" class="submit-form">
+              <input type="hidden" name="action" value="submit" />
+              
+              <div class="form-group">
+                <label for="url">Post URL *</label>
+                <input 
+                  type="url" 
+                  id="url" 
+                  name="url" 
+                  required
+                  placeholder="https://instagram.com/p/..."
+                />
+                <span class="hint">Paste the full URL to your Instagram, TikTok, YouTube, or Twitter post</span>
+              </div>
+
+              <div class="form-group">
+                <label for="content_type">Content Type</label>
+                <select id="content_type" name="content_type">
+                  <option value="post">Post / Photo</option>
+                  <option value="video">Video</option>
+                  <option value="reel">Reel / Short</option>
+                  <option value="story">Story</option>
+                  <option value="review">Review</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="caption">Caption / Notes</label>
+                <textarea 
+                  id="caption" 
+                  name="caption" 
+                  rows="3"
+                  placeholder="Optional: Add any notes about your submission..."
+                ></textarea>
+              </div>
+
+              <button type="submit" class="btn btn-primary btn-block">
+                🚀 Submit Content
+              </button>
+            </form>
+          </div>
+
+          <!-- Previous Submissions -->
+          {submissions && submissions.length > 0 && (
+            <div class="submissions-section">
+              <h2>Your Submissions</h2>
+              <div class="submissions-list">
+                {submissions.map(sub => (
+                  <div class={`submission-item ${sub.status}`}>
+                    <div class="submission-main">
+                      <div class="submission-info">
+                        <span class={`status-badge ${sub.status}`}>
+                          {sub.status === 'pending' && '⏳ Pending'}
+                          {sub.status === 'capturing' && '📸 Capturing'}
+                          {sub.status === 'monitoring' && '👁️ Monitoring'}
+                          {sub.status === 'in_review' && '🔍 In Review'}
+                          {sub.status === 'approved' && '✅ Approved'}
+                          {sub.status === 'rejected' && '❌ Rejected'}
+                        </span>
+                        <span class="platform">{sub.platform}</span>
+                        <span class="date">{new Date(sub.created_at).toLocaleDateString()}</span>
+                      </div>
+                      <a href={sub.url} target="_blank" class="submission-url">
+                        {sub.url.substring(0, 50)}...
+                      </a>
+                    </div>
+                    
+                    {sub.captures && sub.captures.length > 0 && sub.captures[0].screenshot_url && (
+                      <div class="submission-screenshot">
+                        <img src={sub.captures[0].screenshot_url} alt="Screenshot" />
+                      </div>
+                    )}
+
+                    {sub.status === 'approved' && (
+                      <div class="submission-payment">
+                        💰 ${sub.payment_amount || paymentAmount} earned
+                      </div>
+                    )}
+
+                    {sub.status === 'rejected' && sub.rejection_reason && (
+                      <div class="rejection-reason">
+                        Reason: {sub.rejection_reason}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="sidebar">
+          <!-- Earnings Card -->
+          <div class="earnings-card">
+            <h3>💰 Your Earnings</h3>
+            <div class="earnings-amount">${totalEarned}</div>
+            <div class="earnings-breakdown">
+              <div class="earning-row">
+                <span>Approved Posts</span>
+                <span>{approvedSubmissions.length}</span>
+              </div>
+              <div class="earning-row">
+                <span>Rate per Post</span>
+                <span>${paymentAmount}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Campaign Requirements -->
+          <div class="requirements-card">
+            <h3>📋 Requirements</h3>
+            {campaign.requirements ? (
+              <div class="requirements-text">{campaign.requirements}</div>
+            ) : (
+              <p class="no-requirements">No specific requirements listed.</p>
+            )}
+          </div>
+
+          <!-- Tips Card -->
+          <div class="tips-card">
+            <h3>💡 Tips for Approval</h3>
+            <ul>
+              <li>Follow all campaign requirements</li>
+              <li>Ensure your post is public</li>
+              <li>Use required hashtags</li>
+              <li>Tag the brand if required</li>
+              <li>Submit within the deadline</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .submit-page { min-height: 100vh; background: #f8fafc; }
+    
+    .page-header { background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%); padding: 2rem 0; }
+    .header-content { max-width: 1000px; margin: 0 auto; padding: 0 1.5rem; }
+    .back-link { color: rgba(255,255,255,0.7); text-decoration: none; font-size: 0.875rem; }
+    .page-header h1 { font-size: 1.75rem; color: white; margin: 0.5rem 0 0.25rem 0; }
+    .page-header p { color: rgba(255,255,255,0.7); margin: 0; }
+    
+    .page-content { max-width: 1000px; margin: 0 auto; padding: 2rem 1.5rem; }
+    
+    .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; }
+    .alert.success { background: #d1fae5; color: #065f46; }
+    .alert.error { background: #fee2e2; color: #991b1b; }
+    
+    .content-grid { display: grid; grid-template-columns: 1fr 320px; gap: 2rem; }
+    
+    .main-content { display: flex; flex-direction: column; gap: 1.5rem; }
+    
+    .submit-card { background: white; border-radius: 12px; padding: 1.5rem; }
+    .submit-card h2 { margin: 0 0 0.5rem 0; font-size: 1.25rem; }
+    .instructions { color: #6b7280; margin: 0 0 1.5rem 0; }
+    
+    .submit-form { display: flex; flex-direction: column; gap: 1.25rem; }
+    .form-group { display: flex; flex-direction: column; gap: 0.375rem; }
+    .form-group label { font-size: 0.875rem; font-weight: 500; color: #374151; }
+    .form-group input, .form-group textarea, .form-group select { 
+      padding: 0.75rem; 
+      border: 1px solid #d1d5db; 
+      border-radius: 8px; 
+      font-size: 0.9375rem; 
+    }
+    .form-group input:focus, .form-group textarea:focus, .form-group select:focus { 
+      outline: none; 
+      border-color: #2563eb; 
+      box-shadow: 0 0 0 3px rgba(37,99,235,0.1); 
+    }
+    .form-group textarea { resize: vertical; font-family: inherit; }
+    .hint { font-size: 0.75rem; color: #9ca3af; }
+    
+    .submissions-section { background: white; border-radius: 12px; padding: 1.5rem; }
+    .submissions-section h2 { margin: 0 0 1rem 0; font-size: 1.125rem; }
+    
+    .submissions-list { display: flex; flex-direction: column; gap: 1rem; }
+    .submission-item { padding: 1rem; border: 1px solid #e5e7eb; border-radius: 8px; border-left: 4px solid #e5e7eb; }
+    .submission-item.pending, .submission-item.capturing, .submission-item.monitoring { border-left-color: #f59e0b; }
+    .submission-item.in_review { border-left-color: #3b82f6; }
+    .submission-item.approved { border-left-color: #22c55e; }
+    .submission-item.rejected { border-left-color: #ef4444; }
+    
+    .submission-main { margin-bottom: 0.75rem; }
+    .submission-info { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; }
+    .status-badge { font-size: 0.75rem; font-weight: 600; }
+    .platform { background: #f3f4f6; padding: 0.125rem 0.5rem; border-radius: 4px; font-size: 0.6875rem; text-transform: uppercase; }
+    .date { font-size: 0.75rem; color: #9ca3af; }
+    .submission-url { font-size: 0.875rem; color: #2563eb; word-break: break-all; }
+    
+    .submission-screenshot { margin-top: 0.75rem; }
+    .submission-screenshot img { width: 100%; max-height: 150px; object-fit: cover; border-radius: 6px; }
+    
+    .submission-payment { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb; color: #059669; font-weight: 600; }
+    .rejection-reason { margin-top: 0.75rem; padding: 0.75rem; background: #fee2e2; color: #991b1b; border-radius: 6px; font-size: 0.875rem; }
+    
+    .sidebar { display: flex; flex-direction: column; gap: 1rem; }
+    
+    .earnings-card, .requirements-card, .tips-card { background: white; border-radius: 12px; padding: 1.25rem; }
+    .earnings-card h3, .requirements-card h3, .tips-card h3 { margin: 0 0 1rem 0; font-size: 1rem; }
+    
+    .earnings-card { background: linear-gradient(135deg, #f0fdf4, #dcfce7); }
+    .earnings-amount { font-size: 2.5rem; font-weight: 700; color: #059669; text-align: center; margin-bottom: 1rem; }
+    .earnings-breakdown { border-top: 1px solid rgba(0,0,0,0.1); padding-top: 1rem; }
+    .earning-row { display: flex; justify-content: space-between; padding: 0.375rem 0; font-size: 0.875rem; }
+    .earning-row span:first-child { color: #6b7280; }
+    .earning-row span:last-child { font-weight: 600; }
+    
+    .requirements-text { white-space: pre-line; font-size: 0.875rem; color: #374151; line-height: 1.6; }
+    .no-requirements { color: #9ca3af; font-size: 0.875rem; margin: 0; }
+    
+    .tips-card ul { margin: 0; padding-left: 1.25rem; }
+    .tips-card li { font-size: 0.875rem; color: #374151; margin-bottom: 0.5rem; }
+    
+    .btn { padding: 0.75rem 1.5rem; border-radius: 8px; font-weight: 600; border: none; cursor: pointer; font-size: 0.9375rem; }
+    .btn-block { display: block; width: 100%; }
+    .btn-primary { background: linear-gradient(135deg, #2563eb, #3b82f6); color: white; }
+    
+    @media (max-width: 768px) {
+      .content-grid { grid-template-columns: 1fr; }
+      .sidebar { order: -1; }
+    }
+  </style>
+</Layout>
