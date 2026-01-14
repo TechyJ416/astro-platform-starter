@@ -1,0 +1,398 @@
+---
+// src/pages/creator/dashboard.astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!session || !profile) {
+  return Astro.redirect('/login?redirect=/creator/dashboard');
+}
+
+const supabase = createClient(
+  import.meta.env.PUBLIC_SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+// Get user's applications
+const { data: applications } = await supabase
+  .from('applications')
+  .select(`
+    *,
+    campaign:campaigns(id, title, status, payment_per_post, payout_per_post, budget_per_creator, deadline)
+  `)
+  .eq('creator_id', profile.id)
+  .order('created_at', { ascending: false });
+
+// Get user's submissions
+const { data: submissions } = await supabase
+  .from('submissions')
+  .select(`
+    *,
+    campaign:campaigns(id, title)
+  `)
+  .eq('creator_id', profile.id)
+  .order('created_at', { ascending: false });
+
+// Get available campaigns (active ones they haven't applied to)
+const appliedCampaignIds = applications?.map(a => a.campaign_id) || [];
+const { data: availableCampaigns } = await supabase
+  .from('campaigns')
+  .select('*')
+  .eq('status', 'active')
+  .not('id', 'in', appliedCampaignIds.length > 0 ? `(${appliedCampaignIds.join(',')})` : '(00000000-0000-0000-0000-000000000000)');
+
+// Get notifications
+const { data: notifications } = await supabase
+  .from('notifications')
+  .select('*')
+  .eq('user_id', profile.id)
+  .is('read_at', null)
+  .order('created_at', { ascending: false })
+  .limit(5);
+
+// Calculate stats
+const acceptedApps = applications?.filter(a => a.status === 'accepted') || [];
+const approvedSubs = submissions?.filter(s => s.status === 'approved') || [];
+const pendingSubs = submissions?.filter(s => ['pending', 'monitoring', 'in_review'].includes(s.status)) || [];
+
+const totalEarned = approvedSubs.reduce((sum, s) => {
+  const amount = s.payment_amount || s.campaign?.payment_per_post || s.campaign?.payout_per_post || 0;
+  return sum + amount;
+}, 0);
+
+// Level info
+const levelTitles = [
+  { level: 1, title: 'Recruit', min: 0, color: '#9CA3AF' },
+  { level: 2, title: 'Private', min: 100, color: '#6B7280' },
+  { level: 3, title: 'Corporal', min: 500, color: '#78716C' },
+  { level: 4, title: 'Sergeant', min: 1500, color: '#A16207' },
+  { level: 5, title: 'Lieutenant', min: 4000, color: '#CA8A04' },
+  { level: 6, title: 'Captain', min: 8000, color: '#EAB308' },
+  { level: 7, title: 'Major', min: 15000, color: '#22C55E' },
+  { level: 8, title: 'Colonel', min: 30000, color: '#3B82F6' },
+  { level: 9, title: 'General', min: 60000, color: '#8B5CF6' },
+  { level: 10, title: '5 Star Digital General', min: 100000, color: '#F59E0B' },
+];
+
+const currentLevel = levelTitles.find(l => l.level === (profile.creator_level || 1)) || levelTitles[0];
+const nextLevel = levelTitles.find(l => l.level === (profile.creator_level || 1) + 1);
+const currentExp = profile.creator_exp || 0;
+const expProgress = nextLevel 
+  ? ((currentExp - currentLevel.min) / (nextLevel.min - currentLevel.min)) * 100 
+  : 100;
+---
+
+<Layout title="Creator Dashboard">
+  <div class="dashboard">
+    <!-- Header -->
+    <div class="dashboard-header">
+      <div class="header-content">
+        <div class="welcome">
+          <h1>Welcome back, {profile.full_name || profile.username}! 👋</h1>
+          <p>Here's what's happening with your creator journey</p>
+        </div>
+        <a href="/campaigns" class="btn btn-primary">🔍 Find Campaigns</a>
+      </div>
+    </div>
+
+    <div class="dashboard-content">
+      <!-- Level Card -->
+      <div class="level-card" style={`border-left-color: ${currentLevel.color}`}>
+        <div class="level-info">
+          <div class="level-badge" style={`background: ${currentLevel.color}`}>
+            Level {profile.creator_level || 1}
+          </div>
+          <div class="level-details">
+            <h3>{currentLevel.title}</h3>
+            <p>{currentExp.toLocaleString()} XP</p>
+          </div>
+        </div>
+        {nextLevel && (
+          <div class="level-progress">
+            <div class="progress-bar">
+              <div class="progress-fill" style={`width: ${expProgress}%; background: ${currentLevel.color}`}></div>
+            </div>
+            <span class="progress-text">{Math.round(expProgress)}% to {nextLevel.title}</span>
+          </div>
+        )}
+        <div class="multiplier">
+          <span>Payment Multiplier</span>
+          <strong>{profile.payment_multiplier || 1}x</strong>
+        </div>
+      </div>
+
+      <!-- Stats Grid -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">💰</div>
+          <div class="stat-info">
+            <span class="stat-value">${totalEarned.toLocaleString()}</span>
+            <span class="stat-label">Total Earned</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">✅</div>
+          <div class="stat-info">
+            <span class="stat-value">{approvedSubs.length}</span>
+            <span class="stat-label">Approved Posts</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📝</div>
+          <div class="stat-info">
+            <span class="stat-value">{acceptedApps.length}</span>
+            <span class="stat-label">Active Campaigns</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">⏳</div>
+          <div class="stat-info">
+            <span class="stat-value">{pendingSubs.length}</span>
+            <span class="stat-label">Pending Review</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Notifications -->
+      {notifications && notifications.length > 0 && (
+        <div class="notifications-card">
+          <h2>🔔 Recent Notifications</h2>
+          <div class="notifications-list">
+            {notifications.map(n => (
+              <div class="notification-item">
+                <div class="notification-content">
+                  <strong>{n.title}</strong>
+                  {n.body && <p>{n.body}</p>}
+                </div>
+                <span class="notification-time">
+                  {new Date(n.created_at).toLocaleDateString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div class="dashboard-grid">
+        <!-- Active Campaigns -->
+        <div class="panel">
+          <div class="panel-header">
+            <h2>📢 Your Campaigns</h2>
+            <a href="/campaigns" class="link">Browse more →</a>
+          </div>
+          
+          {acceptedApps.length > 0 ? (
+            <div class="campaign-list">
+              {acceptedApps.map(app => {
+                const campaign = app.campaign;
+                const payment = campaign?.payment_per_post || campaign?.payout_per_post || campaign?.budget_per_creator || 0;
+                const campaignSubs = submissions?.filter(s => s.campaign_id === campaign?.id) || [];
+                const approvedCount = campaignSubs.filter(s => s.status === 'approved').length;
+                
+                return campaign && (
+                  <div class="campaign-item">
+                    <div class="campaign-info">
+                      <h4>{campaign.title}</h4>
+                      <div class="campaign-meta">
+                        <span class="payment">${payment}/post</span>
+                        <span class="status">{campaignSubs.length} submissions</span>
+                      </div>
+                    </div>
+                    <a href={`/creator/campaigns/${campaign.id}/submit`} class="btn btn-sm btn-primary">
+                      Submit Content
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div class="empty-state">
+              <p>No active campaigns yet. Apply to campaigns to get started!</p>
+              <a href="/campaigns" class="btn btn-primary">Browse Campaigns</a>
+            </div>
+          )}
+        </div>
+
+        <!-- Recent Submissions -->
+        <div class="panel">
+          <div class="panel-header">
+            <h2>📤 Recent Submissions</h2>
+            <a href="/creator/submissions" class="link">View all →</a>
+          </div>
+          
+          {submissions && submissions.length > 0 ? (
+            <div class="submissions-list">
+              {submissions.slice(0, 5).map(sub => (
+                <div class={`submission-item ${sub.status}`}>
+                  <div class="submission-info">
+                    <span class={`status-dot ${sub.status}`}></span>
+                    <div>
+                      <h4>{sub.campaign?.title || 'Campaign'}</h4>
+                      <span class="platform">{sub.platform}</span>
+                    </div>
+                  </div>
+                  <div class="submission-status">
+                    <span class={`badge ${sub.status}`}>
+                      {sub.status === 'pending' && '⏳ Pending'}
+                      {sub.status === 'monitoring' && '👁️ Monitoring'}
+                      {sub.status === 'in_review' && '🔍 In Review'}
+                      {sub.status === 'approved' && '✅ Approved'}
+                      {sub.status === 'rejected' && '❌ Rejected'}
+                    </span>
+                    {sub.status === 'approved' && sub.payment_amount && (
+                      <span class="payment">+${sub.payment_amount}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div class="empty-state">
+              <p>No submissions yet. Submit content to active campaigns!</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <!-- Available Campaigns -->
+      {availableCampaigns && availableCampaigns.length > 0 && (
+        <div class="panel full-width">
+          <div class="panel-header">
+            <h2>🔥 Campaigns You Might Like</h2>
+            <a href="/campaigns" class="link">See all →</a>
+          </div>
+          <div class="available-campaigns">
+            {availableCampaigns.slice(0, 4).map(campaign => {
+              const payment = campaign.payment_per_post || campaign.payout_per_post || campaign.budget_per_creator || 0;
+              return (
+                <a href={`/campaigns/${campaign.id}`} class="available-campaign-card">
+                  <h4>{campaign.title}</h4>
+                  {campaign.description && (
+                    <p>{campaign.description.substring(0, 80)}...</p>
+                  )}
+                  <div class="campaign-footer">
+                    <span class="payment">${payment}/post</span>
+                    {campaign.deadline && (
+                      <span class="deadline">📅 {new Date(campaign.deadline).toLocaleDateString()}</span>
+                    )}
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+
+  <style>
+    .dashboard { min-height: 100vh; background: #f8fafc; }
+    
+    .dashboard-header { background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%); padding: 2rem 0; }
+    .header-content { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
+    .welcome h1 { font-size: 1.5rem; color: white; margin: 0 0 0.25rem 0; }
+    .welcome p { color: rgba(255,255,255,0.7); margin: 0; }
+    
+    .dashboard-content { max-width: 1200px; margin: 0 auto; padding: 2rem 1.5rem; }
+    
+    /* Level Card */
+    .level-card { background: white; border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 2rem; border-left: 4px solid; flex-wrap: wrap; }
+    .level-info { display: flex; align-items: center; gap: 1rem; }
+    .level-badge { color: white; padding: 0.5rem 1rem; border-radius: 8px; font-weight: 700; font-size: 0.875rem; }
+    .level-details h3 { margin: 0; font-size: 1.25rem; color: #1a1a2e; }
+    .level-details p { margin: 0.25rem 0 0 0; color: #6b7280; font-size: 0.875rem; }
+    .level-progress { flex: 1; min-width: 200px; }
+    .progress-bar { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+    .progress-text { font-size: 0.75rem; color: #6b7280; margin-top: 0.25rem; display: block; }
+    .multiplier { text-align: right; }
+    .multiplier span { display: block; font-size: 0.75rem; color: #6b7280; }
+    .multiplier strong { font-size: 1.5rem; color: #059669; }
+    
+    /* Stats */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+    .stat-card { background: white; padding: 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 1rem; }
+    .stat-icon { font-size: 1.5rem; width: 48px; height: 48px; background: #f3f4f6; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+    .stat-value { display: block; font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
+    .stat-label { font-size: 0.8125rem; color: #6b7280; }
+    
+    /* Notifications */
+    .notifications-card { background: linear-gradient(135deg, #fef3c7, #fde68a); border-radius: 12px; padding: 1.25rem; margin-bottom: 1.5rem; }
+    .notifications-card h2 { margin: 0 0 1rem 0; font-size: 1rem; color: #92400e; }
+    .notifications-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    .notification-item { display: flex; justify-content: space-between; align-items: start; background: white; padding: 0.75rem; border-radius: 8px; }
+    .notification-content strong { display: block; color: #1a1a2e; font-size: 0.875rem; }
+    .notification-content p { margin: 0.25rem 0 0 0; font-size: 0.8125rem; color: #6b7280; }
+    .notification-time { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; }
+    
+    /* Dashboard Grid */
+    .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+    
+    .panel { background: white; border-radius: 16px; padding: 1.5rem; }
+    .panel.full-width { grid-column: 1 / -1; }
+    .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+    .panel-header h2 { margin: 0; font-size: 1.125rem; color: #1a1a2e; }
+    .link { color: #2563eb; text-decoration: none; font-size: 0.875rem; font-weight: 500; }
+    
+    /* Campaign List */
+    .campaign-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    .campaign-item { display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: #f9fafb; border-radius: 10px; }
+    .campaign-info h4 { margin: 0 0 0.25rem 0; font-size: 0.9375rem; color: #1a1a2e; }
+    .campaign-meta { display: flex; gap: 0.75rem; font-size: 0.8125rem; }
+    .campaign-meta .payment { color: #059669; font-weight: 600; }
+    .campaign-meta .status { color: #6b7280; }
+    
+    /* Submissions */
+    .submissions-list { display: flex; flex-direction: column; gap: 0.5rem; }
+    .submission-item { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-radius: 8px; background: #f9fafb; }
+    .submission-info { display: flex; align-items: center; gap: 0.75rem; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .status-dot.pending, .status-dot.monitoring, .status-dot.in_review { background: #f59e0b; }
+    .status-dot.approved { background: #22c55e; }
+    .status-dot.rejected { background: #ef4444; }
+    .submission-info h4 { margin: 0; font-size: 0.875rem; color: #1a1a2e; }
+    .submission-info .platform { font-size: 0.75rem; color: #6b7280; text-transform: capitalize; }
+    .submission-status { display: flex; align-items: center; gap: 0.5rem; }
+    .badge { font-size: 0.6875rem; padding: 0.25rem 0.5rem; border-radius: 6px; font-weight: 500; }
+    .badge.pending, .badge.monitoring, .badge.in_review { background: #fef3c7; color: #92400e; }
+    .badge.approved { background: #d1fae5; color: #065f46; }
+    .badge.rejected { background: #fee2e2; color: #991b1b; }
+    .submission-status .payment { color: #059669; font-weight: 600; font-size: 0.875rem; }
+    
+    /* Available Campaigns */
+    .available-campaigns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+    .available-campaign-card { background: #f9fafb; padding: 1.25rem; border-radius: 12px; text-decoration: none; transition: all 0.2s; }
+    .available-campaign-card:hover { background: #f3f4f6; transform: translateY(-2px); }
+    .available-campaign-card h4 { margin: 0 0 0.5rem 0; font-size: 0.9375rem; color: #1a1a2e; }
+    .available-campaign-card p { margin: 0 0 1rem 0; font-size: 0.8125rem; color: #6b7280; line-height: 1.5; }
+    .campaign-footer { display: flex; justify-content: space-between; align-items: center; font-size: 0.8125rem; }
+    .campaign-footer .payment { color: #059669; font-weight: 600; }
+    .campaign-footer .deadline { color: #6b7280; }
+    
+    /* Empty State */
+    .empty-state { text-align: center; padding: 2rem; color: #6b7280; }
+    .empty-state p { margin: 0 0 1rem 0; }
+    
+    /* Buttons */
+    .btn { padding: 0.625rem 1.25rem; border-radius: 8px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; font-size: 0.875rem; display: inline-flex; align-items: center; gap: 0.5rem; }
+    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
+    .btn-primary { background: linear-gradient(135deg, #2563eb, #3b82f6); color: white; }
+    
+    @media (max-width: 1024px) {
+      .available-campaigns { grid-template-columns: repeat(2, 1fr); }
+    }
+    
+    @media (max-width: 768px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .dashboard-grid { grid-template-columns: 1fr; }
+      .level-card { flex-direction: column; align-items: stretch; text-align: center; }
+      .multiplier { text-align: center; margin-top: 1rem; }
+      .available-campaigns { grid-template-columns: 1fr; }
+    }
+  </style>
+</Layout>
