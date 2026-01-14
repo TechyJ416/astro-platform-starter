@@ -3,282 +3,911 @@
 export const prerender = false;
 
 import Layout from "../layouts/Layout.astro";
-import { supabase } from "../lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 
 const session = Astro.locals.session;
 const profile = Astro.locals.profile;
 
-const isPremium = profile?.is_premium;
-
-let general = { siteName: 'Banity' };
-
-try {
-  const { data: rows } = await supabase.from('site_settings').select('key, value');
-  if (rows) {
-    for (const row of rows) {
-      if (row.key === 'general') general = { ...general, ...row.value };
-    }
-  }
-} catch (e) {}
+const isPremium = profile?.subscription_tier === 'premium' || profile?.subscription_tier === 'elite';
+const currentTier = profile?.subscription_tier || 'free';
 ---
 
-<Layout title="Premium">
+<Layout title="Premium Membership">
   <div class="premium-page">
-    <section class="hero-section">
+    <!-- Hero Section -->
+    <section class="hero">
+      <div class="hero-bg">
+        <div class="gradient-orb orb-1"></div>
+        <div class="gradient-orb orb-2"></div>
+        <div class="gradient-orb orb-3"></div>
+      </div>
       <div class="hero-content">
-        <span class="premium-badge">★ Premium</span>
-        <h1>Unlock Your<br/><span class="accent">Full Potential</span></h1>
-        <p>Get exclusive access to premium features and take your creator journey to the next level.</p>
+        <span class="hero-badge">✨ Level Up Your Creator Journey</span>
+        <h1>Unlock Your Full <span class="gradient-text">Potential</span></h1>
+        <p>Get priority access to premium campaigns, higher payouts, and exclusive tools to accelerate your growth.</p>
+        
+        {isPremium ? (
+          <div class="current-plan-badge">
+            <span>🎉 You're on {currentTier.charAt(0).toUpperCase() + currentTier.slice(1)}</span>
+          </div>
+        ) : (
+          <div class="hero-cta">
+            <a href="#pricing" class="btn btn-primary btn-lg">View Plans</a>
+            <span class="hero-note">Cancel anytime • 7-day money back guarantee</span>
+          </div>
+        )}
       </div>
     </section>
 
-    <section class="pricing-section">
+    <!-- Social Proof -->
+    <section class="social-proof">
+      <div class="proof-container">
+        <div class="proof-stat">
+          <span class="proof-number">2,500+</span>
+          <span class="proof-label">Premium Creators</span>
+        </div>
+        <div class="proof-divider"></div>
+        <div class="proof-stat">
+          <span class="proof-number">$1.2M+</span>
+          <span class="proof-label">Paid to Premium Members</span>
+        </div>
+        <div class="proof-divider"></div>
+        <div class="proof-stat">
+          <span class="proof-number">3.2x</span>
+          <span class="proof-label">Average Earnings Increase</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Grid -->
+    <section class="features-section">
+      <div class="section-header">
+        <h2>Everything You Need to <span class="gradient-text">Succeed</span></h2>
+        <p>Premium members get access to powerful tools and exclusive opportunities</p>
+      </div>
+      
+      <div class="features-grid">
+        <div class="feature-card featured">
+          <div class="feature-icon">🚀</div>
+          <h3>Priority Campaign Access</h3>
+          <p>Be the first to see and apply to high-paying campaigns before they go public. Get a 24-hour head start on every opportunity.</p>
+        </div>
+        
+        <div class="feature-card">
+          <div class="feature-icon">💰</div>
+          <h3>Higher Payment Rates</h3>
+          <p>Earn up to 2x more per post with our premium payment multiplier. Your skills deserve premium compensation.</p>
+        </div>
+        
+        <div class="feature-card">
+          <div class="feature-icon">⚡</div>
+          <h3>Instant Payouts</h3>
+          <p>Skip the waiting period. Premium members get their earnings within 24 hours instead of the standard 7 days.</p>
+        </div>
+        
+        <div class="feature-card">
+          <div class="feature-icon">📊</div>
+          <h3>Advanced Analytics</h3>
+          <p>Deep insights into your performance, engagement metrics, and earning potential across all platforms.</p>
+        </div>
+        
+        <div class="feature-card">
+          <div class="feature-icon">🎯</div>
+          <h3>Exclusive Campaigns</h3>
+          <p>Access premium-only campaigns from top brands with higher budgets and better creative freedom.</p>
+        </div>
+        
+        <div class="feature-card">
+          <div class="feature-icon">👑</div>
+          <h3>Premium Badge</h3>
+          <p>Stand out with a verified premium badge on your profile. Brands love working with premium creators.</p>
+        </div>
+        
+        <div class="feature-card">
+          <div class="feature-icon">💬</div>
+          <h3>Priority Support</h3>
+          <p>Get dedicated support with faster response times. Your questions and issues are always a priority.</p>
+        </div>
+        
+        <div class="feature-card">
+          <div class="feature-icon">📈</div>
+          <h3>Growth Tools</h3>
+          <p>Access to exclusive workshops, creator communities, and resources to grow your influence.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section class="pricing-section" id="pricing">
+      <div class="section-header">
+        <h2>Choose Your <span class="gradient-text">Plan</span></h2>
+        <p>Flexible options to match your creator journey</p>
+      </div>
+
+      <div class="pricing-toggle">
+        <button class="toggle-btn active" data-billing="monthly">Monthly</button>
+        <button class="toggle-btn" data-billing="yearly">
+          Yearly
+          <span class="save-badge">Save 20%</span>
+        </button>
+      </div>
+
       <div class="pricing-grid">
-        <div class="pricing-card free">
-          <div class="card-header">
-            <h3>Free</h3>
-            <div class="price">
-              <span class="amount">$0</span>
-              <span class="period">/month</span>
-            </div>
+        <!-- Free Tier -->
+        <div class="pricing-card">
+          <div class="pricing-header">
+            <h3>Starter</h3>
+            <p>Perfect for getting started</p>
           </div>
-          <ul class="features-list">
-            <li><span class="check">✓</span> Apply to campaigns</li>
-            <li><span class="check">✓</span> Basic profile</li>
-            <li><span class="check">✓</span> Community access</li>
-            <li><span class="check">✓</span> Direct payments</li>
-            <li class="disabled"><span class="x">×</span> Priority applications</li>
-            <li class="disabled"><span class="x">×</span> Premium badge</li>
-            <li class="disabled"><span class="x">×</span> Analytics dashboard</li>
-            <li class="disabled"><span class="x">×</span> Early campaign access</li>
+          <div class="pricing-price">
+            <span class="currency">$</span>
+            <span class="amount">0</span>
+            <span class="period">/month</span>
+          </div>
+          <ul class="pricing-features">
+            <li class="included"><span>✓</span> Browse all public campaigns</li>
+            <li class="included"><span>✓</span> Apply to 5 campaigns/month</li>
+            <li class="included"><span>✓</span> Basic analytics</li>
+            <li class="included"><span>✓</span> Standard payouts (7 days)</li>
+            <li class="excluded"><span>✗</span> Priority campaign access</li>
+            <li class="excluded"><span>✗</span> Payment multiplier</li>
+            <li class="excluded"><span>✗</span> Premium badge</li>
           </ul>
-          {session ? (
-            isPremium ? (
-              <span class="btn btn-secondary btn-full">Current Plan</span>
-            ) : (
-              <span class="btn btn-secondary btn-full">Your Plan</span>
-            )
-          ) : (
-            <a href="/signup" class="btn btn-secondary btn-full">Get Started</a>
-          )}
+          <button class="btn btn-secondary btn-block" disabled={currentTier === 'free'}>
+            {currentTier === 'free' ? 'Current Plan' : 'Downgrade'}
+          </button>
         </div>
 
-        <div class="pricing-card premium featured">
-          <div class="featured-badge">Most Popular</div>
-          <div class="card-header">
+        <!-- Premium Tier -->
+        <div class="pricing-card popular">
+          <div class="popular-badge">Most Popular</div>
+          <div class="pricing-header">
             <h3>Premium</h3>
-            <div class="price">
-              <span class="amount">$19</span>
-              <span class="period">/month</span>
+            <p>For serious creators</p>
+          </div>
+          <div class="pricing-price">
+            <span class="currency">$</span>
+            <span class="amount monthly-price">19</span>
+            <span class="amount yearly-price" style="display: none;">15</span>
+            <span class="period">/month</span>
+          </div>
+          <ul class="pricing-features">
+            <li class="included"><span>✓</span> Everything in Starter</li>
+            <li class="included"><span>✓</span> Unlimited applications</li>
+            <li class="included"><span>✓</span> Priority campaign access</li>
+            <li class="included"><span>✓</span> 1.5x payment multiplier</li>
+            <li class="included"><span>✓</span> Faster payouts (3 days)</li>
+            <li class="included"><span>✓</span> Premium badge ✨</li>
+            <li class="included"><span>✓</span> Advanced analytics</li>
+            <li class="excluded"><span>✗</span> Exclusive elite campaigns</li>
+          </ul>
+          <a href={session ? "/checkout?plan=premium" : "/register?redirect=/premium"} class="btn btn-primary btn-block">
+            {currentTier === 'premium' ? 'Current Plan' : 'Get Premium'}
+          </a>
+        </div>
+
+        <!-- Elite Tier -->
+        <div class="pricing-card elite">
+          <div class="elite-badge">👑 Elite</div>
+          <div class="pricing-header">
+            <h3>Elite</h3>
+            <p>For top-tier creators</p>
+          </div>
+          <div class="pricing-price">
+            <span class="currency">$</span>
+            <span class="amount monthly-price">49</span>
+            <span class="amount yearly-price" style="display: none;">39</span>
+            <span class="period">/month</span>
+          </div>
+          <ul class="pricing-features">
+            <li class="included"><span>✓</span> Everything in Premium</li>
+            <li class="included"><span>✓</span> 2x payment multiplier</li>
+            <li class="included"><span>✓</span> Instant payouts (24 hours)</li>
+            <li class="included"><span>✓</span> Exclusive elite campaigns</li>
+            <li class="included"><span>✓</span> Dedicated account manager</li>
+            <li class="included"><span>✓</span> Featured profile placement</li>
+            <li class="included"><span>✓</span> 1-on-1 strategy calls</li>
+            <li class="included"><span>✓</span> Early feature access</li>
+          </ul>
+          <a href={session ? "/checkout?plan=elite" : "/register?redirect=/premium"} class="btn btn-elite btn-block">
+            {currentTier === 'elite' ? 'Current Plan' : 'Go Elite'}
+          </a>
+        </div>
+      </div>
+
+      <div class="pricing-footer">
+        <p>All plans include a 7-day money-back guarantee. No questions asked.</p>
+      </div>
+    </section>
+
+    <!-- Testimonials -->
+    <section class="testimonials-section">
+      <div class="section-header">
+        <h2>Loved by <span class="gradient-text">Creators</span></h2>
+        <p>See what premium members are saying</p>
+      </div>
+
+      <div class="testimonials-grid">
+        <div class="testimonial-card">
+          <div class="testimonial-content">
+            <p>"Since upgrading to Premium, my monthly earnings have tripled. The priority access to campaigns is a game-changer."</p>
+          </div>
+          <div class="testimonial-author">
+            <img src="https://ui-avatars.com/api/?name=Sarah+M&background=6366f1&color=fff" alt="" />
+            <div>
+              <strong>Sarah M.</strong>
+              <span>Lifestyle Creator • $8,500/month</span>
             </div>
           </div>
-          <ul class="features-list">
-            <li><span class="check">✓</span> Everything in Free</li>
-            <li><span class="check highlight">✓</span> Priority applications</li>
-            <li><span class="check highlight">✓</span> Premium badge</li>
-            <li><span class="check highlight">✓</span> Analytics dashboard</li>
-            <li><span class="check highlight">✓</span> Early campaign access</li>
-            <li><span class="check highlight">✓</span> Featured in discover</li>
-            <li><span class="check highlight">✓</span> Direct brand invites</li>
-            <li><span class="check highlight">✓</span> Priority support</li>
-          </ul>
-          {session ? (
-            isPremium ? (
-              <span class="btn btn-primary btn-full">Current Plan ★</span>
-            ) : (
-              <a href="/dashboard/upgrade" class="btn btn-primary btn-full">Upgrade Now →</a>
-            )
-          ) : (
-            <a href="/signup" class="btn btn-primary btn-full">Get Started →</a>
-          )}
-        </div>
-      </div>
-    </section>
-
-    <section class="benefits-section">
-      <div class="section-container">
-        <div class="section-header">
-          <span class="header-label"><span class="label-line"></span> Why Premium <span class="label-line"></span></span>
-          <h2>Supercharge Your Success</h2>
         </div>
 
-        <div class="benefits-grid">
-          <div class="benefit-card">
-            <div class="benefit-icon">🚀</div>
-            <h3>Priority Applications</h3>
-            <p>Your applications appear at the top, getting seen by brands first.</p>
+        <div class="testimonial-card">
+          <div class="testimonial-content">
+            <p>"The 1.5x payment multiplier alone pays for the subscription many times over. Best investment I've made."</p>
           </div>
-
-          <div class="benefit-card">
-            <div class="benefit-icon">⏰</div>
-            <h3>Early Access</h3>
-            <p>See and apply to new campaigns 24 hours before free users.</p>
+          <div class="testimonial-author">
+            <img src="https://ui-avatars.com/api/?name=Marcus+J&background=8b5cf6&color=fff" alt="" />
+            <div>
+              <strong>Marcus J.</strong>
+              <span>Tech Reviewer • $12,000/month</span>
+            </div>
           </div>
+        </div>
 
-          <div class="benefit-card">
-            <div class="benefit-icon">📊</div>
-            <h3>Advanced Analytics</h3>
-            <p>Track your performance with detailed insights and reports.</p>
+        <div class="testimonial-card">
+          <div class="testimonial-content">
+            <p>"Elite membership gave me access to brand deals I never thought possible. The dedicated support is incredible."</p>
           </div>
-
-          <div class="benefit-card">
-            <div class="benefit-icon">✨</div>
-            <h3>Stand Out</h3>
-            <p>Premium badge and featured placement in creator discovery.</p>
+          <div class="testimonial-author">
+            <img src="https://ui-avatars.com/api/?name=Ashley+K&background=ec4899&color=fff" alt="" />
+            <div>
+              <strong>Ashley K.</strong>
+              <span>Beauty Creator • $22,000/month</span>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
+    <!-- FAQ Section -->
     <section class="faq-section">
-      <div class="section-container">
-        <div class="section-header">
-          <h2>Frequently Asked Questions</h2>
+      <div class="section-header">
+        <h2>Frequently Asked <span class="gradient-text">Questions</span></h2>
+      </div>
+
+      <div class="faq-grid">
+        <div class="faq-item">
+          <h4>Can I cancel anytime?</h4>
+          <p>Yes! You can cancel your subscription at any time. You'll continue to have access until the end of your billing period.</p>
         </div>
-
-        <div class="faq-grid">
-          <div class="faq-item">
-            <h3>Can I cancel anytime?</h3>
-            <p>Yes, you can cancel your premium subscription at any time. You'll keep access until the end of your billing period.</p>
-          </div>
-
-          <div class="faq-item">
-            <h3>Is there a free trial?</h3>
-            <p>We offer a 7-day free trial for new premium subscribers. Cancel before it ends and you won't be charged.</p>
-          </div>
-
-          <div class="faq-item">
-            <h3>What payment methods are accepted?</h3>
-            <p>We accept all major credit cards, debit cards, and PayPal.</p>
-          </div>
-
-          <div class="faq-item">
-            <h3>Can I switch plans?</h3>
-            <p>Yes, you can upgrade or downgrade your plan at any time from your dashboard.</p>
-          </div>
+        
+        <div class="faq-item">
+          <h4>How does the payment multiplier work?</h4>
+          <p>Premium members earn 1.5x the standard rate, and Elite members earn 2x. This applies to all approved submissions automatically.</p>
         </div>
+        
+        <div class="faq-item">
+          <h4>What's priority campaign access?</h4>
+          <p>You get a 24-hour head start on new campaigns before they're visible to free members, giving you better chances of acceptance.</p>
+        </div>
+        
+        <div class="faq-item">
+          <h4>Is there a money-back guarantee?</h4>
+          <p>Absolutely! If you're not satisfied within 7 days, we'll refund your payment in full. No questions asked.</p>
+        </div>
+        
+        <div class="faq-item">
+          <h4>Can I upgrade or downgrade?</h4>
+          <p>Yes, you can change your plan at any time. When upgrading, you'll be charged the prorated difference.</p>
+        </div>
+        
+        <div class="faq-item">
+          <h4>Do I need a minimum follower count?</h4>
+          <p>No minimums required! Premium is available to all creators, regardless of audience size.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Final CTA -->
+    <section class="final-cta">
+      <div class="cta-content">
+        <h2>Ready to Elevate Your Creator Career?</h2>
+        <p>Join thousands of creators already earning more with Premium.</p>
+        <a href="#pricing" class="btn btn-primary btn-lg">Get Started Today</a>
+        <span class="cta-note">7-day money-back guarantee • Cancel anytime</span>
       </div>
     </section>
   </div>
 
+  <script>
+    // Pricing toggle
+    const toggleBtns = document.querySelectorAll('.toggle-btn');
+    const monthlyPrices = document.querySelectorAll('.monthly-price');
+    const yearlyPrices = document.querySelectorAll('.yearly-price');
+
+    toggleBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        toggleBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        const billing = btn.dataset.billing;
+        if (billing === 'yearly') {
+          monthlyPrices.forEach(p => p.style.display = 'none');
+          yearlyPrices.forEach(p => p.style.display = 'inline');
+        } else {
+          monthlyPrices.forEach(p => p.style.display = 'inline');
+          yearlyPrices.forEach(p => p.style.display = 'none');
+        }
+      });
+    });
+  </script>
+
   <style>
-    .premium-page { max-width: 1000px; margin: 0 auto; }
-
-    .hero-section { padding: 4rem 2rem 5rem; text-align: center; }
-
-    .hero-content { max-width: 600px; margin: 0 auto; }
-
-    .premium-badge {
-      display: inline-block; padding: 0.5rem 1.25rem;
-      background: linear-gradient(135deg, #fbbf24, #f59e0b);
-      border-radius: 100px; font-size: 0.875rem; font-weight: 700;
-      color: #1a1a2e; margin-bottom: 1.5rem;
+    .premium-page {
+      background: #0a0a0f;
+      color: white;
+      min-height: 100vh;
     }
 
-    .hero-section h1 {
-      font-size: clamp(2.5rem, 6vw, 3.5rem); font-weight: 800;
-      line-height: 1.1; margin-bottom: 1rem; letter-spacing: -0.02em;
+    .gradient-text {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6, #ec4899);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
 
-    .accent {
-      background: linear-gradient(135deg, #fbbf24, #f59e0b);
-      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    }
-
-    .hero-section p { font-size: 1.125rem; color: var(--star-dim); }
-
-    .pricing-section { padding: 0 2rem 5rem; }
-
-    .pricing-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 2rem; max-width: 800px; margin: 0 auto; }
-
-    .pricing-card {
+    /* Hero */
+    .hero {
       position: relative;
-      background: linear-gradient(135deg, rgba(26, 26, 46, 0.7), rgba(8, 8, 18, 0.7));
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 24px; padding: 2rem;
-      display: flex; flex-direction: column;
+      padding: 8rem 2rem 6rem;
+      text-align: center;
+      overflow: hidden;
     }
 
-    .pricing-card.featured {
-      border-color: rgba(251, 191, 36, 0.4);
-      background: linear-gradient(135deg, rgba(251, 191, 36, 0.08), rgba(26, 26, 46, 0.8));
+    .hero-bg {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
     }
 
-    .featured-badge {
-      position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
-      padding: 0.375rem 1rem;
-      background: linear-gradient(135deg, #fbbf24, #f59e0b);
-      border-radius: 100px; font-size: 0.75rem; font-weight: 700; color: #1a1a2e;
+    .gradient-orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(100px);
+      opacity: 0.5;
     }
 
-    .card-header { text-align: center; margin-bottom: 2rem; padding-top: 0.5rem; }
-    .card-header h3 { font-size: 1.25rem; color: var(--star-white); margin-bottom: 0.75rem; }
-
-    .price { display: flex; align-items: baseline; justify-content: center; gap: 0.25rem; }
-    .amount { font-size: 3rem; font-weight: 800; color: var(--star-white); }
-    .period { color: var(--star-dim); font-size: 1rem; }
-
-    .features-list { list-style: none; flex: 1; margin-bottom: 2rem; }
-    .features-list li {
-      display: flex; align-items: center; gap: 0.75rem;
-      padding: 0.625rem 0; color: var(--star-dim);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    }
-    .features-list li:last-child { border-bottom: none; }
-    .features-list li.disabled { opacity: 0.5; }
-
-    .check { color: var(--success); font-weight: 700; }
-    .check.highlight { color: #fbbf24; }
-    .x { color: var(--star-muted); }
-
-    .btn-full { width: 100%; justify-content: center; }
-
-    .section-container { padding: 4rem 2rem; }
-
-    .section-header { text-align: center; margin-bottom: 3rem; }
-
-    .header-label {
-      display: inline-flex; align-items: center; gap: 1rem; margin-bottom: 1rem;
-      font-size: 0.8125rem; color: var(--cosmic-blue); text-transform: uppercase;
-      letter-spacing: 0.15em; font-weight: 600;
+    .orb-1 {
+      width: 600px;
+      height: 600px;
+      background: #6366f1;
+      top: -200px;
+      left: -100px;
     }
 
-    .label-line { width: 30px; height: 1px; background: var(--cosmic-blue); }
+    .orb-2 {
+      width: 400px;
+      height: 400px;
+      background: #8b5cf6;
+      top: 100px;
+      right: -100px;
+    }
 
-    .section-header h2 { font-size: 2rem; font-weight: 800; color: var(--star-white); }
+    .orb-3 {
+      width: 300px;
+      height: 300px;
+      background: #ec4899;
+      bottom: -100px;
+      left: 50%;
+    }
 
-    .benefits-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; }
+    .hero-content {
+      position: relative;
+      max-width: 800px;
+      margin: 0 auto;
+    }
 
-    .benefit-card {
-      background: linear-gradient(135deg, rgba(26, 26, 46, 0.5), rgba(8, 8, 18, 0.5));
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 16px; padding: 1.5rem; text-align: center;
+    .hero-badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      padding: 0.5rem 1.25rem;
+      border-radius: 9999px;
+      font-size: 0.875rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .hero h1 {
+      font-size: 3.5rem;
+      font-weight: 800;
+      line-height: 1.1;
+      margin: 0 0 1.5rem 0;
+    }
+
+    .hero p {
+      font-size: 1.25rem;
+      color: rgba(255,255,255,0.7);
+      max-width: 600px;
+      margin: 0 auto 2rem;
+      line-height: 1.6;
+    }
+
+    .current-plan-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      padding: 1rem 2rem;
+      border-radius: 12px;
+      font-weight: 600;
+    }
+
+    .hero-cta {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .hero-note {
+      font-size: 0.875rem;
+      color: rgba(255,255,255,0.5);
+    }
+
+    /* Social Proof */
+    .social-proof {
+      background: rgba(255,255,255,0.03);
+      padding: 3rem 2rem;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .proof-container {
+      max-width: 900px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 3rem;
+    }
+
+    .proof-stat {
+      text-align: center;
+    }
+
+    .proof-number {
+      display: block;
+      font-size: 2.5rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #6366f1, #ec4899);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .proof-label {
+      font-size: 0.875rem;
+      color: rgba(255,255,255,0.6);
+    }
+
+    .proof-divider {
+      width: 1px;
+      height: 50px;
+      background: rgba(255,255,255,0.2);
+    }
+
+    /* Section Header */
+    .section-header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .section-header h2 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin: 0 0 0.75rem 0;
+    }
+
+    .section-header p {
+      color: rgba(255,255,255,0.6);
+      font-size: 1.125rem;
+    }
+
+    /* Features */
+    .features-section {
+      padding: 6rem 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.5rem;
+    }
+
+    .feature-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 1.5rem;
       transition: all 0.3s;
     }
 
-    .benefit-card:hover { border-color: rgba(251, 191, 36, 0.3); }
-
-    .benefit-icon { font-size: 2rem; margin-bottom: 0.75rem; }
-    .benefit-card h3 { font-size: 1rem; color: var(--star-white); margin-bottom: 0.5rem; }
-    .benefit-card p { font-size: 0.875rem; color: var(--star-dim); line-height: 1.5; }
-
-    .faq-section { border-top: 1px solid rgba(255, 255, 255, 0.04); }
-
-    .faq-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; }
-
-    .faq-item {
-      background: linear-gradient(135deg, rgba(26, 26, 46, 0.4), rgba(8, 8, 18, 0.4));
-      border: 1px solid rgba(255, 255, 255, 0.04);
-      border-radius: 16px; padding: 1.5rem;
+    .feature-card:hover {
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.2);
+      transform: translateY(-4px);
     }
 
-    .faq-item h3 { font-size: 1rem; color: var(--star-white); margin-bottom: 0.5rem; }
-    .faq-item p { font-size: 0.875rem; color: var(--star-dim); line-height: 1.6; }
+    .feature-card.featured {
+      grid-column: span 2;
+      background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(139,92,246,0.1));
+      border-color: rgba(139,92,246,0.3);
+    }
+
+    .feature-icon {
+      font-size: 2rem;
+      margin-bottom: 1rem;
+    }
+
+    .feature-card h3 {
+      font-size: 1.125rem;
+      margin: 0 0 0.5rem 0;
+    }
+
+    .feature-card p {
+      color: rgba(255,255,255,0.6);
+      font-size: 0.9375rem;
+      line-height: 1.6;
+      margin: 0;
+    }
+
+    /* Pricing */
+    .pricing-section {
+      padding: 6rem 2rem;
+      background: rgba(255,255,255,0.02);
+    }
+
+    .pricing-toggle {
+      display: flex;
+      justify-content: center;
+      gap: 0.5rem;
+      margin-bottom: 3rem;
+      background: rgba(255,255,255,0.05);
+      padding: 0.5rem;
+      border-radius: 12px;
+      width: fit-content;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .toggle-btn {
+      padding: 0.75rem 1.5rem;
+      border: none;
+      background: transparent;
+      color: rgba(255,255,255,0.6);
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .toggle-btn.active {
+      background: white;
+      color: #0a0a0f;
+    }
+
+    .save-badge {
+      background: #22c55e;
+      color: white;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.6875rem;
+    }
+
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .pricing-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 24px;
+      padding: 2rem;
+      position: relative;
+    }
+
+    .pricing-card.popular {
+      background: linear-gradient(180deg, rgba(99,102,241,0.1), rgba(99,102,241,0.02));
+      border-color: #6366f1;
+      transform: scale(1.05);
+    }
+
+    .pricing-card.elite {
+      background: linear-gradient(180deg, rgba(236,72,153,0.1), rgba(236,72,153,0.02));
+      border-color: rgba(236,72,153,0.5);
+    }
+
+    .popular-badge, .elite-badge {
+      position: absolute;
+      top: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: white;
+      padding: 0.375rem 1rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .elite-badge {
+      background: linear-gradient(135deg, #ec4899, #f43f5e);
+    }
+
+    .pricing-header h3 {
+      font-size: 1.5rem;
+      margin: 0 0 0.25rem 0;
+    }
+
+    .pricing-header p {
+      color: rgba(255,255,255,0.5);
+      margin: 0;
+      font-size: 0.875rem;
+    }
+
+    .pricing-price {
+      padding: 1.5rem 0;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      margin-bottom: 1.5rem;
+    }
+
+    .pricing-price .currency {
+      font-size: 1.5rem;
+      color: rgba(255,255,255,0.6);
+      vertical-align: top;
+    }
+
+    .pricing-price .amount {
+      font-size: 4rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .pricing-price .period {
+      color: rgba(255,255,255,0.5);
+    }
+
+    .pricing-features {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 2rem 0;
+    }
+
+    .pricing-features li {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.625rem 0;
+      font-size: 0.9375rem;
+    }
+
+    .pricing-features li.included span {
+      color: #22c55e;
+    }
+
+    .pricing-features li.excluded {
+      color: rgba(255,255,255,0.3);
+    }
+
+    .pricing-features li.excluded span {
+      color: rgba(255,255,255,0.2);
+    }
+
+    .pricing-footer {
+      text-align: center;
+      margin-top: 2rem;
+      color: rgba(255,255,255,0.5);
+      font-size: 0.875rem;
+    }
+
+    /* Testimonials */
+    .testimonials-section {
+      padding: 6rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .testimonials-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+
+    .testimonial-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 1.5rem;
+    }
+
+    .testimonial-content p {
+      font-size: 1rem;
+      line-height: 1.6;
+      color: rgba(255,255,255,0.8);
+      margin: 0 0 1.5rem 0;
+    }
+
+    .testimonial-author {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .testimonial-author img {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+    }
+
+    .testimonial-author strong {
+      display: block;
+    }
+
+    .testimonial-author span {
+      font-size: 0.8125rem;
+      color: rgba(255,255,255,0.5);
+    }
+
+    /* FAQ */
+    .faq-section {
+      padding: 6rem 2rem;
+      background: rgba(255,255,255,0.02);
+    }
+
+    .faq-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 2rem;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .faq-item h4 {
+      font-size: 1.125rem;
+      margin: 0 0 0.5rem 0;
+    }
+
+    .faq-item p {
+      color: rgba(255,255,255,0.6);
+      margin: 0;
+      line-height: 1.6;
+    }
+
+    /* Final CTA */
+    .final-cta {
+      padding: 6rem 2rem;
+      text-align: center;
+      background: linear-gradient(180deg, transparent, rgba(99,102,241,0.1));
+    }
+
+    .cta-content h2 {
+      font-size: 2.5rem;
+      margin: 0 0 0.75rem 0;
+    }
+
+    .cta-content p {
+      color: rgba(255,255,255,0.6);
+      font-size: 1.25rem;
+      margin: 0 0 2rem 0;
+    }
+
+    .cta-note {
+      display: block;
+      margin-top: 1rem;
+      font-size: 0.875rem;
+      color: rgba(255,255,255,0.5);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.875rem 2rem;
+      border-radius: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      border: none;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+
+    .btn-lg {
+      padding: 1rem 2.5rem;
+      font-size: 1.125rem;
+    }
+
+    .btn-block {
+      width: 100%;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 40px rgba(99,102,241,0.4);
+    }
+
+    .btn-secondary {
+      background: rgba(255,255,255,0.1);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255,255,255,0.15);
+    }
+
+    .btn-elite {
+      background: linear-gradient(135deg, #ec4899, #f43f5e);
+      color: white;
+    }
+
+    .btn-elite:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 40px rgba(236,72,153,0.4);
+    }
+
+    @media (max-width: 1024px) {
+      .features-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .feature-card.featured {
+        grid-column: span 2;
+      }
+      .pricing-grid {
+        grid-template-columns: 1fr;
+        max-width: 400px;
+      }
+      .pricing-card.popular {
+        transform: none;
+      }
+    }
 
     @media (max-width: 768px) {
-      .pricing-grid { grid-template-columns: 1fr; }
-      .benefits-grid { grid-template-columns: 1fr; }
-      .faq-grid { grid-template-columns: 1fr; }
+      .hero h1 {
+        font-size: 2.5rem;
+      }
+      .proof-container {
+        flex-direction: column;
+        gap: 2rem;
+      }
+      .proof-divider {
+        width: 50px;
+        height: 1px;
+      }
+      .features-grid {
+        grid-template-columns: 1fr;
+      }
+      .feature-card.featured {
+        grid-column: span 1;
+      }
+      .testimonials-grid {
+        grid-template-columns: 1fr;
+      }
+      .faq-grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </Layout>
