@@ -1,0 +1,313 @@
+---
+// src/pages/creator/submissions.astro
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+const session = Astro.locals.session;
+const profile = Astro.locals.profile;
+
+if (!session || !profile) {
+  return Astro.redirect('/login?redirect=/creator/submissions');
+}
+
+const supabase = createClient(
+  import.meta.env.PUBLIC_SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+// Get filter params
+const statusFilter = Astro.url.searchParams.get('status') || 'all';
+const platformFilter = Astro.url.searchParams.get('platform') || '';
+
+// Build query - ONLY this user's submissions
+let query = supabase
+  .from('submissions')
+  .select(`
+    *,
+    campaign:campaigns(id, title, payment_per_post, payout_per_post, budget_per_creator),
+    captures:submission_captures(*)
+  `)
+  .eq('creator_id', profile.id)
+  .order('created_at', { ascending: false });
+
+if (statusFilter !== 'all') {
+  query = query.eq('status', statusFilter);
+}
+
+if (platformFilter) {
+  query = query.eq('platform', platformFilter);
+}
+
+const { data: submissions } = await query;
+
+// Calculate stats
+const stats = {
+  total: submissions?.length || 0,
+  pending: submissions?.filter(s => ['pending', 'monitoring', 'in_review'].includes(s.status)).length || 0,
+  approved: submissions?.filter(s => s.status === 'approved').length || 0,
+  rejected: submissions?.filter(s => s.status === 'rejected').length || 0,
+};
+
+// Calculate total earnings
+const totalEarnings = submissions?.filter(s => s.status === 'approved').reduce((sum, s) => {
+  const amount = s.payment_amount || s.campaign?.payment_per_post || s.campaign?.payout_per_post || 0;
+  return sum + amount;
+}, 0) || 0;
+
+const platforms = ['instagram', 'tiktok', 'youtube', 'twitter', 'facebook'];
+---
+
+<Layout title="My Submissions">
+  <div class="submissions-page">
+    <!-- Header -->
+    <div class="page-header">
+      <div class="header-content">
+        <a href="/creator/dashboard" class="back-link">← Back to Dashboard</a>
+        <h1>My Submissions</h1>
+        <p>Track all your content submissions and earnings</p>
+      </div>
+    </div>
+
+    <div class="page-content">
+      <!-- Stats Cards -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">📤</div>
+          <div class="stat-info">
+            <span class="stat-value">{stats.total}</span>
+            <span class="stat-label">Total Submissions</span>
+          </div>
+        </div>
+        <div class="stat-card pending">
+          <div class="stat-icon">⏳</div>
+          <div class="stat-info">
+            <span class="stat-value">{stats.pending}</span>
+            <span class="stat-label">Pending Review</span>
+          </div>
+        </div>
+        <div class="stat-card approved">
+          <div class="stat-icon">✅</div>
+          <div class="stat-info">
+            <span class="stat-value">{stats.approved}</span>
+            <span class="stat-label">Approved</span>
+          </div>
+        </div>
+        <div class="stat-card earnings">
+          <div class="stat-icon">💰</div>
+          <div class="stat-info">
+            <span class="stat-value">${totalEarnings.toLocaleString()}</span>
+            <span class="stat-label">Total Earned</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="filters-bar">
+        <div class="filter-tabs">
+          <a href="?status=all" class={`tab ${statusFilter === 'all' ? 'active' : ''}`}>All</a>
+          <a href="?status=pending" class={`tab ${statusFilter === 'pending' ? 'active' : ''}`}>
+            Pending
+            {stats.pending > 0 && <span class="badge">{stats.pending}</span>}
+          </a>
+          <a href="?status=approved" class={`tab ${statusFilter === 'approved' ? 'active' : ''}`}>Approved</a>
+          <a href="?status=rejected" class={`tab ${statusFilter === 'rejected' ? 'active' : ''}`}>Rejected</a>
+        </div>
+        
+        <div class="filter-group">
+          <label>Platform:</label>
+          <select id="platform-filter">
+            <option value="">All Platforms</option>
+            {platforms.map(p => (
+              <option value={p} selected={platformFilter === p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <!-- Submissions List -->
+      {submissions && submissions.length > 0 ? (
+        <div class="submissions-list">
+          {submissions.map(sub => {
+            const paymentAmount = sub.payment_amount || sub.campaign?.payment_per_post || sub.campaign?.payout_per_post || 0;
+            const screenshot = sub.captures?.[0]?.screenshot_url;
+            
+            return (
+              <div class={`submission-card ${sub.status}`}>
+                <div class="submission-main">
+                  <div class="submission-header">
+                    <div class="campaign-info">
+                      <h3>{sub.campaign?.title || 'Campaign'}</h3>
+                      <span class="platform-badge">{sub.platform}</span>
+                    </div>
+                    <span class={`status-badge ${sub.status}`}>
+                      {sub.status === 'pending' && '⏳ Pending'}
+                      {sub.status === 'capturing' && '📸 Capturing'}
+                      {sub.status === 'monitoring' && '👁️ Monitoring'}
+                      {sub.status === 'in_review' && '🔍 In Review'}
+                      {sub.status === 'approved' && '✅ Approved'}
+                      {sub.status === 'rejected' && '❌ Rejected'}
+                    </span>
+                  </div>
+
+                  <a href={sub.url} target="_blank" class="submission-url">
+                    🔗 {sub.url}
+                  </a>
+
+                  {sub.caption && (
+                    <p class="submission-caption">{sub.caption}</p>
+                  )}
+
+                  <div class="submission-meta">
+                    <span class="date">📅 {new Date(sub.created_at).toLocaleDateString()}</span>
+                    {sub.content_type && (
+                      <span class="content-type">📝 {sub.content_type}</span>
+                    )}
+                    {sub.status === 'approved' && (
+                      <span class="payment">💰 +${paymentAmount}</span>
+                    )}
+                  </div>
+
+                  {/* Engagement Stats */}
+                  {(sub.latest_views > 0 || sub.latest_likes > 0 || sub.latest_comments > 0) && (
+                    <div class="engagement-stats">
+                      {sub.latest_views > 0 && <span>👁️ {sub.latest_views.toLocaleString()} views</span>}
+                      {sub.latest_likes > 0 && <span>❤️ {sub.latest_likes.toLocaleString()} likes</span>}
+                      {sub.latest_comments > 0 && <span>💬 {sub.latest_comments} comments</span>}
+                    </div>
+                  )}
+
+                  {sub.status === 'rejected' && sub.rejection_reason && (
+                    <div class="rejection-reason">
+                      <strong>Rejection Reason:</strong> {sub.rejection_reason}
+                    </div>
+                  )}
+                </div>
+
+                {screenshot && (
+                  <div class="submission-screenshot">
+                    <img src={screenshot} alt="Post screenshot" />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div class="empty-state">
+          <span class="empty-icon">📤</span>
+          <h2>No Submissions Yet</h2>
+          <p>
+            {statusFilter !== 'all' 
+              ? `No ${statusFilter} submissions found.` 
+              : 'Submit content to your accepted campaigns to start earning!'}
+          </p>
+          <a href="/creator/dashboard" class="btn btn-primary">Go to Dashboard</a>
+        </div>
+      )}
+    </div>
+  </div>
+
+  <script>
+    const platformFilter = document.getElementById('platform-filter') as HTMLSelectElement;
+    if (platformFilter) {
+      platformFilter.addEventListener('change', () => {
+        const url = new URL(window.location.href);
+        if (platformFilter.value) {
+          url.searchParams.set('platform', platformFilter.value);
+        } else {
+          url.searchParams.delete('platform');
+        }
+        window.location.href = url.toString();
+      });
+    }
+  </script>
+
+  <style>
+    .submissions-page { min-height: 100vh; background: #f8fafc; }
+    
+    .page-header { background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%); padding: 2rem 0; }
+    .header-content { max-width: 1000px; margin: 0 auto; padding: 0 1.5rem; }
+    .back-link { color: rgba(255,255,255,0.7); text-decoration: none; font-size: 0.875rem; }
+    .page-header h1 { font-size: 1.75rem; color: white; margin: 0.5rem 0 0.25rem 0; }
+    .page-header p { color: rgba(255,255,255,0.7); margin: 0; }
+    
+    .page-content { max-width: 1000px; margin: 0 auto; padding: 2rem 1.5rem; }
+    
+    /* Stats */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+    .stat-card { background: white; padding: 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 1rem; }
+    .stat-card.pending { background: linear-gradient(135deg, #fef3c7, #fde68a); }
+    .stat-card.approved { background: linear-gradient(135deg, #d1fae5, #a7f3d0); }
+    .stat-card.earnings { background: linear-gradient(135deg, #dbeafe, #bfdbfe); }
+    .stat-icon { font-size: 1.5rem; }
+    .stat-value { display: block; font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
+    .stat-label { font-size: 0.8125rem; color: #6b7280; }
+    
+    /* Filters */
+    .filters-bar { display: flex; justify-content: space-between; align-items: center; background: white; padding: 0.75rem 1rem; border-radius: 12px; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
+    .filter-tabs { display: flex; gap: 0.25rem; }
+    .tab { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 8px; text-decoration: none; color: #6b7280; font-weight: 500; transition: all 0.2s; }
+    .tab:hover { background: #f3f4f6; }
+    .tab.active { background: #2563eb; color: white; }
+    .tab .badge { background: rgba(255,255,255,0.3); padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.6875rem; }
+    .tab:not(.active) .badge { background: #fee2e2; color: #991b1b; }
+    
+    .filter-group { display: flex; align-items: center; gap: 0.5rem; }
+    .filter-group label { font-size: 0.875rem; color: #6b7280; }
+    .filter-group select { padding: 0.5rem 1rem; border: 1px solid #e5e7eb; border-radius: 8px; }
+    
+    /* Submissions List */
+    .submissions-list { display: flex; flex-direction: column; gap: 1rem; }
+    
+    .submission-card { background: white; border-radius: 16px; padding: 1.5rem; display: flex; gap: 1.5rem; border-left: 4px solid #e5e7eb; }
+    .submission-card.pending, .submission-card.capturing, .submission-card.monitoring, .submission-card.in_review { border-left-color: #f59e0b; }
+    .submission-card.approved { border-left-color: #22c55e; }
+    .submission-card.rejected { border-left-color: #ef4444; }
+    
+    .submission-main { flex: 1; }
+    
+    .submission-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75rem; gap: 1rem; }
+    .campaign-info h3 { margin: 0 0 0.25rem 0; font-size: 1.125rem; color: #1a1a2e; }
+    .platform-badge { background: #f3f4f6; color: #374151; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.6875rem; text-transform: uppercase; font-weight: 600; }
+    
+    .status-badge { padding: 0.375rem 0.875rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+    .status-badge.pending, .status-badge.capturing, .status-badge.monitoring, .status-badge.in_review { background: #fef3c7; color: #92400e; }
+    .status-badge.approved { background: #d1fae5; color: #065f46; }
+    .status-badge.rejected { background: #fee2e2; color: #991b1b; }
+    
+    .submission-url { display: block; color: #2563eb; font-size: 0.875rem; margin-bottom: 0.75rem; word-break: break-all; text-decoration: none; }
+    .submission-url:hover { text-decoration: underline; }
+    
+    .submission-caption { color: #6b7280; font-size: 0.875rem; margin: 0 0 0.75rem 0; line-height: 1.5; }
+    
+    .submission-meta { display: flex; gap: 1rem; font-size: 0.8125rem; color: #6b7280; flex-wrap: wrap; }
+    .submission-meta .payment { color: #059669; font-weight: 600; }
+    
+    .engagement-stats { display: flex; gap: 1rem; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb; font-size: 0.8125rem; color: #6b7280; }
+    
+    .rejection-reason { margin-top: 0.75rem; padding: 0.75rem; background: #fee2e2; color: #991b1b; border-radius: 8px; font-size: 0.875rem; }
+    
+    .submission-screenshot { width: 200px; flex-shrink: 0; }
+    .submission-screenshot img { width: 100%; height: 150px; object-fit: cover; border-radius: 10px; }
+    
+    /* Empty State */
+    .empty-state { text-align: center; padding: 4rem 2rem; background: white; border-radius: 16px; }
+    .empty-icon { font-size: 4rem; display: block; margin-bottom: 1rem; }
+    .empty-state h2 { margin: 0 0 0.5rem 0; color: #1a1a2e; }
+    .empty-state p { color: #6b7280; margin: 0 0 1.5rem 0; }
+    
+    .btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; border-radius: 8px; font-weight: 600; text-decoration: none; }
+    .btn-primary { background: linear-gradient(135deg, #2563eb, #3b82f6); color: white; }
+    
+    @media (max-width: 768px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .submission-card { flex-direction: column; }
+      .submission-screenshot { width: 100%; }
+      .submission-screenshot img { height: 200px; }
+      .filters-bar { flex-direction: column; align-items: stretch; }
+    }
+  </style>
+</Layout>
