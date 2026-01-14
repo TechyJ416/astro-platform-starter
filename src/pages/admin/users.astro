@@ -7,8 +7,9 @@ import { createClient } from "@supabase/supabase-js";
 
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
 const session = Astro.locals.session;
+const adminProfile = Astro.locals.profile;
 
-if (!isMasterKeySession && !session) {
+if (!isMasterKeySession && (!session || !['admin', 'moderator'].includes(adminProfile?.role))) {
   return Astro.redirect('/admin/login');
 }
 
@@ -21,17 +22,32 @@ const supabase = createClient(
 let successMessage = '';
 let errorMessage = '';
 
+// ============================================
+// LEVEL & CLASS SYSTEM CONFIGURATION
+// ============================================
 const levelClasses = [
-  { classNum: 1, title: 'Recruit', minLevel: 1, maxLevel: 10, color: '#9CA3AF', minExp: 0 },
-  { classNum: 2, title: 'Private', minLevel: 11, maxLevel: 20, color: '#6B7280', minExp: 1000 },
-  { classNum: 3, title: 'Corporal', minLevel: 21, maxLevel: 30, color: '#78716C', minExp: 5000 },
-  { classNum: 4, title: 'Sergeant', minLevel: 31, maxLevel: 40, color: '#A16207', minExp: 15000 },
-  { classNum: 5, title: 'Lieutenant', minLevel: 41, maxLevel: 50, color: '#CA8A04', minExp: 40000 },
-  { classNum: 6, title: 'Captain', minLevel: 51, maxLevel: 60, color: '#EAB308', minExp: 80000 },
-  { classNum: 7, title: 'Major', minLevel: 61, maxLevel: 70, color: '#22C55E', minExp: 150000 },
-  { classNum: 8, title: 'Colonel', minLevel: 71, maxLevel: 80, color: '#3B82F6', minExp: 300000 },
-  { classNum: 9, title: 'General', minLevel: 81, maxLevel: 90, color: '#8B5CF6', minExp: 600000 },
-  { classNum: 10, title: '5 Star General', minLevel: 91, maxLevel: 100, color: '#F59E0B', minExp: 1000000 },
+  { classNum: 1, title: 'Recruit', minLevel: 1, maxLevel: 10, color: '#9CA3AF', minExp: 0, multiplier: 1.0, icon: '🎖️' },
+  { classNum: 2, title: 'Private', minLevel: 11, maxLevel: 20, color: '#6B7280', minExp: 1000, multiplier: 1.05, icon: '🎖️' },
+  { classNum: 3, title: 'Corporal', minLevel: 21, maxLevel: 30, color: '#78716C', minExp: 5000, multiplier: 1.10, icon: '🎖️' },
+  { classNum: 4, title: 'Sergeant', minLevel: 31, maxLevel: 40, color: '#A16207', minExp: 15000, multiplier: 1.20, icon: '🎖️' },
+  { classNum: 5, title: 'Lieutenant', minLevel: 41, maxLevel: 50, color: '#CA8A04', minExp: 40000, multiplier: 1.30, icon: '⚔️' },
+  { classNum: 6, title: 'Captain', minLevel: 51, maxLevel: 60, color: '#EAB308', minExp: 80000, multiplier: 1.40, icon: '⚔️' },
+  { classNum: 7, title: 'Major', minLevel: 61, maxLevel: 70, color: '#22C55E', minExp: 150000, multiplier: 1.50, icon: '🏅' },
+  { classNum: 8, title: 'Colonel', minLevel: 71, maxLevel: 80, color: '#3B82F6', minExp: 300000, multiplier: 1.70, icon: '🏅' },
+  { classNum: 9, title: 'General', minLevel: 81, maxLevel: 90, color: '#8B5CF6', minExp: 600000, multiplier: 1.90, icon: '👑' },
+  { classNum: 10, title: '5 Star General', minLevel: 91, maxLevel: 100, color: '#F59E0B', minExp: 1000000, multiplier: 2.0, icon: '👑' },
+];
+
+// Available badges for users
+const availableBadges = [
+  { id: 'verified', name: 'Verified', icon: '✓', color: '#3B82F6', description: 'Verified creator' },
+  { id: 'top_creator', name: 'Top Creator', icon: '⭐', color: '#F59E0B', description: 'Top performing creator' },
+  { id: 'early_adopter', name: 'Early Adopter', icon: '🚀', color: '#8B5CF6', description: 'Early platform member' },
+  { id: 'trusted', name: 'Trusted', icon: '🛡️', color: '#22C55E', description: 'Trusted community member' },
+  { id: 'vip', name: 'VIP', icon: '💎', color: '#EC4899', description: 'VIP status member' },
+  { id: 'influencer', name: 'Influencer', icon: '📢', color: '#F97316', description: 'High reach influencer' },
+  { id: 'partner', name: 'Partner', icon: '🤝', color: '#14B8A6', description: 'Official partner' },
+  { id: 'beta_tester', name: 'Beta Tester', icon: '🧪', color: '#6366F1', description: 'Beta testing participant' },
 ];
 
 function getLevelClass(level: number) {
@@ -52,105 +68,401 @@ function getTotalExpForLevel(level: number): number {
   return total;
 }
 
+// ============================================
+// ADMIN ACTION LOGGING
+// ============================================
+async function logAdminAction(action: string, targetUserId: string, details: any) {
+  try {
+    await supabase.from('admin_logs').insert({
+      admin_id: session?.user?.id || 'master_key',
+      action,
+      target_user_id: targetUserId,
+      details,
+      ip_address: Astro.request.headers.get('x-forwarded-for') || 'unknown',
+      created_at: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.error('Failed to log admin action:', e);
+  }
+}
+
+// ============================================
+// POST HANDLERS - All Admin Actions
+// ============================================
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const action = form.get('action') as string;
   const userId = form.get('user_id') as string;
 
-  if (action === 'update_role') {
-    const newRole = form.get('role') as string;
-    const { error } = await supabase
-      .from('profiles')
-      .update({ role: newRole })
-      .eq('id', userId);
-    
-    if (error) errorMessage = error.message;
-    else successMessage = 'User role updated!';
-  }
+  try {
+    // CREATE NEW USER
+    if (action === 'create_user') {
+      const email = form.get('email') as string;
+      const password = form.get('password') as string;
+      const fullName = form.get('full_name') as string;
+      const username = form.get('username') as string;
+      const role = form.get('role') as string || 'creator';
 
-  if (action === 'update_level') {
-    const newLevel = parseInt(form.get('level') as string) || 1;
-    const levelClass = getLevelClass(newLevel);
-    const requiredExp = getTotalExpForLevel(newLevel);
-    
-    const paymentMultipliers = [1, 1.05, 1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 1.9, 2.0];
-    const multiplier = paymentMultipliers[levelClass.classNum - 1] || 1;
-    
-    const { error } = await supabase
-      .from('profiles')
-      .update({ 
+      if (!email || !password) {
+        errorMessage = 'Email and password are required';
+      } else {
+        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+          email,
+          password,
+          email_confirm: true,
+        });
+
+        if (authError) {
+          errorMessage = authError.message;
+        } else if (authData.user) {
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .insert({
+              id: authData.user.id,
+              email,
+              full_name: fullName || null,
+              username: username || null,
+              role,
+              creator_level: 1,
+              creator_exp: 0,
+              payment_multiplier: 1.0,
+              badges: [],
+              is_banned: false,
+              email_verified: true,
+              created_at: new Date().toISOString(),
+            });
+          
+          if (profileError) {
+            errorMessage = profileError.message;
+          } else {
+            await logAdminAction('create_user', authData.user.id, { email, role });
+            successMessage = `User ${email} created successfully!`;
+          }
+        }
+      }
+    }
+
+    // UPDATE USER PROFILE (username, email, full_name)
+    if (action === 'update_profile') {
+      const newEmail = form.get('email') as string;
+      const newUsername = form.get('username') as string;
+      const newFullName = form.get('full_name') as string;
+      const newBio = form.get('bio') as string;
+
+      const updates: any = {};
+      if (newEmail) updates.email = newEmail;
+      if (newUsername !== undefined) updates.username = newUsername || null;
+      if (newFullName !== undefined) updates.full_name = newFullName || null;
+      if (newBio !== undefined) updates.bio = newBio || null;
+
+      // Update auth email if changed
+      if (newEmail) {
+        const { error: authError } = await supabase.auth.admin.updateUserById(userId, { email: newEmail });
+        if (authError) {
+          errorMessage = authError.message;
+        }
+      }
+
+      if (!errorMessage) {
+        const { error } = await supabase.from('profiles').update(updates).eq('id', userId);
+        if (error) errorMessage = error.message;
+        else {
+          await logAdminAction('update_profile', userId, updates);
+          successMessage = 'User profile updated!';
+        }
+      }
+    }
+
+    // UPDATE ROLE
+    if (action === 'update_role') {
+      const newRole = form.get('role') as string;
+      const { data: oldUser } = await supabase.from('profiles').select('role').eq('id', userId).single();
+      
+      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
+      if (error) errorMessage = error.message;
+      else {
+        await logAdminAction('update_role', userId, { from: oldUser?.role, to: newRole });
+        successMessage = `Role updated to ${newRole}!`;
+      }
+    }
+
+    // UPDATE LEVEL
+    if (action === 'update_level') {
+      const newLevel = Math.min(100, Math.max(1, parseInt(form.get('level') as string) || 1));
+      const levelClass = getLevelClass(newLevel);
+      const requiredExp = getTotalExpForLevel(newLevel);
+      
+      const { error } = await supabase.from('profiles').update({ 
         creator_level: newLevel,
         creator_exp: requiredExp,
-        payment_multiplier: multiplier
-      })
-      .eq('id', userId);
-    
-    if (error) errorMessage = error.message;
-    else successMessage = `User set to Level ${newLevel} (${levelClass.title})!`;
-  }
-
-  if (action === 'update_subscription') {
-    const tier = form.get('subscription_tier') as string;
-    const { error } = await supabase
-      .from('profiles')
-      .update({ subscription_tier: tier || null })
-      .eq('id', userId);
-    
-    if (error) errorMessage = error.message;
-    else successMessage = 'Subscription updated!';
-  }
-
-  if (action === 'add_exp') {
-    const expAmount = parseInt(form.get('exp_amount') as string) || 0;
-    const { data: user } = await supabase.from('profiles').select('creator_exp, creator_level').eq('id', userId).single();
-    
-    if (user && expAmount > 0) {
-      let newExp = (user.creator_exp || 0) + expAmount;
-      let newLevel = user.creator_level || 1;
-      
-      while (newExp >= getTotalExpForLevel(newLevel + 1) && newLevel < 100) {
-        newLevel++;
-      }
-      
-      const levelClass = getLevelClass(newLevel);
-      const paymentMultipliers = [1, 1.05, 1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 1.9, 2.0];
-      const multiplier = paymentMultipliers[levelClass.classNum - 1] || 1;
-
-      const { error } = await supabase
-        .from('profiles')
-        .update({ 
-          creator_exp: newExp,
-          creator_level: newLevel,
-          payment_multiplier: multiplier
-        })
-        .eq('id', userId);
+        payment_multiplier: levelClass.multiplier
+      }).eq('id', userId);
       
       if (error) errorMessage = error.message;
-      else successMessage = `Added ${expAmount} XP! New level: ${newLevel}`;
+      else {
+        await logAdminAction('update_level', userId, { level: newLevel, class: levelClass.title });
+        successMessage = `User set to Level ${newLevel} (${levelClass.title})!`;
+      }
     }
-  }
 
-  if (action === 'ban' || action === 'unban') {
-    const { error } = await supabase
-      .from('profiles')
-      .update({ is_banned: action === 'ban' })
-      .eq('id', userId);
-    
-    if (error) errorMessage = error.message;
-    else successMessage = `User ${action === 'ban' ? 'banned' : 'unbanned'}.`;
+    // ADD EXPERIENCE
+    if (action === 'add_exp') {
+      const expAmount = parseInt(form.get('exp_amount') as string) || 0;
+      const { data: user } = await supabase.from('profiles').select('creator_exp, creator_level').eq('id', userId).single();
+      
+      if (user && expAmount !== 0) {
+        let newExp = Math.max(0, (user.creator_exp || 0) + expAmount);
+        let newLevel = user.creator_level || 1;
+        
+        // Level up check
+        while (newExp >= getTotalExpForLevel(newLevel + 1) && newLevel < 100) {
+          newLevel++;
+        }
+        // Level down check (if removing exp)
+        while (newLevel > 1 && newExp < getTotalExpForLevel(newLevel)) {
+          newLevel--;
+        }
+        
+        const levelClass = getLevelClass(newLevel);
+        const { error } = await supabase.from('profiles').update({ 
+          creator_exp: newExp,
+          creator_level: newLevel,
+          payment_multiplier: levelClass.multiplier
+        }).eq('id', userId);
+        
+        if (error) errorMessage = error.message;
+        else {
+          await logAdminAction('modify_exp', userId, { amount: expAmount, newExp, newLevel });
+          successMessage = expAmount > 0 ? `Added ${expAmount} XP! Level: ${newLevel}` : `Removed ${Math.abs(expAmount)} XP! Level: ${newLevel}`;
+        }
+      }
+    }
+
+    // UPDATE SUBSCRIPTION
+    if (action === 'update_subscription') {
+      const tier = form.get('subscription_tier') as string;
+      const { error } = await supabase.from('profiles').update({ subscription_tier: tier || null }).eq('id', userId);
+      if (error) errorMessage = error.message;
+      else {
+        await logAdminAction('update_subscription', userId, { tier: tier || 'free' });
+        successMessage = 'Subscription updated!';
+      }
+    }
+
+    // MANAGE BADGES
+    if (action === 'add_badge') {
+      const badgeId = form.get('badge_id') as string;
+      const { data: user } = await supabase.from('profiles').select('badges').eq('id', userId).single();
+      const currentBadges = user?.badges || [];
+      
+      if (!currentBadges.includes(badgeId)) {
+        const { error } = await supabase.from('profiles').update({ badges: [...currentBadges, badgeId] }).eq('id', userId);
+        if (error) errorMessage = error.message;
+        else {
+          await logAdminAction('add_badge', userId, { badge: badgeId });
+          successMessage = 'Badge added!';
+        }
+      } else {
+        errorMessage = 'User already has this badge';
+      }
+    }
+
+    if (action === 'remove_badge') {
+      const badgeId = form.get('badge_id') as string;
+      const { data: user } = await supabase.from('profiles').select('badges').eq('id', userId).single();
+      const currentBadges = user?.badges || [];
+      
+      const { error } = await supabase.from('profiles').update({ 
+        badges: currentBadges.filter((b: string) => b !== badgeId) 
+      }).eq('id', userId);
+      
+      if (error) errorMessage = error.message;
+      else {
+        await logAdminAction('remove_badge', userId, { badge: badgeId });
+        successMessage = 'Badge removed!';
+      }
+    }
+
+    // REMOVE AVATAR
+    if (action === 'remove_avatar') {
+      const { error } = await supabase.from('profiles').update({ avatar_url: null }).eq('id', userId);
+      if (error) errorMessage = error.message;
+      else {
+        await logAdminAction('remove_avatar', userId, {});
+        successMessage = 'Avatar removed!';
+      }
+    }
+
+    // RESET PASSWORD (Master Key Only)
+    if (action === 'reset_password') {
+      if (!isMasterKeySession && adminProfile?.role !== 'admin') {
+        errorMessage = 'Only master key admins can reset passwords';
+      } else {
+        const newPassword = form.get('new_password') as string;
+        if (!newPassword || newPassword.length < 6) {
+          errorMessage = 'Password must be at least 6 characters';
+        } else {
+          const { error } = await supabase.auth.admin.updateUserById(userId, { password: newPassword });
+          if (error) errorMessage = error.message;
+          else {
+            await logAdminAction('reset_password', userId, { method: 'manual' });
+            successMessage = 'Password reset successfully!';
+          }
+        }
+      }
+    }
+
+    // SEND PASSWORD RESET EMAIL
+    if (action === 'send_password_reset') {
+      const { data: user } = await supabase.from('profiles').select('email').eq('id', userId).single();
+      if (user?.email) {
+        const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
+          redirectTo: `${Astro.url.origin}/reset-password`,
+        });
+        if (error) errorMessage = error.message;
+        else {
+          await logAdminAction('send_password_reset', userId, { email: user.email });
+          successMessage = 'Password reset email sent!';
+        }
+      }
+    }
+
+    // BAN/UNBAN USER
+    if (action === 'ban' || action === 'unban') {
+      const reason = form.get('ban_reason') as string;
+      const { error } = await supabase.from('profiles').update({ 
+        is_banned: action === 'ban',
+        ban_reason: action === 'ban' ? reason : null,
+        banned_at: action === 'ban' ? new Date().toISOString() : null,
+        banned_by: action === 'ban' ? (session?.user?.id || 'master_key') : null,
+      }).eq('id', userId);
+      
+      if (error) errorMessage = error.message;
+      else {
+        await logAdminAction(action, userId, { reason });
+        successMessage = `User ${action === 'ban' ? 'banned' : 'unbanned'}.`;
+      }
+    }
+
+    // VERIFY/UNVERIFY EMAIL
+    if (action === 'verify_email') {
+      const { error } = await supabase.auth.admin.updateUserById(userId, { email_confirm: true });
+      if (!error) {
+        await supabase.from('profiles').update({ email_verified: true }).eq('id', userId);
+        await logAdminAction('verify_email', userId, {});
+        successMessage = 'Email verified!';
+      } else {
+        errorMessage = error.message;
+      }
+    }
+
+    // ADD ADMIN NOTE
+    if (action === 'add_note') {
+      const note = form.get('note') as string;
+      const { data: user } = await supabase.from('profiles').select('admin_notes').eq('id', userId).single();
+      const notes = user?.admin_notes || [];
+      
+      notes.push({
+        id: crypto.randomUUID(),
+        content: note,
+        author_id: session?.user?.id || 'master_key',
+        author_name: adminProfile?.full_name || 'Admin',
+        created_at: new Date().toISOString(),
+      });
+      
+      const { error } = await supabase.from('profiles').update({ admin_notes: notes }).eq('id', userId);
+      if (error) errorMessage = error.message;
+      else successMessage = 'Note added!';
+    }
+
+    // DELETE NOTE
+    if (action === 'delete_note') {
+      const noteId = form.get('note_id') as string;
+      const { data: user } = await supabase.from('profiles').select('admin_notes').eq('id', userId).single();
+      const notes = (user?.admin_notes || []).filter((n: any) => n.id !== noteId);
+      
+      const { error } = await supabase.from('profiles').update({ admin_notes: notes }).eq('id', userId);
+      if (error) errorMessage = error.message;
+      else successMessage = 'Note deleted!';
+    }
+
+    // ADJUST BALANCE
+    if (action === 'adjust_balance') {
+      const amount = parseFloat(form.get('amount') as string) || 0;
+      const reason = form.get('reason') as string;
+      const { data: user } = await supabase.from('profiles').select('balance, total_earned').eq('id', userId).single();
+      
+      const newBalance = Math.max(0, (user?.balance || 0) + amount);
+      const newTotalEarned = amount > 0 ? (user?.total_earned || 0) + amount : user?.total_earned || 0;
+      
+      const { error } = await supabase.from('profiles').update({ 
+        balance: newBalance,
+        total_earned: newTotalEarned,
+      }).eq('id', userId);
+      
+      if (error) errorMessage = error.message;
+      else {
+        await logAdminAction('adjust_balance', userId, { amount, reason, newBalance });
+        successMessage = `Balance adjusted by $${amount.toFixed(2)}`;
+      }
+    }
+
+    // IMPERSONATE USER (View as User)
+    if (action === 'impersonate') {
+      Astro.cookies.set('impersonate_user_id', userId, { path: '/', maxAge: 3600 });
+      await logAdminAction('impersonate', userId, {});
+      return Astro.redirect('/creator/dashboard');
+    }
+
+    // DELETE USER (Master Key Only)
+    if (action === 'delete_user') {
+      if (!isMasterKeySession) {
+        errorMessage = 'Only master key sessions can delete users';
+      } else {
+        const confirmEmail = form.get('confirm_email') as string;
+        const { data: user } = await supabase.from('profiles').select('email').eq('id', userId).single();
+        
+        if (user?.email !== confirmEmail) {
+          errorMessage = 'Email confirmation does not match';
+        } else {
+          await supabase.from('profiles').delete().eq('id', userId);
+          const { error } = await supabase.auth.admin.deleteUser(userId);
+          if (error) errorMessage = error.message;
+          else {
+            await logAdminAction('delete_user', userId, { email: user.email });
+            successMessage = 'User permanently deleted!';
+            return Astro.redirect('/admin/users');
+          }
+        }
+      }
+    }
+
+  } catch (e: any) {
+    errorMessage = e.message || 'An error occurred';
   }
 }
 
+// ============================================
+// QUERY PARAMETERS & DATA FETCHING
+// ============================================
 const filter = Astro.url.searchParams.get('filter') || 'all';
 const search = Astro.url.searchParams.get('search') || '';
+const sortBy = Astro.url.searchParams.get('sort') || 'newest';
+const page = parseInt(Astro.url.searchParams.get('page') || '1');
 const viewUserId = Astro.url.searchParams.get('view');
+const showCreate = Astro.url.searchParams.get('create') === 'true';
+const tab = Astro.url.searchParams.get('tab') || 'profile';
 
-let query = supabase
-  .from('profiles')
-  .select('*')
-  .order('created_at', { ascending: false });
+const limit = 25;
+const offset = (page - 1) * limit;
 
-if (filter !== 'all') {
+let query = supabase.from('profiles').select('*', { count: 'exact' });
+
+if (filter === 'banned') {
+  query = query.eq('is_banned', true);
+} else if (filter === 'premium') {
+  query = query.in('subscription_tier', ['premium', 'elite']);
+} else if (filter !== 'all') {
   query = query.eq('role', filter);
 }
 
@@ -158,452 +470,602 @@ if (search) {
   query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%,username.ilike.%${search}%`);
 }
 
-const { data: users } = await query.limit(100);
+if (sortBy === 'newest') query = query.order('created_at', { ascending: false });
+else if (sortBy === 'oldest') query = query.order('created_at', { ascending: true });
+else if (sortBy === 'level') query = query.order('creator_level', { ascending: false });
+else if (sortBy === 'earned') query = query.order('total_earned', { ascending: false });
+else if (sortBy === 'name') query = query.order('full_name', { ascending: true });
 
+const { data: users, count: totalCount } = await query.range(offset, offset + limit - 1);
+const totalPages = Math.ceil((totalCount || 0) / limit);
+
+const { data: allUsers } = await supabase.from('profiles').select('role, subscription_tier, is_banned');
 const stats = {
-  total: users?.length || 0,
-  creators: users?.filter(u => u.role === 'creator').length || 0,
-  managers: users?.filter(u => u.role === 'manager').length || 0,
-  admins: users?.filter(u => u.role === 'admin').length || 0,
-  premium: users?.filter(u => u.subscription_tier === 'premium' || u.subscription_tier === 'elite').length || 0,
+  total: allUsers?.length || 0,
+  creators: allUsers?.filter(u => u.role === 'creator').length || 0,
+  managers: allUsers?.filter(u => u.role === 'manager').length || 0,
+  admins: allUsers?.filter(u => u.role === 'admin').length || 0,
+  premium: allUsers?.filter(u => u.subscription_tier === 'premium' || u.subscription_tier === 'elite').length || 0,
+  banned: allUsers?.filter(u => u.is_banned).length || 0,
 };
 
 let viewUser: any = null;
+let userActivity: any[] = [];
+
 if (viewUserId) {
   const { data } = await supabase.from('profiles').select('*').eq('id', viewUserId).single();
   viewUser = data;
+  
+  const { data: logs } = await supabase
+    .from('admin_logs')
+    .select('*')
+    .eq('target_user_id', viewUserId)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  userActivity = logs || [];
 }
 
 const userLevel = viewUser?.creator_level || 1;
 const userLevelClass = getLevelClass(userLevel);
+const userExp = viewUser?.creator_exp || 0;
+const currentLevelExp = getTotalExpForLevel(userLevel);
+const nextLevelExp = getTotalExpForLevel(userLevel + 1);
+const expProgress = nextLevelExp > currentLevelExp ? ((userExp - currentLevelExp) / (nextLevelExp - currentLevelExp)) * 100 : 100;
+const userBadges = viewUser?.badges || [];
+
+function formatDate(dateString: string) {
+  return new Date(dateString).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatDateTime(dateString: string) {
+  return new Date(dateString).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
 ---
 
-<AdminLayout title="Users">
-  {successMessage && <div class="alert success">{successMessage}</div>}
-  {errorMessage && <div class="alert error">{errorMessage}</div>}
+<AdminLayout title="User Management">
+  {successMessage && <div class="alert success"><span>✓</span>{successMessage}<button onclick="this.parentElement.remove()">×</button></div>}
+  {errorMessage && <div class="alert error"><span>!</span>{errorMessage}<button onclick="this.parentElement.remove()">×</button></div>}
 
-  {viewUser && (
-    <div class="user-view">
-      <div class="view-header">
-        <a href="/admin/users" class="back-link">← Back to Users</a>
-      </div>
-
-      <div class="user-profile-card">
-        <div class="profile-header">
-          <img src={viewUser.avatar_url || `https://ui-avatars.com/api/?name=${viewUser.full_name || 'User'}&size=120`} alt="" class="avatar-xl" />
-          <div class="profile-info">
-            <h2>{viewUser.full_name || viewUser.username || 'Unknown User'}</h2>
-            <p class="email">{viewUser.email}</p>
-            <div class="badges">
-              <span class={`role-badge ${viewUser.role}`}>{viewUser.role}</span>
-              {viewUser.subscription_tier && <span class="premium-badge">{viewUser.subscription_tier}</span>}
-              {viewUser.is_banned && <span class="banned-badge">BANNED</span>}
-            </div>
+  {showCreate && (
+    <div class="modal-overlay show">
+      <div class="modal">
+        <div class="modal-header"><h2>➕ Create New User</h2><a href="/admin/users" class="close">×</a></div>
+        <form method="POST" class="modal-body">
+          <input type="hidden" name="action" value="create_user" />
+          <div class="form-row">
+            <div class="form-group"><label>Email *</label><input type="email" name="email" required /></div>
+            <div class="form-group"><label>Password *</label><input type="password" name="password" required minlength="6" /></div>
           </div>
-        </div>
-
-        <div class="level-section">
-          <h3>🎖️ Level & Rank</h3>
-          
-          <div class="current-level">
-            <div class="level-display" style={`border-color: ${userLevelClass.color}`}>
-              <span class="level-number">{userLevel}</span>
-              <span class="level-title" style={`color: ${userLevelClass.color}`}>{userLevelClass.title}</span>
-            </div>
-            <div class="level-stats">
-              <div class="stat">
-                <span class="label">Total EXP</span>
-                <span class="value">{(viewUser.creator_exp || 0).toLocaleString()}</span>
-              </div>
-              <div class="stat">
-                <span class="label">Payment Multiplier</span>
-                <span class="value">{viewUser.payment_multiplier || 1}x</span>
-              </div>
-            </div>
+          <div class="form-row">
+            <div class="form-group"><label>Full Name</label><input type="text" name="full_name" /></div>
+            <div class="form-group"><label>Username</label><input type="text" name="username" /></div>
           </div>
-
-          <div class="level-classes">
-            <h4>Set Level Class</h4>
-            <div class="class-grid">
-              <form method="POST" class="class-form">
-                <input type="hidden" name="action" value="update_level" />
-                <input type="hidden" name="user_id" value={viewUser.id} />
-                <input type="hidden" name="level" value="1" />
-                <button type="submit" class={`class-btn ${userLevel >= 1 && userLevel <= 10 ? 'active' : ''}`} style={userLevel >= 1 && userLevel <= 10 ? 'background: #9CA3AF; border-color: #9CA3AF; color: white;' : 'border-color: #9CA3AF; color: #9CA3AF;'}>
-                  <span class="class-icon">🎖️</span>
-                  <span class="class-title">Recruit</span>
-                  <span class="class-range">Lvl 1-10</span>
-                </button>
-              </form>
-              <form method="POST" class="class-form">
-                <input type="hidden" name="action" value="update_level" />
-                <input type="hidden" name="user_id" value={viewUser.id} />
-                <input type="hidden" name="level" value="11" />
-                <button type="submit" class={`class-btn ${userLevel >= 11 && userLevel <= 20 ? 'active' : ''}`} style={userLevel >= 11 && userLevel <= 20 ? 'background: #6B7280; border-color: #6B7280; color: white;' : 'border-color: #6B7280; color: #6B7280;'}>
-                  <span class="class-icon">🎖️</span>
-                  <span class="class-title">Private</span>
-                  <span class="class-range">Lvl 11-20</span>
-                </button>
-              </form>
-              <form method="POST" class="class-form">
-                <input type="hidden" name="action" value="update_level" />
-                <input type="hidden" name="user_id" value={viewUser.id} />
-                <input type="hidden" name="level" value="21" />
-                <button type="submit" class={`class-btn ${userLevel >= 21 && userLevel <= 30 ? 'active' : ''}`} style={userLevel >= 21 && userLevel <= 30 ? 'background: #78716C; border-color: #78716C; color: white;' : 'border-color: #78716C; color: #78716C;'}>
-                  <span class="class-icon">🎖️</span>
-                  <span class="class-title">Corporal</span>
-                  <span class="class-range">Lvl 21-30</span>
-                </button>
-              </form>
-              <form method="POST" class="class-form">
-                <input type="hidden" name="action" value="update_level" />
-                <input type="hidden" name="user_id" value={viewUser.id} />
-                <input type="hidden" name="level" value="31" />
-                <button type="submit" class={`class-btn ${userLevel >= 31 && userLevel <= 40 ? 'active' : ''}`} style={userLevel >= 31 && userLevel <= 40 ? 'background: #A16207; border-color: #A16207; color: white;' : 'border-color: #A16207; color: #A16207;'}>
-                  <span class="class-icon">🎖️</span>
-                  <span class="class-title">Sergeant</span>
-                  <span class="class-range">Lvl 31-40</span>
-                </button>
-              </form>
-              <form method="POST" class="class-form">
-                <input type="hidden" name="action" value="update_level" />
-                <input type="hidden" name="user_id" value={viewUser.id} />
-                <input type="hidden" name="level" value="41" />
-                <button type="submit" class={`class-btn ${userLevel >= 41 && userLevel <= 50 ? 'active' : ''}`} style={userLevel >= 41 && userLevel <= 50 ? 'background: #CA8A04; border-color: #CA8A04; color: white;' : 'border-color: #CA8A04; color: #CA8A04;'}>
-                  <span class="class-icon">🎖️</span>
-                  <span class="class-title">Lieutenant</span>
-                  <span class="class-range">Lvl 41-50</span>
-                </button>
-              </form>
-              <form method="POST" class="class-form">
-                <input type="hidden" name="action" value="update_level" />
-                <input type="hidden" name="user_id" value={viewUser.id} />
-                <input type="hidden" name="level" value="51" />
-                <button type="submit" class={`class-btn ${userLevel >= 51 && userLevel <= 60 ? 'active' : ''}`} style={userLevel >= 51 && userLevel <= 60 ? 'background: #EAB308; border-color: #EAB308; color: white;' : 'border-color: #EAB308; color: #EAB308;'}>
-                  <span class="class-icon">🎖️</span>
-                  <span class="class-title">Captain</span>
-                  <span class="class-range">Lvl 51-60</span>
-                </button>
-              </form>
-              <form method="POST" class="class-form">
-                <input type="hidden" name="action" value="update_level" />
-                <input type="hidden" name="user_id" value={viewUser.id} />
-                <input type="hidden" name="level" value="61" />
-                <button type="submit" class={`class-btn ${userLevel >= 61 && userLevel <= 70 ? 'active' : ''}`} style={userLevel >= 61 && userLevel <= 70 ? 'background: #22C55E; border-color: #22C55E; color: white;' : 'border-color: #22C55E; color: #22C55E;'}>
-                  <span class="class-icon">🎖️</span>
-                  <span class="class-title">Major</span>
-                  <span class="class-range">Lvl 61-70</span>
-                </button>
-              </form>
-              <form method="POST" class="class-form">
-                <input type="hidden" name="action" value="update_level" />
-                <input type="hidden" name="user_id" value={viewUser.id} />
-                <input type="hidden" name="level" value="71" />
-                <button type="submit" class={`class-btn ${userLevel >= 71 && userLevel <= 80 ? 'active' : ''}`} style={userLevel >= 71 && userLevel <= 80 ? 'background: #3B82F6; border-color: #3B82F6; color: white;' : 'border-color: #3B82F6; color: #3B82F6;'}>
-                  <span class="class-icon">🎖️</span>
-                  <span class="class-title">Colonel</span>
-                  <span class="class-range">Lvl 71-80</span>
-                </button>
-              </form>
-              <form method="POST" class="class-form">
-                <input type="hidden" name="action" value="update_level" />
-                <input type="hidden" name="user_id" value={viewUser.id} />
-                <input type="hidden" name="level" value="81" />
-                <button type="submit" class={`class-btn ${userLevel >= 81 && userLevel <= 90 ? 'active' : ''}`} style={userLevel >= 81 && userLevel <= 90 ? 'background: #8B5CF6; border-color: #8B5CF6; color: white;' : 'border-color: #8B5CF6; color: #8B5CF6;'}>
-                  <span class="class-icon">🎖️</span>
-                  <span class="class-title">General</span>
-                  <span class="class-range">Lvl 81-90</span>
-                </button>
-              </form>
-              <form method="POST" class="class-form">
-                <input type="hidden" name="action" value="update_level" />
-                <input type="hidden" name="user_id" value={viewUser.id} />
-                <input type="hidden" name="level" value="91" />
-                <button type="submit" class={`class-btn ${userLevel >= 91 && userLevel <= 100 ? 'active' : ''}`} style={userLevel >= 91 && userLevel <= 100 ? 'background: #F59E0B; border-color: #F59E0B; color: white;' : 'border-color: #F59E0B; color: #F59E0B;'}>
-                  <span class="class-icon">🎖️</span>
-                  <span class="class-title">5 Star General</span>
-                  <span class="class-range">Lvl 91-100</span>
-                </button>
-              </form>
-            </div>
+          <div class="form-group">
+            <label>Role</label>
+            <select name="role">
+              <option value="creator">Creator</option>
+              <option value="manager">Manager</option>
+              <option value="moderator">Moderator</option>
+              <option value="admin">Admin</option>
+            </select>
           </div>
-
-          <div class="manual-level">
-            <h4>Set Exact Level (1-100)</h4>
-            <form method="POST" class="level-form">
-              <input type="hidden" name="action" value="update_level" />
-              <input type="hidden" name="user_id" value={viewUser.id} />
-              <input type="number" name="level" min="1" max="100" value={userLevel} class="level-input" />
-              <button type="submit" class="btn btn-primary btn-sm">Set Level</button>
-            </form>
-          </div>
-
-          <div class="add-exp">
-            <h4>Add Experience Points</h4>
-            <form method="POST" class="exp-form">
-              <input type="hidden" name="action" value="add_exp" />
-              <input type="hidden" name="user_id" value={viewUser.id} />
-              <div class="exp-buttons">
-                <button type="submit" name="exp_amount" value="100" class="exp-btn">+100 XP</button>
-                <button type="submit" name="exp_amount" value="500" class="exp-btn">+500 XP</button>
-                <button type="submit" name="exp_amount" value="1000" class="exp-btn">+1,000 XP</button>
-                <button type="submit" name="exp_amount" value="5000" class="exp-btn">+5,000 XP</button>
-              </div>
-            </form>
-          </div>
-        </div>
-
-        <div class="settings-grid">
-          <div class="setting-card">
-            <h4>Role</h4>
-            <form method="POST">
-              <input type="hidden" name="action" value="update_role" />
-              <input type="hidden" name="user_id" value={viewUser.id} />
-              <select name="role" onchange="this.form.submit()">
-                <option value="creator" selected={viewUser.role === 'creator'}>Creator</option>
-                <option value="manager" selected={viewUser.role === 'manager'}>Manager</option>
-                <option value="moderator" selected={viewUser.role === 'moderator'}>Moderator</option>
-                <option value="admin" selected={viewUser.role === 'admin'}>Admin</option>
-              </select>
-            </form>
-          </div>
-
-          <div class="setting-card">
-            <h4>Subscription</h4>
-            <form method="POST">
-              <input type="hidden" name="action" value="update_subscription" />
-              <input type="hidden" name="user_id" value={viewUser.id} />
-              <select name="subscription_tier" onchange="this.form.submit()">
-                <option value="" selected={!viewUser.subscription_tier}>Free</option>
-                <option value="premium" selected={viewUser.subscription_tier === 'premium'}>Premium</option>
-                <option value="elite" selected={viewUser.subscription_tier === 'elite'}>Elite</option>
-              </select>
-            </form>
-          </div>
-        </div>
-
-        <div class="user-stats-row">
-          <div class="stat-item">
-            <span class="label">Joined</span>
-            <span class="value">{new Date(viewUser.created_at).toLocaleDateString()}</span>
-          </div>
-          <div class="stat-item">
-            <span class="label">Total Earned</span>
-            <span class="value">${(viewUser.total_earned || 0).toLocaleString()}</span>
-          </div>
-          <div class="stat-item">
-            <span class="label">Campaigns Completed</span>
-            <span class="value">{viewUser.campaigns_completed || 0}</span>
-          </div>
-        </div>
-
-        <div class="user-actions">
-          {viewUser.is_banned ? (
-            <form method="POST" class="inline">
-              <input type="hidden" name="action" value="unban" />
-              <input type="hidden" name="user_id" value={viewUser.id} />
-              <button type="submit" class="btn btn-success">Unban User</button>
-            </form>
-          ) : (
-            <form method="POST" class="inline">
-              <input type="hidden" name="action" value="ban" />
-              <input type="hidden" name="user_id" value={viewUser.id} />
-              <button type="submit" class="btn btn-danger">Ban User</button>
-            </form>
-          )}
-        </div>
+          <div class="form-actions"><a href="/admin/users" class="btn secondary">Cancel</a><button type="submit" class="btn primary">Create</button></div>
+        </form>
       </div>
     </div>
   )}
 
-  {!viewUser && (
-    <div class="users-list-view">
+  {viewUser ? (
+    <div class="user-detail">
+      <div class="header-bar">
+        <a href={`/admin/users?filter=${filter}&search=${search}&page=${page}`}>← Back</a>
+        <div class="actions">
+          <form method="POST" class="inline"><input type="hidden" name="action" value="impersonate" /><input type="hidden" name="user_id" value={viewUser.id} /><button class="btn secondary sm">👁️ View as User</button></form>
+          {viewUser.is_banned ? (
+            <form method="POST" class="inline"><input type="hidden" name="action" value="unban" /><input type="hidden" name="user_id" value={viewUser.id} /><button class="btn success sm">Unban</button></form>
+          ) : (
+            <button class="btn danger sm" onclick="document.getElementById('banModal').style.display='flex'">Ban</button>
+          )}
+        </div>
+      </div>
+
+      <div class="profile-card">
+        <div class="profile-header">
+          <div class="avatar-wrap">
+            <img src={viewUser.avatar_url || `https://ui-avatars.com/api/?name=${viewUser.full_name || 'U'}&size=100&background=2563eb&color=fff`} class="avatar" />
+            {viewUser.avatar_url && (
+              <form method="POST"><input type="hidden" name="action" value="remove_avatar" /><input type="hidden" name="user_id" value={viewUser.id} /><button class="avatar-rm">×</button></form>
+            )}
+            <span class="level-pip" style={`background:${userLevelClass.color}`}>{userLevelClass.icon} {userLevel}</span>
+          </div>
+          <div class="info">
+            <h1>{viewUser.full_name || viewUser.username || 'Unknown'} {viewUser.email_verified && <span class="verified">✓</span>}</h1>
+            <p class="email">{viewUser.email}</p>
+            <div class="badges">
+              <span class={`role ${viewUser.role}`}>{viewUser.role}</span>
+              {viewUser.subscription_tier && <span class={`sub ${viewUser.subscription_tier}`}>{viewUser.subscription_tier}</span>}
+              {viewUser.is_banned && <span class="banned">BANNED</span>}
+              {userBadges.map((b: string) => { const bd = availableBadges.find(x => x.id === b); return bd ? <span class="badge" style={`background:${bd.color}20;color:${bd.color}`}>{bd.icon} {bd.name}</span> : null; })}
+            </div>
+          </div>
+          <div class="quick-stats">
+            <div><strong>${(viewUser.total_earned||0).toLocaleString()}</strong><span>Earned</span></div>
+            <div><strong>{viewUser.campaigns_completed||0}</strong><span>Campaigns</span></div>
+            <div><strong>${(viewUser.balance||0).toFixed(2)}</strong><span>Balance</span></div>
+            <div><strong>{viewUser.payment_multiplier||1}x</strong><span>Multiplier</span></div>
+          </div>
+        </div>
+        <div class="tabs">
+          <a href={`?view=${viewUser.id}&tab=profile`} class={tab==='profile'?'active':''}>👤 Profile</a>
+          <a href={`?view=${viewUser.id}&tab=level`} class={tab==='level'?'active':''}>🎖️ Level</a>
+          <a href={`?view=${viewUser.id}&tab=badges`} class={tab==='badges'?'active':''}>🏅 Badges</a>
+          <a href={`?view=${viewUser.id}&tab=security`} class={tab==='security'?'active':''}>🔐 Security</a>
+          <a href={`?view=${viewUser.id}&tab=notes`} class={tab==='notes'?'active':''}>📝 Notes</a>
+        </div>
+      </div>
+
+      {tab === 'profile' && (
+        <div class="tab-content grid-2">
+          <div class="card">
+            <h3>Edit Profile</h3>
+            <form method="POST">
+              <input type="hidden" name="action" value="update_profile" />
+              <input type="hidden" name="user_id" value={viewUser.id} />
+              <div class="form-group"><label>Email</label><input type="email" name="email" value={viewUser.email} /></div>
+              <div class="form-group"><label>Full Name</label><input type="text" name="full_name" value={viewUser.full_name||''} /></div>
+              <div class="form-group"><label>Username</label><input type="text" name="username" value={viewUser.username||''} /></div>
+              <div class="form-group"><label>Bio</label><textarea name="bio" rows="3">{viewUser.bio||''}</textarea></div>
+              <button class="btn primary">Save</button>
+            </form>
+          </div>
+          <div class="card">
+            <h3>Settings</h3>
+            <div class="setting"><span>Role</span><form method="POST"><input type="hidden" name="action" value="update_role" /><input type="hidden" name="user_id" value={viewUser.id} /><select name="role" onchange="this.form.submit()"><option value="creator" selected={viewUser.role==='creator'}>Creator</option><option value="manager" selected={viewUser.role==='manager'}>Manager</option><option value="moderator" selected={viewUser.role==='moderator'}>Moderator</option><option value="admin" selected={viewUser.role==='admin'}>Admin</option></select></form></div>
+            <div class="setting"><span>Subscription</span><form method="POST"><input type="hidden" name="action" value="update_subscription" /><input type="hidden" name="user_id" value={viewUser.id} /><select name="subscription_tier" onchange="this.form.submit()"><option value="" selected={!viewUser.subscription_tier}>Free</option><option value="premium" selected={viewUser.subscription_tier==='premium'}>Premium</option><option value="elite" selected={viewUser.subscription_tier==='elite'}>Elite</option></select></form></div>
+            <div class="setting"><span>Balance</span><button class="btn secondary sm" onclick="document.getElementById('balanceModal').style.display='flex'">Adjust</button></div>
+            <div class="info-row"><span>User ID</span><code>{viewUser.id}</code></div>
+            <div class="info-row"><span>Joined</span><span>{formatDate(viewUser.created_at)}</span></div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'level' && (
+        <div class="tab-content">
+          <div class="card">
+            <div class="level-hero">
+              <div class="level-box" style={`border-color:${userLevelClass.color};background:${userLevelClass.color}15`}>
+                <span class="icon">{userLevelClass.icon}</span>
+                <span class="num" style={`color:${userLevelClass.color}`}>{userLevel}</span>
+                <span class="title" style={`color:${userLevelClass.color}`}>{userLevelClass.title}</span>
+              </div>
+              <div class="level-info">
+                <div class="xp"><strong>{userExp.toLocaleString()}</strong> / {nextLevelExp.toLocaleString()} XP</div>
+                <div class="bar"><div style={`width:${expProgress}%;background:${userLevelClass.color}`}></div></div>
+                <div class="meta"><span>{viewUser.payment_multiplier||1}x Pay</span><span>{nextLevelExp - userExp} to next</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Set Level Class</h3>
+            <div class="class-grid">
+              {levelClasses.map(lc => (
+                <form method="POST"><input type="hidden" name="action" value="update_level" /><input type="hidden" name="user_id" value={viewUser.id} /><input type="hidden" name="level" value={lc.minLevel} />
+                  <button class={`class-btn ${userLevel >= lc.minLevel && userLevel <= lc.maxLevel ? 'active' : ''}`} style={userLevel >= lc.minLevel && userLevel <= lc.maxLevel ? `background:${lc.color};border-color:${lc.color};color:white` : `border-color:${lc.color};color:${lc.color}`}>
+                    <span>{lc.icon}</span><span>{lc.title}</span><span class="sm">Lvl {lc.minLevel}-{lc.maxLevel}</span><span class="sm">{lc.multiplier}x</span>
+                  </button>
+                </form>
+              ))}
+            </div>
+          </div>
+          <div class="card-row">
+            <div class="card">
+              <h3>Set Exact Level</h3>
+              <form method="POST" class="inline-form"><input type="hidden" name="action" value="update_level" /><input type="hidden" name="user_id" value={viewUser.id} /><input type="number" name="level" value={userLevel} min="1" max="100" /><button class="btn primary">Set</button></form>
+            </div>
+            <div class="card">
+              <h3>Add/Remove XP</h3>
+              <form method="POST"><input type="hidden" name="action" value="add_exp" /><input type="hidden" name="user_id" value={viewUser.id} />
+                <div class="exp-btns">
+                  <button name="exp_amount" value="-1000" class="neg">-1K</button>
+                  <button name="exp_amount" value="-100" class="neg">-100</button>
+                  <button name="exp_amount" value="100">+100</button>
+                  <button name="exp_amount" value="500">+500</button>
+                  <button name="exp_amount" value="1000">+1K</button>
+                  <button name="exp_amount" value="5000">+5K</button>
+                  <button name="exp_amount" value="10000">+10K</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'badges' && (
+        <div class="tab-content">
+          <div class="card">
+            <h3>Current Badges ({userBadges.length})</h3>
+            {userBadges.length > 0 ? (
+              <div class="badges-grid">
+                {userBadges.map((b: string) => { const bd = availableBadges.find(x => x.id === b); return bd ? (
+                  <div class="badge-card has" style={`border-color:${bd.color}`}>
+                    <span class="icon" style={`color:${bd.color}`}>{bd.icon}</span>
+                    <span class="name">{bd.name}</span>
+                    <form method="POST"><input type="hidden" name="action" value="remove_badge" /><input type="hidden" name="user_id" value={viewUser.id} /><input type="hidden" name="badge_id" value={bd.id} /><button class="rm">Remove</button></form>
+                  </div>
+                ) : null; })}
+              </div>
+            ) : <p class="muted">No badges</p>}
+          </div>
+          <div class="card">
+            <h3>Add Badge</h3>
+            <div class="badges-grid">
+              {availableBadges.filter(b => !userBadges.includes(b.id)).map(bd => (
+                <form method="POST"><input type="hidden" name="action" value="add_badge" /><input type="hidden" name="user_id" value={viewUser.id} /><input type="hidden" name="badge_id" value={bd.id} />
+                  <button class="badge-card add" style={`border-color:${bd.color}40`}>
+                    <span class="icon" style={`color:${bd.color}`}>{bd.icon}</span>
+                    <span class="name">{bd.name}</span>
+                    <span class="desc">{bd.description}</span>
+                  </button>
+                </form>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'security' && (
+        <div class="tab-content grid-2">
+          <div class="card">
+            <h3>Password</h3>
+            <div class="security-row">
+              <div><strong>Send Reset Email</strong><p>Sends link to user's email</p></div>
+              <form method="POST"><input type="hidden" name="action" value="send_password_reset" /><input type="hidden" name="user_id" value={viewUser.id} /><button class="btn secondary">Send Email</button></form>
+            </div>
+            {(isMasterKeySession || adminProfile?.role === 'admin') && (
+              <div class="security-row danger">
+                <div><strong>Manual Reset</strong><p>Set new password directly</p></div>
+                <form method="POST" class="inline-form"><input type="hidden" name="action" value="reset_password" /><input type="hidden" name="user_id" value={viewUser.id} /><input type="password" name="new_password" placeholder="New password" minlength="6" required /><button class="btn danger">Reset</button></form>
+              </div>
+            )}
+          </div>
+          <div class="card">
+            <h3>Email Verification</h3>
+            {viewUser.email_verified ? (
+              <div class="status-box success"><span>✓</span><div><strong>Verified</strong><p>Email confirmed</p></div></div>
+            ) : (
+              <><div class="status-box warning"><span>!</span><div><strong>Not Verified</strong><p>Email unconfirmed</p></div></div>
+              <form method="POST"><input type="hidden" name="action" value="verify_email" /><input type="hidden" name="user_id" value={viewUser.id} /><button class="btn primary">Verify Now</button></form></>
+            )}
+          </div>
+          <div class="card danger-zone full">
+            <h3>⚠️ Danger Zone</h3>
+            <div class="danger-row">
+              <div><strong>Ban User</strong><p>Block account access</p></div>
+              {viewUser.is_banned ? (
+                <div class="ban-status"><span>Banned {formatDate(viewUser.banned_at)}</span>{viewUser.ban_reason && <p>Reason: {viewUser.ban_reason}</p>}<form method="POST"><input type="hidden" name="action" value="unban" /><input type="hidden" name="user_id" value={viewUser.id} /><button class="btn success">Unban</button></form></div>
+              ) : (
+                <button class="btn danger" onclick="document.getElementById('banModal').style.display='flex'">Ban</button>
+              )}
+            </div>
+            {isMasterKeySession && (
+              <div class="danger-row severe">
+                <div><strong>Delete User</strong><p>Permanent removal - cannot be undone</p></div>
+                <button class="btn danger" onclick="document.getElementById('deleteModal').style.display='flex'">Delete</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === 'notes' && (
+        <div class="tab-content">
+          <div class="card">
+            <h3>Admin Notes</h3>
+            <form method="POST" class="note-form"><input type="hidden" name="action" value="add_note" /><input type="hidden" name="user_id" value={viewUser.id} /><textarea name="note" rows="3" placeholder="Add a note..." required></textarea><button class="btn primary">Add Note</button></form>
+            <div class="notes-list">
+              {(viewUser.admin_notes || []).map((n: any) => (
+                <div class="note">
+                  <div class="note-head"><strong>{n.author_name}</strong><span>{formatDateTime(n.created_at)}</span><form method="POST" class="inline"><input type="hidden" name="action" value="delete_note" /><input type="hidden" name="user_id" value={viewUser.id} /><input type="hidden" name="note_id" value={n.id} /><button class="del">×</button></form></div>
+                  <p>{n.content}</p>
+                </div>
+              ))}
+              {(viewUser.admin_notes || []).length === 0 && <p class="muted">No notes yet</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div class="modal-overlay" id="banModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+        <div class="modal sm">
+          <div class="modal-header"><h2>Ban User</h2><button onclick="this.closest('.modal-overlay').style.display='none'" class="close">×</button></div>
+          <form method="POST" class="modal-body"><input type="hidden" name="action" value="ban" /><input type="hidden" name="user_id" value={viewUser.id} />
+            <div class="form-group"><label>Reason (optional)</label><textarea name="ban_reason" rows="3"></textarea></div>
+            <div class="form-actions"><button type="button" class="btn secondary" onclick="this.closest('.modal-overlay').style.display='none'">Cancel</button><button class="btn danger">Ban User</button></div>
+          </form>
+        </div>
+      </div>
+
+      <div class="modal-overlay" id="balanceModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+        <div class="modal sm">
+          <div class="modal-header"><h2>Adjust Balance</h2><button onclick="this.closest('.modal-overlay').style.display='none'" class="close">×</button></div>
+          <form method="POST" class="modal-body"><input type="hidden" name="action" value="adjust_balance" /><input type="hidden" name="user_id" value={viewUser.id} />
+            <div class="form-group"><label>Current</label><div class="balance">${(viewUser.balance||0).toFixed(2)}</div></div>
+            <div class="form-group"><label>Amount</label><input type="number" name="amount" step="0.01" required /><span class="hint">Use negative to deduct</span></div>
+            <div class="form-group"><label>Reason</label><input type="text" name="reason" required /></div>
+            <div class="form-actions"><button type="button" class="btn secondary" onclick="this.closest('.modal-overlay').style.display='none'">Cancel</button><button class="btn primary">Adjust</button></div>
+          </form>
+        </div>
+      </div>
+
+      {isMasterKeySession && (
+        <div class="modal-overlay" id="deleteModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+          <div class="modal sm">
+            <div class="modal-header danger"><h2>⚠️ Delete User</h2><button onclick="this.closest('.modal-overlay').style.display='none'" class="close">×</button></div>
+            <form method="POST" class="modal-body"><input type="hidden" name="action" value="delete_user" /><input type="hidden" name="user_id" value={viewUser.id} />
+              <div class="warning-box"><p>This will permanently delete all user data. This cannot be undone.</p></div>
+              <div class="form-group"><label>Type email to confirm: <strong>{viewUser.email}</strong></label><input type="email" name="confirm_email" required /></div>
+              <div class="form-actions"><button type="button" class="btn secondary" onclick="this.closest('.modal-overlay').style.display='none'">Cancel</button><button class="btn danger">Delete Permanently</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  ) : (
+    <div class="users-list">
+      <div class="page-header"><div><h1>👥 User Management</h1><p>{stats.total} users</p></div><a href="?create=true" class="btn primary">➕ Create User</a></div>
+      
       <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-icon">👥</div>
-          <div class="stat-info">
-            <span class="stat-value">{stats.total}</span>
-            <span class="stat-label">Total Users</span>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">🎨</div>
-          <div class="stat-info">
-            <span class="stat-value">{stats.creators}</span>
-            <span class="stat-label">Creators</span>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">📊</div>
-          <div class="stat-info">
-            <span class="stat-value">{stats.managers}</span>
-            <span class="stat-label">Managers</span>
-          </div>
-        </div>
-        <div class="stat-card highlight">
-          <div class="stat-icon">⭐</div>
-          <div class="stat-info">
-            <span class="stat-value">{stats.premium}</span>
-            <span class="stat-label">Premium</span>
-          </div>
-        </div>
+        <a href="?filter=all" class={`stat ${filter==='all'?'active':''}`}><span class="icon">👥</span><strong>{stats.total}</strong><span>Total</span></a>
+        <a href="?filter=creator" class={`stat ${filter==='creator'?'active':''}`}><span class="icon">🎨</span><strong>{stats.creators}</strong><span>Creators</span></a>
+        <a href="?filter=manager" class={`stat ${filter==='manager'?'active':''}`}><span class="icon">📊</span><strong>{stats.managers}</strong><span>Managers</span></a>
+        <a href="?filter=premium" class={`stat highlight ${filter==='premium'?'active':''}`}><span class="icon">⭐</span><strong>{stats.premium}</strong><span>Premium</span></a>
+        <a href="?filter=banned" class={`stat danger ${filter==='banned'?'active':''}`}><span class="icon">🚫</span><strong>{stats.banned}</strong><span>Banned</span></a>
       </div>
 
       <div class="toolbar">
-        <form method="GET" class="search-form">
-          <input type="text" name="search" placeholder="Search users..." value={search} />
-          <button type="submit" class="btn btn-primary">Search</button>
-        </form>
-        <div class="filter-tabs">
-          <a href="?filter=all" class={`tab ${filter === 'all' ? 'active' : ''}`}>All</a>
-          <a href="?filter=creator" class={`tab ${filter === 'creator' ? 'active' : ''}`}>Creators</a>
-          <a href="?filter=manager" class={`tab ${filter === 'manager' ? 'active' : ''}`}>Managers</a>
-          <a href="?filter=admin" class={`tab ${filter === 'admin' ? 'active' : ''}`}>Admins</a>
-        </div>
+        <form method="GET" class="search"><input type="hidden" name="filter" value={filter} /><input type="text" name="search" placeholder="Search..." value={search} /><button class="btn primary">Search</button>{search && <a href={`?filter=${filter}`} class="btn secondary">Clear</a>}</form>
+        <select onchange={`location='?filter=${filter}&search=${search}&sort='+this.value`}><option value="newest" selected={sortBy==='newest'}>Newest</option><option value="oldest" selected={sortBy==='oldest'}>Oldest</option><option value="level" selected={sortBy==='level'}>Level</option><option value="earned" selected={sortBy==='earned'}>Earned</option></select>
       </div>
 
-      <div class="users-table">
+      <div class="filter-tabs">
+        <a href={`?search=${search}&sort=${sortBy}`} class={filter==='all'?'active':''}>All</a>
+        <a href={`?filter=creator&search=${search}&sort=${sortBy}`} class={filter==='creator'?'active':''}>Creators</a>
+        <a href={`?filter=manager&search=${search}&sort=${sortBy}`} class={filter==='manager'?'active':''}>Managers</a>
+        <a href={`?filter=admin&search=${search}&sort=${sortBy}`} class={filter==='admin'?'active':''}>Admins</a>
+      </div>
+
+      <div class="table-wrap">
         <table>
-          <thead>
-            <tr>
-              <th>User</th>
-              <th>Role</th>
-              <th>Level</th>
-              <th>Subscription</th>
-              <th>Joined</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
+          <thead><tr><th>User</th><th>Role</th><th>Level</th><th>Sub</th><th>Earned</th><th>Joined</th><th></th></tr></thead>
           <tbody>
-            {users?.map(user => {
-              const uLevel = user.creator_level || 1;
-              const uClass = getLevelClass(uLevel);
-              return (
-                <tr>
-                  <td>
-                    <div class="user-cell">
-                      <img src={user.avatar_url || `https://ui-avatars.com/api/?name=${user.full_name || 'User'}`} alt="" />
-                      <div>
-                        <strong>{user.full_name || user.username || 'Unknown'}</strong>
-                        <span>{user.email}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <span class={`role-badge ${user.role}`}>{user.role}</span>
-                  </td>
-                  <td>
-                    <div class="level-cell">
-                      <span class="level-num" style={`color: ${uClass.color}`}>{uLevel}</span>
-                      <span class="level-name">{uClass.title}</span>
-                    </div>
-                  </td>
-                  <td>
-                    {user.subscription_tier ? (
-                      <span class={`sub-badge ${user.subscription_tier}`}>{user.subscription_tier}</span>
-                    ) : (
-                      <span class="sub-badge free">Free</span>
-                    )}
-                  </td>
-                  <td>{new Date(user.created_at).toLocaleDateString()}</td>
-                  <td>
-                    <a href={`?view=${user.id}`} class="btn btn-sm btn-secondary">View</a>
-                  </td>
-                </tr>
-              );
-            })}
+            {users?.map(u => { const lc = getLevelClass(u.creator_level||1); return (
+              <tr class={u.is_banned?'banned':''}>
+                <td><div class="user-cell"><img src={u.avatar_url||`https://ui-avatars.com/api/?name=${u.full_name||'U'}&size=36`} /><div><strong>{u.full_name||u.username||'Unknown'}{u.email_verified && <span class="v">✓</span>}</strong><span>{u.email}</span>{u.is_banned && <span class="ban-tag">Banned</span>}</div></div></td>
+                <td><span class={`role ${u.role}`}>{u.role}</span></td>
+                <td><span style={`color:${lc.color};font-weight:700`}>{u.creator_level||1}</span><br/><small>{lc.title}</small></td>
+                <td>{u.subscription_tier ? <span class={`sub ${u.subscription_tier}`}>{u.subscription_tier}</span> : <span class="sub free">Free</span>}</td>
+                <td class="earned">${(u.total_earned||0).toLocaleString()}</td>
+                <td class="date">{formatDate(u.created_at)}</td>
+                <td><a href={`?view=${u.id}`} class="btn secondary sm">Manage</a></td>
+              </tr>
+            ); })}
+            {users?.length === 0 && <tr><td colspan="7" class="empty">No users found</td></tr>}
           </tbody>
         </table>
       </div>
+
+      {totalPages > 1 && (
+        <div class="pagination">
+          {page > 1 && <a href={`?filter=${filter}&search=${search}&sort=${sortBy}&page=${page-1}`}>← Prev</a>}
+          <span>Page {page} of {totalPages}</span>
+          {page < totalPages && <a href={`?filter=${filter}&search=${search}&sort=${sortBy}&page=${page+1}`}>Next →</a>}
+        </div>
+      )}
     </div>
   )}
 
   <style>
-    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
-    .stat-card { background: white; padding: 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 1rem; }
-    .stat-card.highlight { background: linear-gradient(135deg, #fef3c7, #fde68a); }
-    .stat-icon { font-size: 1.5rem; }
-    .stat-value { display: block; font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
-    .stat-label { font-size: 0.8125rem; color: #6b7280; }
-    .toolbar { display: flex; justify-content: space-between; align-items: center; background: white; padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
-    .search-form { display: flex; gap: 0.5rem; }
-    .search-form input { padding: 0.5rem 1rem; border: 1px solid #e5e7eb; border-radius: 8px; width: 250px; }
-    .filter-tabs { display: flex; gap: 0.5rem; }
-    .tab { padding: 0.5rem 1rem; border-radius: 8px; text-decoration: none; color: #6b7280; font-weight: 500; }
-    .tab:hover { background: #f3f4f6; }
-    .tab.active { background: #2563eb; color: white; }
-    .users-table { background: white; border-radius: 12px; overflow: hidden; }
-    table { width: 100%; border-collapse: collapse; }
-    th { text-align: left; padding: 1rem; background: #f9fafb; font-weight: 600; font-size: 0.8125rem; color: #6b7280; text-transform: uppercase; }
-    td { padding: 1rem; border-top: 1px solid #e5e7eb; }
-    .user-cell { display: flex; align-items: center; gap: 0.75rem; }
-    .user-cell img { width: 40px; height: 40px; border-radius: 50%; }
-    .user-cell strong { display: block; color: #1a1a2e; }
-    .user-cell span { font-size: 0.8125rem; color: #6b7280; }
-    .role-badge { padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; }
-    .role-badge.creator { background: #dbeafe; color: #1e40af; }
-    .role-badge.manager { background: #d1fae5; color: #065f46; }
-    .role-badge.admin { background: #fee2e2; color: #991b1b; }
-    .role-badge.moderator { background: #ede9fe; color: #6d28d9; }
-    .level-cell { display: flex; flex-direction: column; }
-    .level-num { font-weight: 700; }
-    .level-name { font-size: 0.75rem; color: #6b7280; }
-    .sub-badge { padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.6875rem; font-weight: 600; }
-    .sub-badge.free { background: #f3f4f6; color: #6b7280; }
-    .sub-badge.premium { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; }
-    .sub-badge.elite { background: linear-gradient(135deg, #ec4899, #f43f5e); color: white; }
-    .view-header { margin-bottom: 1.5rem; }
-    .back-link { color: #6b7280; text-decoration: none; }
-    .user-profile-card { background: white; border-radius: 16px; padding: 2rem; }
-    .profile-header { display: flex; align-items: center; gap: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #e5e7eb; margin-bottom: 1.5rem; }
-    .avatar-xl { width: 100px; height: 100px; border-radius: 50%; }
-    .profile-info h2 { margin: 0 0 0.25rem 0; }
-    .profile-info .email { color: #6b7280; margin: 0 0 0.75rem 0; }
-    .badges { display: flex; gap: 0.5rem; }
-    .premium-badge { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; }
-    .banned-badge { background: #ef4444; color: white; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.6875rem; font-weight: 600; }
-    .level-section { background: #f9fafb; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
-    .level-section h3 { margin: 0 0 1rem 0; font-size: 1.125rem; }
-    .level-section h4 { margin: 1.5rem 0 0.75rem 0; font-size: 0.875rem; color: #6b7280; }
-    .current-level { display: flex; align-items: center; gap: 2rem; margin-bottom: 1.5rem; }
-    .level-display { text-align: center; padding: 1rem 2rem; border: 3px solid; border-radius: 12px; background: white; }
-    .level-number { display: block; font-size: 2.5rem; font-weight: 700; color: #1a1a2e; }
-    .level-title { font-size: 1rem; font-weight: 600; }
-    .level-stats { display: flex; gap: 2rem; }
-    .level-stats .stat .label { display: block; font-size: 0.75rem; color: #6b7280; }
-    .level-stats .stat .value { font-size: 1.25rem; font-weight: 700; color: #1a1a2e; }
-    .class-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.75rem; }
-    .class-form { margin: 0; }
-    .class-btn { width: 100%; padding: 1rem 0.5rem; border: 2px solid; border-radius: 10px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
-    .class-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    .class-btn.active { color: white !important; }
-    .class-icon { font-size: 1.25rem; }
-    .class-title { font-weight: 600; font-size: 0.75rem; }
-    .class-range { font-size: 0.625rem; opacity: 0.7; }
-    .level-form { display: flex; gap: 0.5rem; align-items: center; }
-    .level-input { width: 80px; padding: 0.5rem; border: 1px solid #e5e7eb; border-radius: 6px; text-align: center; font-weight: 600; }
-    .exp-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-    .exp-btn { padding: 0.5rem 1rem; border: 1px solid #e5e7eb; border-radius: 8px; background: white; cursor: pointer; font-weight: 500; transition: all 0.2s; }
-    .exp-btn:hover { background: #dbeafe; border-color: #3b82f6; color: #1e40af; }
-    .settings-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
-    .setting-card { background: #f9fafb; border-radius: 10px; padding: 1rem; }
-    .setting-card h4 { margin: 0 0 0.5rem 0; font-size: 0.875rem; color: #6b7280; }
-    .setting-card select { width: 100%; padding: 0.5rem; border: 1px solid #e5e7eb; border-radius: 6px; }
-    .user-stats-row { display: flex; gap: 2rem; padding: 1rem; background: #f9fafb; border-radius: 10px; margin-bottom: 1.5rem; }
-    .stat-item .label { display: block; font-size: 0.75rem; color: #6b7280; }
-    .stat-item .value { font-size: 1.125rem; font-weight: 600; color: #1a1a2e; }
-    .user-actions { display: flex; gap: 0.75rem; }
-    .btn { padding: 0.625rem 1.25rem; border-radius: 8px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; font-size: 0.875rem; }
-    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
-    .btn-primary { background: #2563eb; color: white; }
-    .btn-secondary { background: #f3f4f6; color: #374151; }
-    .btn-success { background: #22c55e; color: white; }
-    .btn-danger { background: #ef4444; color: white; }
-    .inline { display: inline; }
-    .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
-    .alert.success { background: #d1fae5; color: #065f46; }
-    .alert.error { background: #fee2e2; color: #991b1b; }
-    @media (max-width: 1024px) { .class-grid { grid-template-columns: repeat(3, 1fr); } }
-    @media (max-width: 768px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } .class-grid { grid-template-columns: repeat(2, 1fr); } .current-level { flex-direction: column; text-align: center; } .settings-grid { grid-template-columns: 1fr; } }
+    :root{--primary:#2563eb;--danger:#ef4444;--success:#22c55e;--gray:#6b7280;--border:#e5e7eb;--bg:#f9fafb}
+    .alert{display:flex;align-items:center;gap:.75rem;padding:1rem;border-radius:10px;margin-bottom:1.5rem;animation:slideIn .3s}
+    .alert.success{background:#d1fae5;color:#065f46}.alert.error{background:#fee2e2;color:#991b1b}
+    .alert button{margin-left:auto;background:none;border:none;font-size:1.25rem;cursor:pointer;opacity:.6}
+    @keyframes slideIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}
+    .modal-overlay.show{display:flex}
+    .modal{background:white;border-radius:16px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto}
+    .modal.sm{max-width:400px}
+    .modal-header{display:flex;justify-content:space-between;align-items:center;padding:1.25rem;border-bottom:1px solid var(--border)}
+    .modal-header.danger{background:#fef2f2}
+    .modal-header h2{margin:0;font-size:1.125rem}
+    .modal-header .close{font-size:1.5rem;background:none;border:none;cursor:pointer;color:var(--gray)}
+    .modal-body{padding:1.25rem}
+    .form-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+    .form-group{margin-bottom:1rem}
+    .form-group label{display:block;font-weight:500;margin-bottom:.375rem;font-size:.875rem;color:#374151}
+    .form-group input,.form-group select,.form-group textarea{width:100%;padding:.625rem;border:1px solid var(--border);border-radius:8px;font-size:.9375rem}
+    .form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+    .form-group .hint{font-size:.75rem;color:var(--gray);margin-top:.25rem;display:block}
+    .form-actions{display:flex;gap:.75rem;justify-content:flex-end;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)}
+
+    .page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.5rem}
+    .page-header h1{margin:0 0 .25rem;font-size:1.5rem}.page-header p{margin:0;color:var(--gray)}
+
+    .stats-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;margin-bottom:1.5rem}
+    .stat{background:white;padding:1rem;border-radius:12px;display:flex;align-items:center;gap:.75rem;text-decoration:none;transition:all .2s;border:2px solid transparent}
+    .stat:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.08)}
+    .stat.active{border-color:var(--primary);background:#eff6ff}
+    .stat.highlight{background:linear-gradient(135deg,#fef3c7,#fde68a)}
+    .stat.danger{background:linear-gradient(135deg,#fee2e2,#fecaca)}
+    .stat .icon{font-size:1.25rem}
+    .stat strong{display:block;font-size:1.375rem;color:#1a1a2e}
+    .stat span:not(.icon){font-size:.75rem;color:var(--gray)}
+
+    .toolbar{display:flex;justify-content:space-between;align-items:center;background:white;padding:1rem;border-radius:12px;margin-bottom:1rem;flex-wrap:wrap;gap:1rem}
+    .search{display:flex;gap:.5rem;flex:1;max-width:400px}
+    .search input{flex:1;padding:.625rem;border:1px solid var(--border);border-radius:8px}
+    .toolbar select{padding:.625rem 1rem;border:1px solid var(--border);border-radius:8px;background:white}
+
+    .filter-tabs{display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap}
+    .filter-tabs a{padding:.5rem 1rem;border-radius:8px;text-decoration:none;color:var(--gray);font-weight:500;font-size:.875rem}
+    .filter-tabs a:hover{background:#f3f4f6}.filter-tabs a.active{background:var(--primary);color:white}
+
+    .table-wrap{background:white;border-radius:12px;overflow:hidden}
+    table{width:100%;border-collapse:collapse}
+    th{text-align:left;padding:1rem;background:var(--bg);font-weight:600;font-size:.75rem;color:var(--gray);text-transform:uppercase}
+    td{padding:1rem;border-top:1px solid var(--border)}
+    tr:hover{background:var(--bg)}
+    tr.banned{background:#fef2f2}
+    .user-cell{display:flex;align-items:center;gap:.75rem}
+    .user-cell img{width:36px;height:36px;border-radius:50%}
+    .user-cell strong{display:flex;align-items:center;gap:.25rem;color:#1a1a2e}
+    .user-cell span{display:block;font-size:.8125rem;color:var(--gray)}
+    .user-cell .v{color:var(--primary);font-size:.75rem}
+    .user-cell .ban-tag{display:inline-block;background:var(--danger);color:white;font-size:.625rem;padding:.125rem .375rem;border-radius:4px;margin-left:.5rem}
+    .role{display:inline-block;padding:.25rem .625rem;border-radius:9999px;font-size:.6875rem;font-weight:600;text-transform:uppercase}
+    .role.creator{background:#dbeafe;color:#1e40af}.role.manager{background:#d1fae5;color:#065f46}.role.admin{background:#fee2e2;color:#991b1b}.role.moderator{background:#ede9fe;color:#6d28d9}
+    .sub{display:inline-block;padding:.25rem .625rem;border-radius:9999px;font-size:.6875rem;font-weight:600}
+    .sub.free{background:#f3f4f6;color:var(--gray)}.sub.premium{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white}.sub.elite{background:linear-gradient(135deg,#ec4899,#f43f5e);color:white}
+    td.earned{font-weight:600;color:#059669}td.date{color:var(--gray);font-size:.875rem}
+    td.empty{text-align:center;padding:3rem;color:var(--gray)}
+
+    .pagination{display:flex;justify-content:center;align-items:center;gap:1rem;margin-top:1.5rem;padding:1rem;background:white;border-radius:12px}
+    .pagination a{padding:.5rem 1rem;background:#f3f4f6;border-radius:8px;text-decoration:none;color:#374151;font-weight:500}
+    .pagination a:hover{background:#e5e7eb}
+    .pagination span{color:var(--gray)}
+
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;padding:.625rem 1.25rem;border-radius:8px;font-weight:600;font-size:.875rem;text-decoration:none;border:none;cursor:pointer;transition:all .2s}
+    .btn.sm{padding:.5rem .875rem;font-size:.8125rem}
+    .btn.primary{background:var(--primary);color:white}.btn.primary:hover{background:#1d4ed8}
+    .btn.secondary{background:#f3f4f6;color:#374151}.btn.secondary:hover{background:#e5e7eb}
+    .btn.success{background:var(--success);color:white}.btn.success:hover{background:#16a34a}
+    .btn.danger{background:var(--danger);color:white}.btn.danger:hover{background:#dc2626}
+    .inline{display:inline}
+
+    /* Detail View */
+    .header-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem}
+    .header-bar a{color:var(--gray);text-decoration:none;font-weight:500}
+    .header-bar a:hover{color:var(--primary)}
+    .actions{display:flex;gap:.5rem}
+
+    .profile-card{background:white;border-radius:16px;overflow:hidden;margin-bottom:1.5rem}
+    .profile-header{display:grid;grid-template-columns:auto 1fr auto;gap:1.5rem;padding:1.5rem;background:linear-gradient(135deg,#f8fafc,#f1f5f9);border-bottom:1px solid var(--border)}
+    .avatar-wrap{position:relative}
+    .avatar{width:80px;height:80px;border-radius:50%;border:4px solid white;box-shadow:0 4px 12px rgba(0,0,0,.1)}
+    .avatar-rm{position:absolute;top:0;right:0;width:22px;height:22px;background:var(--danger);color:white;border:2px solid white;border-radius:50%;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+    .level-pip{position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);padding:.25rem .5rem;border-radius:9999px;color:white;font-size:.625rem;font-weight:700;white-space:nowrap}
+    .info h1{margin:0;font-size:1.375rem;display:flex;align-items:center;gap:.5rem}
+    .info .verified{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;background:var(--primary);color:white;border-radius:50%;font-size:.625rem}
+    .info .email{color:var(--gray);margin:.25rem 0 0;font-size:.9375rem}
+    .badges{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.75rem}
+    .badges .badge{padding:.25rem .5rem;border-radius:9999px;font-size:.6875rem;font-weight:600}
+    .badges .banned{background:var(--danger);color:white;padding:.25rem .625rem;border-radius:9999px;font-size:.6875rem;font-weight:600}
+    .quick-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem}
+    .quick-stats>div{text-align:center;padding:.75rem;background:white;border-radius:8px}
+    .quick-stats strong{display:block;font-size:1.125rem;color:#1a1a2e}
+    .quick-stats span{font-size:.625rem;color:var(--gray);text-transform:uppercase}
+
+    .tabs{display:flex;border-bottom:1px solid var(--border);overflow-x:auto}
+    .tabs a{padding:1rem 1.25rem;text-decoration:none;color:var(--gray);font-weight:500;font-size:.875rem;border-bottom:2px solid transparent;white-space:nowrap}
+    .tabs a:hover{color:#1a1a2e;background:var(--bg)}
+    .tabs a.active{color:var(--primary);border-bottom-color:var(--primary)}
+
+    .tab-content{animation:fadeIn .3s}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    .tab-content.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+    .card{background:white;border-radius:12px;padding:1.5rem;margin-bottom:1.5rem}
+    .card:last-child{margin-bottom:0}
+    .card h3{margin:0 0 1rem;font-size:1rem}
+    .card-row{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+    .card.full{grid-column:span 2}
+
+    .setting{display:flex;justify-content:space-between;align-items:center;padding:.75rem 0;border-bottom:1px solid #f3f4f6}
+    .setting:last-of-type{border-bottom:none}
+    .setting select{padding:.5rem;border:1px solid var(--border);border-radius:6px}
+    .info-row{display:flex;justify-content:space-between;padding:.5rem 0;font-size:.875rem}
+    .info-row code{font-family:monospace;font-size:.75rem;background:#f3f4f6;padding:.25rem .5rem;border-radius:4px}
+
+    .level-hero{display:grid;grid-template-columns:auto 1fr;gap:2rem;align-items:center}
+    .level-box{text-align:center;padding:1.25rem 1.5rem;border:3px solid;border-radius:16px}
+    .level-box .icon{display:block;font-size:1.5rem;margin-bottom:.25rem}
+    .level-box .num{display:block;font-size:2.5rem;font-weight:800;line-height:1}
+    .level-box .title{font-size:1rem;font-weight:600}
+    .level-info .xp{margin-bottom:.5rem}
+    .level-info .xp strong{font-size:1.25rem}
+    .level-info .bar{height:10px;background:#e5e7eb;border-radius:5px;overflow:hidden}
+    .level-info .bar>div{height:100%;border-radius:5px}
+    .level-info .meta{display:flex;justify-content:space-between;margin-top:.5rem;font-size:.8125rem;color:var(--gray)}
+
+    .class-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:.75rem}
+    .class-btn{width:100%;padding:.875rem .5rem;border:2px solid;border-radius:10px;background:white;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:.125rem;transition:all .2s}
+    .class-btn:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.1)}
+    .class-btn.active{color:white!important}
+    .class-btn span{font-size:.75rem;font-weight:600}
+    .class-btn .sm{font-size:.625rem;opacity:.8}
+
+    .inline-form{display:flex;gap:.5rem;align-items:center}
+    .inline-form input[type="number"]{width:80px;padding:.5rem;border:1px solid var(--border);border-radius:6px;text-align:center;font-size:1rem;font-weight:600}
+    .inline-form input[type="password"]{width:160px;padding:.5rem;border:1px solid var(--border);border-radius:6px}
+
+    .exp-btns{display:flex;flex-wrap:wrap;gap:.5rem}
+    .exp-btns button{padding:.5rem .875rem;border:1px solid var(--border);border-radius:8px;background:white;cursor:pointer;font-weight:600;font-size:.8125rem}
+    .exp-btns button:hover{background:#dbeafe;border-color:var(--primary);color:#1e40af}
+    .exp-btns button.neg{color:var(--danger)}.exp-btns button.neg:hover{background:#fee2e2;border-color:var(--danger);color:#991b1b}
+
+    .badges-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem}
+    .badge-card{padding:1rem;border:2px solid var(--border);border-radius:10px;text-align:center}
+    .badge-card.has{background:var(--bg)}
+    .badge-card.add{cursor:pointer;transition:all .2s;width:100%;background:white}
+    .badge-card.add:hover{border-color:var(--primary);transform:translateY(-2px)}
+    .badge-card .icon{display:block;font-size:1.5rem;margin-bottom:.375rem}
+    .badge-card .name{display:block;font-weight:600;color:#1a1a2e;font-size:.875rem}
+    .badge-card .desc{display:block;font-size:.6875rem;color:var(--gray);margin-top:.25rem}
+    .badge-card .rm{margin-top:.75rem;padding:.375rem .625rem;background:#fee2e2;color:var(--danger);border:none;border-radius:6px;font-size:.6875rem;font-weight:500;cursor:pointer}
+    .badge-card .rm:hover{background:#fecaca}
+
+    .security-row{display:flex;justify-content:space-between;align-items:center;padding:1rem 0;border-bottom:1px solid #f3f4f6}
+    .security-row:last-child{border-bottom:none}
+    .security-row.danger{background:#fef2f2;margin:0 -1.5rem;padding:1rem 1.5rem}
+    .security-row strong{display:block;margin-bottom:.25rem}
+    .security-row p{margin:0;font-size:.8125rem;color:var(--gray)}
+
+    .status-box{display:flex;gap:1rem;padding:1rem;border-radius:10px;margin-bottom:1rem}
+    .status-box.success{background:#d1fae5}.status-box.warning{background:#fef3c7}
+    .status-box>span{font-size:1.25rem}
+    .status-box strong{display:block;margin-bottom:.125rem}
+    .status-box p{margin:0;font-size:.8125rem;color:var(--gray)}
+
+    .danger-zone{background:white;border:2px solid #fecaca;border-radius:12px;padding:1.5rem}
+    .danger-zone h3{color:var(--danger);margin:0 0 1rem}
+    .danger-row{display:flex;justify-content:space-between;align-items:center;padding:1rem;border:1px solid #fecaca;border-radius:8px;margin-bottom:1rem}
+    .danger-row:last-child{margin-bottom:0}
+    .danger-row.severe{background:#fef2f2}
+    .danger-row strong{display:block;margin-bottom:.125rem}
+    .danger-row p{margin:0;font-size:.8125rem;color:var(--gray)}
+    .ban-status{text-align:right}
+    .ban-status span{display:inline-block;background:var(--danger);color:white;padding:.25rem .625rem;border-radius:4px;font-size:.75rem;margin-bottom:.5rem}
+    .ban-status p{font-size:.8125rem;color:var(--gray);margin:.5rem 0}
+
+    .warning-box{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:1rem;margin-bottom:1rem}
+    .warning-box p{margin:0;color:#991b1b;font-size:.875rem}
+
+    .note-form{margin-bottom:1.5rem}
+    .note-form textarea{width:100%;padding:.75rem;border:1px solid var(--border);border-radius:8px;margin-bottom:.75rem;resize:vertical}
+    .notes-list{display:flex;flex-direction:column;gap:1rem}
+    .note{padding:1rem;background:var(--bg);border-radius:8px;border-left:3px solid var(--primary)}
+    .note-head{display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem}
+    .note-head strong{color:#1a1a2e}
+    .note-head span{font-size:.75rem;color:var(--gray)}
+    .note-head .del{margin-left:auto;background:none;border:none;color:var(--danger);font-size:1.25rem;cursor:pointer;opacity:.5}
+    .note-head .del:hover{opacity:1}
+    .note p{margin:0;color:#4b5563;line-height:1.5}
+
+    .muted{color:var(--gray);text-align:center;padding:2rem}
+
+    .balance{font-size:1.5rem;font-weight:700;color:#059669;padding:.5rem;background:#d1fae5;border-radius:8px;text-align:center}
+
+    @media(max-width:1200px){.stats-grid{grid-template-columns:repeat(3,1fr)}.class-grid{grid-template-columns:repeat(3,1fr)}.badges-grid{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:1024px){.tab-content.grid-2{grid-template-columns:1fr}.profile-header{grid-template-columns:1fr;text-align:center}.quick-stats{grid-template-columns:repeat(4,1fr)}.level-hero{grid-template-columns:1fr;text-align:center}.card.full{grid-column:span 1}}
+    @media(max-width:768px){.stats-grid{grid-template-columns:repeat(2,1fr)}.class-grid{grid-template-columns:repeat(2,1fr)}.badges-grid{grid-template-columns:repeat(2,1fr)}.form-row{grid-template-columns:1fr}.card-row{grid-template-columns:1fr}.tabs{gap:0}.tabs a{padding:.75rem;font-size:.75rem}.quick-stats{grid-template-columns:repeat(2,1fr)}.toolbar{flex-direction:column}.search{max-width:100%;width:100%}table{font-size:.8125rem}th,td{padding:.75rem .5rem}}
   </style>
 </AdminLayout>
