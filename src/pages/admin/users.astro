@@ -4,7 +4,6 @@ export const prerender = false;
 
 import AdminLayout from "../../layouts/AdminLayout.astro";
 import { createClient } from "@supabase/supabase-js";
-import { sendApprovalEmail, sendDenialEmail } from "../../lib/email";
 
 const isMasterKeySession = Astro.locals.isMasterKeySession || false;
 const session = Astro.locals.session;
@@ -13,589 +12,458 @@ if (!isMasterKeySession && !session) {
   return Astro.redirect('/admin/login');
 }
 
-// Create admin client with service key for user management
-const supabaseUrl = import.meta.env.SUPABASE_URL;
-const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_KEY;
-const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
-
 const supabase = createClient(
-  supabaseUrl,
-  supabaseServiceKey || supabaseAnonKey,
+  import.meta.env.PUBLIC_SUPABASE_URL,
+  import.meta.env.SUPABASE_SERVICE_KEY,
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
-const hasServiceKey = !!supabaseServiceKey;
+let successMessage = '';
+let errorMessage = '';
 
-let actionMessage = '';
-let actionError = '';
+// Level Classes (each spans 10 individual levels)
+const levelClasses = [
+  { class: 1, title: 'Recruit', minLevel: 1, maxLevel: 10, color: '#9CA3AF', minExp: 0 },
+  { class: 2, title: 'Private', minLevel: 11, maxLevel: 20, color: '#6B7280', minExp: 1000 },
+  { class: 3, title: 'Corporal', minLevel: 21, maxLevel: 30, color: '#78716C', minExp: 5000 },
+  { class: 4, title: 'Sergeant', minLevel: 31, maxLevel: 40, color: '#A16207', minExp: 15000 },
+  { class: 5, title: 'Lieutenant', minLevel: 41, maxLevel: 50, color: '#CA8A04', minExp: 40000 },
+  { class: 6, title: 'Captain', minLevel: 51, maxLevel: 60, color: '#EAB308', minExp: 80000 },
+  { class: 7, title: 'Major', minLevel: 61, maxLevel: 70, color: '#22C55E', minExp: 150000 },
+  { class: 8, title: 'Colonel', minLevel: 71, maxLevel: 80, color: '#3B82F6', minExp: 300000 },
+  { class: 9, title: 'General', minLevel: 81, maxLevel: 90, color: '#8B5CF6', minExp: 600000 },
+  { class: 10, title: '5 Star General', minLevel: 91, maxLevel: 100, color: '#F59E0B', minExp: 1000000 },
+];
 
-const action = Astro.url.searchParams.get('action');
-const editUserId = Astro.url.searchParams.get('edit');
-
-// Get user being edited
-let editUser = null;
-if (editUserId) {
-  const { data } = await supabase.from('profiles').select('*').eq('id', editUserId).single();
-  editUser = data;
+function getLevelClass(level: number) {
+  return levelClasses.find(c => level >= c.minLevel && level <= c.maxLevel) || levelClasses[0];
 }
 
+function getExpForLevel(level: number): number {
+  // Each level requires progressively more EXP
+  // Base: 100 XP for level 1, increasing by 50% each level class
+  const baseExp = 100;
+  const multiplier = 1.1; // 10% increase per level
+  return Math.floor(baseExp * Math.pow(multiplier, level - 1));
+}
+
+function getTotalExpForLevel(level: number): number {
+  let total = 0;
+  for (let i = 1; i < level; i++) {
+    total += getExpForLevel(i);
+  }
+  return total;
+}
+
+// Handle POST actions
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  const formAction = form.get('action') as string;
+  const action = form.get('action') as string;
+  const userId = form.get('user_id') as string;
 
-  // ============ CREATE USER (Master Key Only) ============
-  if (formAction === 'create_user') {
-    if (!isMasterKeySession) {
-      actionError = 'Only master key sessions can create users.';
-    } else if (!hasServiceKey) {
-      actionError = 'SUPABASE_SERVICE_KEY is required to create users.';
-    } else {
-      const email = (form.get('email') as string)?.trim();
-      const password = form.get('password') as string;
-      const fullName = (form.get('fullName') as string)?.trim();
-      const role = (form.get('role') as string) || 'creator';
-
-      if (!email || !password) {
-        actionError = 'Email and password are required.';
-      } else if (password.length < 8) {
-        actionError = 'Password must be at least 8 characters.';
-      } else {
-        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-          email,
-          password,
-          email_confirm: true,
-          user_metadata: { full_name: fullName },
-        });
-
-        if (authError) {
-          actionError = authError.message;
-        } else if (authData.user) {
-          const { error: profileError } = await supabase.from('profiles').upsert({
-            id: authData.user.id,
-            email,
-            full_name: fullName,
-            role,
-            status: 'active',
-            is_active: true,
-            is_verified: true,
-          });
-
-          if (profileError) {
-            actionError = `User created but profile failed: ${profileError.message}`;
-          } else {
-            return Astro.redirect('/admin/users?created=true');
-          }
-        }
-      }
-    }
-  }
-
-  // ============ APPROVE WAITLIST USER ============
-  if (formAction === 'approve') {
-    const userId = form.get('userId') as string;
-    const { data: user } = await supabase.from('profiles').select('email, full_name').eq('id', userId).single();
+  if (action === 'update_role') {
+    const newRole = form.get('role') as string;
+    const { error } = await supabase
+      .from('profiles')
+      .update({ role: newRole })
+      .eq('id', userId);
     
-    const { error } = await supabase.from('profiles').update({
-      status: 'active',
-      is_active: true,
-    }).eq('id', userId);
-
-    if (error) {
-      actionError = error.message;
-    } else {
-      actionMessage = `${user?.full_name || user?.email} has been approved and can now log in.`;
-      // Send approval email to user
-      if (user?.email) {
-        await sendApprovalEmail(user.email, user.full_name || '');
-      }
-    }
+    if (error) errorMessage = error.message;
+    else successMessage = 'User role updated!';
   }
 
-  // ============ DENY WAITLIST USER ============
-  if (formAction === 'deny') {
-    const userId = form.get('userId') as string;
-    const { data: user } = await supabase.from('profiles').select('email, full_name').eq('id', userId).single();
+  if (action === 'update_level') {
+    const newLevel = parseInt(form.get('level') as string) || 1;
+    const levelClass = getLevelClass(newLevel);
+    const requiredExp = getTotalExpForLevel(newLevel);
     
-    const { error } = await supabase.from('profiles').update({
-      status: 'denied',
-      is_active: false,
-    }).eq('id', userId);
+    // Calculate payment multiplier based on level class
+    const paymentMultipliers = [1, 1.05, 1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 1.9, 2.0];
+    const multiplier = paymentMultipliers[levelClass.class - 1] || 1;
+    
+    const { error } = await supabase
+      .from('profiles')
+      .update({ 
+        creator_level: newLevel,
+        creator_exp: requiredExp,
+        payment_multiplier: multiplier
+      })
+      .eq('id', userId);
+    
+    if (error) errorMessage = error.message;
+    else successMessage = `User set to Level ${newLevel} (${levelClass.title})!`;
+  }
 
-    if (error) {
-      actionError = error.message;
-    } else {
-      actionMessage = `${user?.full_name || user?.email}'s application has been denied.`;
-      // Send denial email to user
-      if (user?.email) {
-        await sendDenialEmail(user.email, user.full_name || '');
+  if (action === 'update_subscription') {
+    const tier = form.get('subscription_tier') as string;
+    const { error } = await supabase
+      .from('profiles')
+      .update({ subscription_tier: tier || null })
+      .eq('id', userId);
+    
+    if (error) errorMessage = error.message;
+    else successMessage = 'Subscription updated!';
+  }
+
+  if (action === 'toggle_premium') {
+    const { data: user } = await supabase.from('profiles').select('subscription_tier').eq('id', userId).single();
+    const newTier = user?.subscription_tier === 'premium' ? null : 'premium';
+    
+    const { error } = await supabase
+      .from('profiles')
+      .update({ subscription_tier: newTier })
+      .eq('id', userId);
+    
+    if (error) errorMessage = error.message;
+    else successMessage = newTier ? 'Premium activated!' : 'Premium removed.';
+  }
+
+  if (action === 'add_exp') {
+    const expAmount = parseInt(form.get('exp_amount') as string) || 0;
+    const { data: user } = await supabase.from('profiles').select('creator_exp, creator_level').eq('id', userId).single();
+    
+    if (user && expAmount > 0) {
+      let newExp = (user.creator_exp || 0) + expAmount;
+      let newLevel = user.creator_level || 1;
+      
+      // Check for level ups
+      while (newExp >= getTotalExpForLevel(newLevel + 1) && newLevel < 100) {
+        newLevel++;
       }
+      
+      const levelClass = getLevelClass(newLevel);
+      const paymentMultipliers = [1, 1.05, 1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 1.9, 2.0];
+      const multiplier = paymentMultipliers[levelClass.class - 1] || 1;
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({ 
+          creator_exp: newExp,
+          creator_level: newLevel,
+          payment_multiplier: multiplier
+        })
+        .eq('id', userId);
+      
+      if (error) errorMessage = error.message;
+      else successMessage = `Added ${expAmount} XP! New level: ${newLevel}`;
     }
   }
 
-  // ============ RESET PASSWORD (Master Key Only) ============
-  if (formAction === 'reset_password') {
-    if (!isMasterKeySession) {
-      actionError = 'Only master key sessions can reset passwords.';
-    } else if (!hasServiceKey) {
-      actionError = 'SUPABASE_SERVICE_KEY is required to reset passwords.';
-    } else {
-      const userId = form.get('userId') as string;
-      const newPassword = form.get('newPassword') as string;
-
-      if (!newPassword || newPassword.length < 8) {
-        actionError = 'Password must be at least 8 characters.';
-      } else {
-        const { error } = await supabase.auth.admin.updateUserById(userId, {
-          password: newPassword,
-        });
-
-        if (error) actionError = error.message;
-        else actionMessage = 'Password reset successfully.';
-      }
-    }
-  }
-
-  // ============ UPDATE USER ============
-  if (formAction === 'update_user') {
-    const userId = form.get('userId') as string;
-    const fullName = (form.get('fullName') as string)?.trim();
-    const username = (form.get('username') as string)?.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') || null;
-    const role = form.get('role') as string;
-    const status = form.get('status') as string;
-    const isActive = form.get('isActive') === 'on';
-    const isVerified = form.get('isVerified') === 'on';
-
-    const { error } = await supabase.from('profiles').update({
-      full_name: fullName,
-      username,
-      role,
-      status,
-      is_active: isActive,
-      is_verified: isVerified,
-    }).eq('id', userId);
-
-    if (error) {
-      if (error.code === '23505') {
-        actionError = 'Username already taken.';
-      } else {
-        actionError = error.message;
-      }
-    } else {
-      return Astro.redirect('/admin/users?updated=true');
-    }
-  }
-
-  // ============ QUICK ACTIONS ============
-  const userId = form.get('userId') as string;
-  
-  if (formAction === 'toggle_active' && userId) {
-    const { data: user } = await supabase.from('profiles').select('is_active').eq('id', userId).single();
-    const { error } = await supabase.from('profiles').update({ 
-      is_active: !user?.is_active,
-      status: !user?.is_active ? 'active' : 'suspended'
-    }).eq('id', userId);
-    if (error) actionError = error.message;
-    else actionMessage = `User ${user?.is_active ? 'suspended' : 'activated'}.`;
-  }
-
-  if (formAction === 'set_role' && userId) {
-    const newRole = form.get('newRole') as string;
-    const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
-    if (error) actionError = error.message;
-    else actionMessage = `User role updated to ${newRole}.`;
-  }
-
-  if (formAction === 'delete_user' && userId) {
-    if (!isMasterKeySession) {
-      actionError = 'Only master key sessions can delete users.';
-    } else if (!hasServiceKey) {
-      actionError = 'SUPABASE_SERVICE_KEY is required to delete users.';
-    } else {
-      await supabase.from('profiles').delete().eq('id', userId);
-      const { error } = await supabase.auth.admin.deleteUser(userId);
-      if (error) actionError = error.message;
-      else actionMessage = 'User deleted permanently.';
-    }
+  if (action === 'ban' || action === 'unban') {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_banned: action === 'ban' })
+      .eq('id', userId);
+    
+    if (error) errorMessage = error.message;
+    else successMessage = `User ${action === 'ban' ? 'banned' : 'unbanned'}.`;
   }
 }
 
-// Success messages from redirects
-if (Astro.url.searchParams.get('created')) actionMessage = 'User created successfully!';
-if (Astro.url.searchParams.get('updated')) actionMessage = 'User updated successfully!';
+// Get query params
+const filter = Astro.url.searchParams.get('filter') || 'all';
+const search = Astro.url.searchParams.get('search') || '';
+const viewUserId = Astro.url.searchParams.get('view');
 
-// Fetch all users
-const { data: users, error } = await supabase
-  .from("profiles")
-  .select("id, email, full_name, role, status, is_active, is_verified, avatar_url, bio, created_at, level, completed_campaigns, is_premium")
-  .order("created_at", { ascending: false });
+// Build query
+let query = supabase
+  .from('profiles')
+  .select('*')
+  .order('created_at', { ascending: false });
+
+if (filter !== 'all') {
+  query = query.eq('role', filter);
+}
+
+if (search) {
+  query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%,username.ilike.%${search}%`);
+}
+
+const { data: users } = await query.limit(100);
 
 // Stats
-const allUsers = users || [];
-const pendingUsers = allUsers.filter(u => u.status === 'pending');
-const activeUsers = allUsers.filter(u => u.status === 'active' && u.is_active);
-const deniedUsers = allUsers.filter(u => u.status === 'denied');
-const adminCount = allUsers.filter(u => u.role === 'admin').length;
-const modCount = allUsers.filter(u => u.role === 'moderator').length;
-const creatorCount = allUsers.filter(u => u.role === 'creator').length;
+const stats = {
+  total: users?.length || 0,
+  creators: users?.filter(u => u.role === 'creator').length || 0,
+  managers: users?.filter(u => u.role === 'manager').length || 0,
+  admins: users?.filter(u => u.role === 'admin').length || 0,
+  premium: users?.filter(u => u.subscription_tier === 'premium' || u.subscription_tier === 'elite').length || 0,
+};
 
-// Filter
-const filter = Astro.url.searchParams.get('filter') || (pendingUsers.length > 0 ? 'pending' : 'all');
-const searchQuery = Astro.url.searchParams.get('q')?.toLowerCase() || '';
-
-const filteredUsers = allUsers.filter(user => {
-  let matchesFilter = true;
-  if (filter === 'pending') matchesFilter = user.status === 'pending';
-  else if (filter === 'active') matchesFilter = user.status === 'active' && user.is_active;
-  else if (filter === 'denied') matchesFilter = user.status === 'denied';
-  else if (filter === 'suspended') matchesFilter = user.status === 'suspended' || (!user.is_active && user.status !== 'denied' && user.status !== 'pending');
-  else if (filter === 'admin') matchesFilter = user.role === 'admin';
-  else if (filter === 'moderator') matchesFilter = user.role === 'moderator';
-  else if (filter === 'creator') matchesFilter = user.role === 'creator';
-  else if (filter === 'manager') matchesFilter = user.role === 'manager';
-  else if (filter === 'verified') matchesFilter = user.is_verified === true;
-
-  if (searchQuery) {
-    const matchesSearch = 
-      user.email?.toLowerCase().includes(searchQuery) ||
-      user.full_name?.toLowerCase().includes(searchQuery);
-    return matchesFilter && matchesSearch;
-  }
-  return matchesFilter;
-});
-
-const managerCount = allUsers.filter(u => u.role === 'manager').length;
-const verifiedCount = allUsers.filter(u => u.is_verified).length;
-
-const showForm = action === 'new' || editUserId;
+// Single user view
+let viewUser = null;
+if (viewUserId) {
+  const { data } = await supabase.from('profiles').select('*').eq('id', viewUserId).single();
+  viewUser = data;
+}
 ---
 
 <AdminLayout title="Users">
-  {actionMessage && <div class="alert success">{actionMessage}</div>}
-  {actionError && <div class="alert error">{actionError}</div>}
-  {error && <div class="alert error">{error.message}</div>}
+  {successMessage && <div class="alert success">{successMessage}</div>}
+  {errorMessage && <div class="alert error">{errorMessage}</div>}
 
-  {!hasServiceKey && isMasterKeySession && (
-    <div class="alert warning">
-      ⚠️ SUPABASE_SERVICE_KEY not configured. Password reset and user creation disabled.
-    </div>
-  )}
-
-  {showForm ? (
-    <div class="panel">
-      <div class="panel-header">
-        <h2>{editUser ? 'Edit User' : 'Create New User'}</h2>
-        <a href="/admin/users" class="btn btn-secondary">← Back</a>
+  {viewUser ? (
+    <!-- Single User View -->
+    <div class="user-view">
+      <div class="view-header">
+        <a href="/admin/users" class="back-link">← Back to Users</a>
       </div>
-      
-      {action === 'new' ? (
-        <form method="POST" class="form">
-          <input type="hidden" name="action" value="create_user" />
-          
-          {!isMasterKeySession && (
-            <div class="alert warning">⚠️ Only master key sessions can create users.</div>
-          )}
-          
-          <div class="form-row">
-            <div class="form-group">
-              <label>Email *</label>
-              <input type="email" name="email" required placeholder="user@example.com" />
+
+      <div class="user-profile-card">
+        <div class="profile-header">
+          <img src={viewUser.avatar_url || `https://ui-avatars.com/api/?name=${viewUser.full_name || 'User'}&size=120`} alt="" class="avatar-xl" />
+          <div class="profile-info">
+            <h2>{viewUser.full_name || viewUser.username || 'Unknown User'}</h2>
+            <p class="email">{viewUser.email}</p>
+            <div class="badges">
+              <span class={`role-badge ${viewUser.role}`}>{viewUser.role}</span>
+              {viewUser.subscription_tier && (
+                <span class="premium-badge">{viewUser.subscription_tier}</span>
+              )}
+              {viewUser.is_banned && <span class="banned-badge">BANNED</span>}
             </div>
-            <div class="form-group">
-              <label>Full Name</label>
-              <input type="text" name="fullName" placeholder="John Doe" />
+          </div>
+        </div>
+
+        <!-- Level Section -->
+        <div class="level-section">
+          <h3>🎖️ Level & Rank</h3>
+          
+          <div class="current-level">
+            <div class="level-display" style={`border-color: ${getLevelClass(viewUser.creator_level || 1).color}`}>
+              <span class="level-number">{viewUser.creator_level || 1}</span>
+              <span class="level-title" style={`color: ${getLevelClass(viewUser.creator_level || 1).color}`}>
+                {getLevelClass(viewUser.creator_level || 1).title}
+              </span>
+            </div>
+            <div class="level-stats">
+              <div class="stat">
+                <span class="label">Total EXP</span>
+                <span class="value">{(viewUser.creator_exp || 0).toLocaleString()}</span>
+              </div>
+              <div class="stat">
+                <span class="label">Payment Multiplier</span>
+                <span class="value">{viewUser.payment_multiplier || 1}x</span>
+              </div>
             </div>
           </div>
 
-          <div class="form-row">
-            <div class="form-group">
-              <label>Password * <span class="hint">(min 8 chars)</span></label>
-              <input type="password" name="password" required minlength="8" placeholder="••••••••" />
+          <!-- Level Class Grid -->
+          <div class="level-classes">
+            <h4>Set Level Class</h4>
+            <div class="class-grid">
+              {levelClasses.map(lc => {
+                const isCurrentClass = viewUser.creator_level >= lc.minLevel && viewUser.creator_level <= lc.maxLevel;
+                return (
+                  <form method="POST" class="class-form">
+                    <input type="hidden" name="action" value="update_level" />
+                    <input type="hidden" name="user_id" value={viewUser.id} />
+                    <input type="hidden" name="level" value={lc.minLevel} />
+                    <button 
+                      type="submit" 
+                      class={`class-btn ${isCurrentClass ? 'active' : ''}`}
+                      style={isCurrentClass ? `background: ${lc.color}; border-color: ${lc.color}; color: white;` : `border-color: ${lc.color}; color: ${lc.color};`}
+                    >
+                      <span class="class-icon">🎖️</span>
+                      <span class="class-title">{lc.title}</span>
+                      <span class="class-range">Lvl {lc.minLevel}-{lc.maxLevel}</span>
+                    </button>
+                  </form>
+                );
+              })}
             </div>
-            <div class="form-group">
-              <label>Role</label>
-              <select name="role">
-                <option value="creator">Creator</option>
-                <option value="manager">Campaign Manager</option>
-                <option value="moderator">Moderator</option>
-                <option value="admin">Admin</option>
+          </div>
+
+          <!-- Manual Level Input -->
+          <div class="manual-level">
+            <h4>Set Exact Level (1-100)</h4>
+            <form method="POST" class="level-form">
+              <input type="hidden" name="action" value="update_level" />
+              <input type="hidden" name="user_id" value={viewUser.id} />
+              <input type="number" name="level" min="1" max="100" value={viewUser.creator_level || 1} class="level-input" />
+              <button type="submit" class="btn btn-primary btn-sm">Set Level</button>
+            </form>
+          </div>
+
+          <!-- Add EXP -->
+          <div class="add-exp">
+            <h4>Add Experience Points</h4>
+            <form method="POST" class="exp-form">
+              <input type="hidden" name="action" value="add_exp" />
+              <input type="hidden" name="user_id" value={viewUser.id} />
+              <div class="exp-buttons">
+                <button type="submit" name="exp_amount" value="100" class="exp-btn">+100 XP</button>
+                <button type="submit" name="exp_amount" value="500" class="exp-btn">+500 XP</button>
+                <button type="submit" name="exp_amount" value="1000" class="exp-btn">+1,000 XP</button>
+                <button type="submit" name="exp_amount" value="5000" class="exp-btn">+5,000 XP</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Role & Subscription -->
+        <div class="settings-grid">
+          <div class="setting-card">
+            <h4>Role</h4>
+            <form method="POST">
+              <input type="hidden" name="action" value="update_role" />
+              <input type="hidden" name="user_id" value={viewUser.id} />
+              <select name="role" onchange="this.form.submit()">
+                <option value="creator" selected={viewUser.role === 'creator'}>Creator</option>
+                <option value="manager" selected={viewUser.role === 'manager'}>Manager</option>
+                <option value="moderator" selected={viewUser.role === 'moderator'}>Moderator</option>
+                <option value="admin" selected={viewUser.role === 'admin'}>Admin</option>
               </select>
-            </div>
+            </form>
           </div>
 
-          <div class="form-actions">
-            <button type="submit" class="btn btn-primary" disabled={!isMasterKeySession}>Create User</button>
-            <a href="/admin/users" class="btn btn-secondary">Cancel</a>
+          <div class="setting-card">
+            <h4>Subscription</h4>
+            <form method="POST">
+              <input type="hidden" name="action" value="update_subscription" />
+              <input type="hidden" name="user_id" value={viewUser.id} />
+              <select name="subscription_tier" onchange="this.form.submit()">
+                <option value="" selected={!viewUser.subscription_tier}>Free</option>
+                <option value="premium" selected={viewUser.subscription_tier === 'premium'}>Premium</option>
+                <option value="elite" selected={viewUser.subscription_tier === 'elite'}>Elite</option>
+              </select>
+            </form>
           </div>
-        </form>
-      ) : editUser ? (
-        <>
-          <form method="POST" class="form">
-            <input type="hidden" name="action" value="update_user" />
-            <input type="hidden" name="userId" value={editUser.id} />
-            
-            <div class="user-header">
-              <div class="user-avatar large">
-                {editUser.avatar_url ? (
-                  <img src={editUser.avatar_url} alt={editUser.full_name || 'User'} />
-                ) : (
-                  <span>{editUser.full_name?.charAt(0) || editUser.email?.charAt(0)?.toUpperCase() || '?'}</span>
-                )}
-              </div>
-              <div>
-                <div class="user-email-display">{editUser.email}</div>
-                <div class="user-id">ID: {editUser.id}</div>
-              </div>
-            </div>
-            
-            <div class="form-row">
-              <div class="form-group">
-                <label>Full Name</label>
-                <input type="text" name="fullName" value={editUser.full_name || ''} placeholder="John Doe" />
-              </div>
-              <div class="form-group">
-                <label>Username</label>
-                <input type="text" name="username" value={editUser.username || ''} placeholder="johndoe" />
-              </div>
-            </div>
+        </div>
 
-            <div class="form-row">
-              <div class="form-group">
-                <label>Role</label>
-                <select name="role">
-                  <option value="creator" selected={editUser.role === 'creator'}>Creator</option>
-                  <option value="manager" selected={editUser.role === 'manager'}>Campaign Manager</option>
-                  <option value="moderator" selected={editUser.role === 'moderator'}>Moderator</option>
-                  <option value="admin" selected={editUser.role === 'admin'}>Admin</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Status</label>
-                <select name="status">
-                  <option value="pending" selected={editUser.status === 'pending'}>Pending (Waitlist)</option>
-                  <option value="active" selected={editUser.status === 'active'}>Active</option>
-                  <option value="suspended" selected={editUser.status === 'suspended'}>Suspended</option>
-                  <option value="denied" selected={editUser.status === 'denied'}>Denied</option>
-                </select>
-              </div>
-            </div>
+        <!-- User Stats -->
+        <div class="user-stats">
+          <div class="stat-item">
+            <span class="label">Joined</span>
+            <span class="value">{new Date(viewUser.created_at).toLocaleDateString()}</span>
+          </div>
+          <div class="stat-item">
+            <span class="label">Total Earned</span>
+            <span class="value">${(viewUser.total_earned || 0).toLocaleString()}</span>
+          </div>
+          <div class="stat-item">
+            <span class="label">Campaigns Completed</span>
+            <span class="value">{viewUser.campaigns_completed || 0}</span>
+          </div>
+        </div>
 
-            <div class="form-row">
-              <div class="form-group checkboxes">
-                <label class="checkbox-label">
-                  <input type="checkbox" name="isActive" checked={editUser.is_active} />
-                  <span>Account Active</span>
-                </label>
-                <label class="checkbox-label">
-                  <input type="checkbox" name="isVerified" checked={editUser.is_verified} />
-                  <span>Verified Creator/Manager</span>
-                </label>
-              </div>
-            </div>
-
-            <div class="quick-links">
-              <a href={`/profile/${editUser.id}`} target="_blank" class="btn btn-secondary">👤 View Public Profile</a>
-              <a href={`/admin/badges?user=${editUser.id}`} class="btn btn-secondary">🏆 Manage Badges</a>
-            </div>
-
-            <div class="form-actions">
-              <button type="submit" class="btn btn-primary">Save Changes</button>
-              <a href="/admin/users" class="btn btn-secondary">Cancel</a>
-            </div>
-          </form>
-
-          {isMasterKeySession && hasServiceKey && (
-            <>
-              <div class="section-divider">
-                <h3>🔐 Reset Password</h3>
-                <p>Set a new password for this user.</p>
-                <form method="POST" class="inline-form">
-                  <input type="hidden" name="action" value="reset_password" />
-                  <input type="hidden" name="userId" value={editUser.id} />
-                  <input type="password" name="newPassword" required minlength="8" placeholder="New password (min 8 chars)" class="form-input" />
-                  <button type="submit" class="btn btn-warning">Reset Password</button>
-                </form>
-              </div>
-
-              <div class="section-divider danger">
-                <h3>⚠️ Danger Zone</h3>
-                <p>Permanently delete this user. This cannot be undone.</p>
-                <form method="POST" onsubmit="return confirm('Permanently delete this user? This cannot be undone.');">
-                  <input type="hidden" name="action" value="delete_user" />
-                  <input type="hidden" name="userId" value={editUser.id} />
-                  <button type="submit" class="btn btn-danger">Delete User Permanently</button>
-                </form>
-              </div>
-            </>
+        <!-- Actions -->
+        <div class="user-actions">
+          {viewUser.is_banned ? (
+            <form method="POST" class="inline">
+              <input type="hidden" name="action" value="unban" />
+              <input type="hidden" name="user_id" value={viewUser.id} />
+              <button type="submit" class="btn btn-success">Unban User</button>
+            </form>
+          ) : (
+            <form method="POST" class="inline">
+              <input type="hidden" name="action" value="ban" />
+              <input type="hidden" name="user_id" value={viewUser.id} />
+              <button type="submit" class="btn btn-danger">Ban User</button>
+            </form>
           )}
-        </>
-      ) : null}
+          <a href={`/admin/users/${viewUser.id}/activity`} class="btn btn-secondary">View Activity Log</a>
+        </div>
+      </div>
     </div>
   ) : (
+    <!-- Users List -->
     <>
-      <!-- Stats Cards -->
       <div class="stats-grid">
-        <div class={`stat-card ${pendingUsers.length > 0 ? 'highlight-warning' : ''}`}>
-          <div class="stat-icon">⏳</div>
-          <div><div class="stat-value">{pendingUsers.length}</div><div class="stat-label">Pending Approval</div></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">✅</div>
-          <div><div class="stat-value">{activeUsers.length}</div><div class="stat-label">Active Users</div></div>
-        </div>
         <div class="stat-card">
           <div class="stat-icon">👥</div>
-          <div><div class="stat-value">{allUsers.length}</div><div class="stat-label">Total Users</div></div>
+          <div class="stat-info">
+            <span class="stat-value">{stats.total}</span>
+            <span class="stat-label">Total Users</span>
+          </div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">🛡️</div>
-          <div><div class="stat-value">{adminCount + modCount}</div><div class="stat-label">Staff</div></div>
+          <div class="stat-icon">🎨</div>
+          <div class="stat-info">
+            <span class="stat-value">{stats.creators}</span>
+            <span class="stat-label">Creators</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📊</div>
+          <div class="stat-info">
+            <span class="stat-value">{stats.managers}</span>
+            <span class="stat-label">Managers</span>
+          </div>
+        </div>
+        <div class="stat-card highlight">
+          <div class="stat-icon">⭐</div>
+          <div class="stat-info">
+            <span class="stat-value">{stats.premium}</span>
+            <span class="stat-label">Premium</span>
+          </div>
         </div>
       </div>
 
-      <!-- Pending Waitlist Alert -->
-      {pendingUsers.length > 0 && filter !== 'pending' && (
-        <div class="pending-alert">
-          <span class="pending-icon">⏳</span>
-          <div>
-            <strong>{pendingUsers.length} user{pendingUsers.length > 1 ? 's' : ''} waiting for approval</strong>
-            <p>Review and approve or deny pending signups.</p>
-          </div>
-          <a href="?filter=pending" class="btn btn-warning">Review Waitlist</a>
-        </div>
-      )}
-
-      <!-- Toolbar -->
       <div class="toolbar">
+        <form method="GET" class="search-form">
+          <input type="text" name="search" placeholder="Search users..." value={search} />
+          <button type="submit" class="btn btn-primary">Search</button>
+        </form>
         <div class="filter-tabs">
-          <a href="?filter=pending" class:list={["filter-tab", { active: filter === 'pending' }]}>
-            ⏳ Pending ({pendingUsers.length})
-          </a>
-          <a href="?filter=all" class:list={["filter-tab", { active: filter === 'all' }]}>All</a>
-          <a href="?filter=active" class:list={["filter-tab", { active: filter === 'active' }]}>Active</a>
-          <a href="?filter=verified" class:list={["filter-tab", { active: filter === 'verified' }]}>✓ Verified</a>
-          <a href="?filter=admin" class:list={["filter-tab", { active: filter === 'admin' }]}>Admins</a>
-          <a href="?filter=moderator" class:list={["filter-tab", { active: filter === 'moderator' }]}>Mods</a>
-          <a href="?filter=manager" class:list={["filter-tab", { active: filter === 'manager' }]}>Managers</a>
-          <a href="?filter=creator" class:list={["filter-tab", { active: filter === 'creator' }]}>Creators</a>
-          <a href="?filter=denied" class:list={["filter-tab", { active: filter === 'denied' }]}>Denied</a>
-        </div>
-        <div class="toolbar-actions">
-          <form class="search-form" method="GET">
-            {filter !== 'all' && <input type="hidden" name="filter" value={filter} />}
-            <input type="text" name="q" placeholder="Search users..." value={searchQuery} class="search-input" />
-          </form>
-          {isMasterKeySession && (
-            <a href="?action=new" class="btn btn-primary">+ New User</a>
-          )}
+          <a href="?filter=all" class={`tab ${filter === 'all' ? 'active' : ''}`}>All</a>
+          <a href="?filter=creator" class={`tab ${filter === 'creator' ? 'active' : ''}`}>Creators</a>
+          <a href="?filter=manager" class={`tab ${filter === 'manager' ? 'active' : ''}`}>Managers</a>
+          <a href="?filter=admin" class={`tab ${filter === 'admin' ? 'active' : ''}`}>Admins</a>
         </div>
       </div>
 
-      <!-- Users List -->
-      <div class="panel">
-        <div class="panel-header">
-          <h2>
-            {filter === 'pending' ? '⏳ Waitlist - Pending Approval' : 
-             filter === 'all' ? 'All Users' : 
-             `${filter.charAt(0).toUpperCase() + filter.slice(1)} Users`}
-          </h2>
-          <span class="panel-count">{filteredUsers.length} users</span>
-        </div>
-
-        {filteredUsers.length > 0 ? (
-          <div class="users-list">
-            {filteredUsers.map(user => (
-              <div class={`user-card ${user.status === 'pending' ? 'pending-user' : ''}`}>
-                <div class="user-main">
-                  <div class="user-avatar">
-                    {user.avatar_url ? (
-                      <img src={user.avatar_url} alt={user.full_name || 'User'} />
-                    ) : (
-                      <span>{user.full_name?.charAt(0) || user.email?.charAt(0)?.toUpperCase() || '?'}</span>
-                    )}
-                  </div>
-                  <div class="user-info">
-                    <div class="user-name">
-                      {user.full_name || 'No name'}
-                      {user.is_verified && <span class="verified-check" title="Verified">✓</span>}
-                      {user.is_premium && <span class="premium-star" title="Premium">⭐</span>}
-                      {user.status === 'pending' && <span class="status-tag pending">Pending</span>}
-                      {user.status === 'denied' && <span class="status-tag denied">Denied</span>}
-                      {user.status === 'suspended' && <span class="status-tag suspended">Suspended</span>}
-                      {!user.is_active && user.status === 'active' && <span class="status-tag suspended">Inactive</span>}
-                    </div>
-                    <div class="user-email">{user.email}</div>
-                    <div class="user-date">
-                      Signed up {new Date(user.created_at).toLocaleDateString()} • 
-                      Level {user.level || 1} • 
-                      {user.completed_campaigns || 0} campaigns
-                    </div>
-                  </div>
-                </div>
-
-                <div class="user-meta">
-                  <span class={`role-badge ${user.role || 'creator'}`}>{user.role || 'creator'}</span>
-                  <span class="level-badge">Lvl {user.level || 1}</span>
-                </div>
-
-                <div class="user-actions">
-                  {user.status === 'pending' ? (
-                    <div class="waitlist-actions">
-                      <form method="POST" class="inline">
-                        <input type="hidden" name="userId" value={user.id} />
-                        <button name="action" value="approve" class="btn btn-sm btn-success">✓ Approve</button>
-                      </form>
-                      <form method="POST" class="inline">
-                        <input type="hidden" name="userId" value={user.id} />
-                        <button name="action" value="deny" class="btn btn-sm btn-danger">✕ Deny</button>
-                      </form>
-                      <a href={`/admin/users/${user.id}`} class="btn btn-sm btn-secondary">View</a>
-                    </div>
-                  ) : (
-                    <>
-                      <a href={`/profile/${user.id}`} target="_blank" class="btn btn-sm btn-secondary" title="View Public Profile">
-                        👤
-                      </a>
-                      <a href={`/admin/badges?user=${user.id}`} class="btn btn-sm btn-secondary" title="Manage Badges">
-                        🏆
-                      </a>
-                      <a href={`/admin/preview/${user.id}`} class="btn btn-sm btn-primary" title="Preview as this user">
-                        👁️
-                      </a>
-                      <a href={`?edit=${user.id}`} class="btn btn-sm btn-secondary">Edit</a>
-                      <div class="dropdown">
-                        <button class="btn btn-sm btn-secondary dropdown-trigger">⋯</button>
-                        <div class="dropdown-menu">
-                          <a href={`/admin/users/${user.id}`} class="dropdown-item">📋 Details</a>
-                          {['admin', 'moderator', 'creator', 'manager'].map(role => (
-                            <form method="POST">
-                              <input type="hidden" name="userId" value={user.id} />
-                              <input type="hidden" name="action" value="set_role" />
-                              <button type="submit" name="newRole" value={role} class="dropdown-item" disabled={user.role === role}>
-                                Set {role}
-                              </button>
-                            </form>
-                          ))}
-                          <form method="POST" class="inline">
-                            <input type="hidden" name="userId" value={user.id} />
-                            <button type="submit" name="action" value="toggle_active" class="dropdown-item">
-                              {user.is_active ? '🚫 Suspend' : '✅ Activate'}
-                            </button>
-                          </form>
-                        </div>
+      <div class="users-table">
+        <table>
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th>Level</th>
+              <th>Subscription</th>
+              <th>Joined</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users?.map(user => {
+              const levelClass = getLevelClass(user.creator_level || 1);
+              return (
+                <tr>
+                  <td>
+                    <div class="user-cell">
+                      <img src={user.avatar_url || `https://ui-avatars.com/api/?name=${user.full_name || 'User'}`} alt="" />
+                      <div>
+                        <strong>{user.full_name || user.username || 'Unknown'}</strong>
+                        <span>{user.email}</span>
                       </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div class="empty-state">
-            <div class="empty-icon">{filter === 'pending' ? '🎉' : '👥'}</div>
-            <h3>{filter === 'pending' ? 'No pending applications!' : 'No users found'}</h3>
-            <p>{filter === 'pending' ? 'All waitlist applications have been reviewed.' : searchQuery ? 'Try a different search.' : 'No users match this filter.'}</p>
-          </div>
-        )}
+                    </div>
+                  </td>
+                  <td>
+                    <span class={`role-badge ${user.role}`}>{user.role}</span>
+                  </td>
+                  <td>
+                    <div class="level-cell">
+                      <span class="level-num" style={`color: ${levelClass.color}`}>{user.creator_level || 1}</span>
+                      <span class="level-name">{levelClass.title}</span>
+                    </div>
+                  </td>
+                  <td>
+                    {user.subscription_tier ? (
+                      <span class={`sub-badge ${user.subscription_tier}`}>{user.subscription_tier}</span>
+                    ) : (
+                      <span class="sub-badge free">Free</span>
+                    )}
+                  </td>
+                  <td>{new Date(user.created_at).toLocaleDateString()}</td>
+                  <td>
+                    <a href={`?view=${user.id}`} class="btn btn-sm btn-secondary">View</a>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </>
   )}
@@ -603,134 +471,116 @@ const showForm = action === 'new' || editUserId;
   <style>
     .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
     .stat-card { background: white; padding: 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 1rem; }
-    .stat-card.highlight-warning { background: linear-gradient(135deg, #fef3c7, #fde68a); border: 2px solid #f59e0b; }
-    .stat-icon { font-size: 1.5rem; width: 44px; height: 44px; background: #f3f4f6; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-    .stat-value { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
+    .stat-card.highlight { background: linear-gradient(135deg, #fef3c7, #fde68a); }
+    .stat-icon { font-size: 1.5rem; }
+    .stat-value { display: block; font-size: 1.5rem; font-weight: 700; color: #1a1a2e; }
     .stat-label { font-size: 0.8125rem; color: #6b7280; }
 
-    .pending-alert { display: flex; align-items: center; gap: 1rem; background: #fef3c7; border: 2px solid #f59e0b; border-radius: 12px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; }
-    .pending-icon { font-size: 2rem; }
-    .pending-alert strong { color: #92400e; }
-    .pending-alert p { font-size: 0.875rem; color: #78350f; margin: 0.25rem 0 0; }
-    .pending-alert .btn { margin-left: auto; flex-shrink: 0; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; background: white; padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
+    .search-form { display: flex; gap: 0.5rem; }
+    .search-form input { padding: 0.5rem 1rem; border: 1px solid #e5e7eb; border-radius: 8px; width: 250px; }
+    .filter-tabs { display: flex; gap: 0.5rem; }
+    .tab { padding: 0.5rem 1rem; border-radius: 8px; text-decoration: none; color: #6b7280; font-weight: 500; }
+    .tab:hover { background: #f3f4f6; }
+    .tab.active { background: #2563eb; color: white; }
 
-    .toolbar { display: flex; justify-content: space-between; align-items: center; background: white; border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
-    .toolbar-actions { display: flex; gap: 0.75rem; align-items: center; }
-    .filter-tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-    .filter-tab { padding: 0.5rem 1rem; border-radius: 8px; text-decoration: none; color: #6b7280; font-size: 0.875rem; font-weight: 500; }
-    .filter-tab:hover { background: #f3f4f6; color: #1a1a2e; }
-    .filter-tab.active { background: #2563eb; color: white; }
-    
-    .search-form { display: flex; }
-    .search-input { padding: 0.5rem 1rem; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 0.875rem; width: 200px; }
-    .search-input:focus { outline: none; border-color: #2563eb; }
+    .users-table { background: white; border-radius: 12px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 1rem; background: #f9fafb; font-weight: 600; font-size: 0.8125rem; color: #6b7280; text-transform: uppercase; }
+    td { padding: 1rem; border-top: 1px solid #e5e7eb; }
+    .user-cell { display: flex; align-items: center; gap: 0.75rem; }
+    .user-cell img { width: 40px; height: 40px; border-radius: 50%; }
+    .user-cell strong { display: block; color: #1a1a2e; }
+    .user-cell span { font-size: 0.8125rem; color: #6b7280; }
 
-    .panel { background: white; border-radius: 12px; overflow: hidden; }
-    .panel-header { display: flex; justify-content: space-between; align-items: center; padding: 1.25rem 1.5rem; border-bottom: 1px solid #e5e7eb; }
-    .panel-header h2 { font-size: 1rem; color: #1a1a2e; margin: 0; }
-    .panel-count { font-size: 0.875rem; color: #6b7280; }
+    .role-badge { padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; }
+    .role-badge.creator { background: #dbeafe; color: #1e40af; }
+    .role-badge.manager { background: #d1fae5; color: #065f46; }
+    .role-badge.admin { background: #fee2e2; color: #991b1b; }
+    .role-badge.moderator { background: #ede9fe; color: #6d28d9; }
 
-    .users-list { padding: 0; }
-    .user-card { display: flex; align-items: center; gap: 1.5rem; padding: 1rem 1.5rem; border-bottom: 1px solid #f0f0f0; }
-    .user-card:last-child { border-bottom: none; }
-    .user-card:hover { background: #f9fafb; }
-    .user-card.pending-user { background: #fffbeb; }
-    .user-card.pending-user:hover { background: #fef3c7; }
+    .level-cell { display: flex; flex-direction: column; }
+    .level-num { font-weight: 700; }
+    .level-name { font-size: 0.75rem; color: #6b7280; }
 
-    .user-main { display: flex; align-items: center; gap: 1rem; flex: 1; min-width: 0; }
-    .user-avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #dbeafe, #c7d2fe); display: flex; align-items: center; justify-content: center; font-weight: 600; color: #2563eb; flex-shrink: 0; overflow: hidden; }
-    .user-avatar.large { width: 64px; height: 64px; font-size: 1.5rem; }
-    .user-avatar img { width: 100%; height: 100%; object-fit: cover; }
-    .user-info { min-width: 0; }
-    .user-name { font-weight: 600; color: #1a1a2e; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-    .user-email { font-size: 0.875rem; color: #6b7280; }
-    .user-email-display { font-size: 1rem; color: #374151; }
-    .user-id { font-size: 0.75rem; color: #9ca3af; font-family: monospace; }
-    .user-date { font-size: 0.75rem; color: #9ca3af; margin-top: 0.125rem; }
-    
-    .status-tag { font-size: 0.625rem; padding: 0.125rem 0.5rem; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
-    .status-tag.pending { background: #fef3c7; color: #d97706; }
-    .status-tag.denied { background: #fee2e2; color: #dc2626; }
-    .status-tag.suspended { background: #f3f4f6; color: #6b7280; }
+    .sub-badge { padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.6875rem; font-weight: 600; }
+    .sub-badge.free { background: #f3f4f6; color: #6b7280; }
+    .sub-badge.premium { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; }
+    .sub-badge.elite { background: linear-gradient(135deg, #ec4899, #f43f5e); color: white; }
 
-    .user-meta { display: flex; align-items: center; gap: 0.5rem; }
-    .role-badge { font-size: 0.6875rem; padding: 0.25rem 0.75rem; border-radius: 999px; font-weight: 600; text-transform: uppercase; }
-    .role-badge.admin { background: #fee2e2; color: #dc2626; }
-    .role-badge.moderator { background: #fef3c7; color: #d97706; }
-    .role-badge.creator { background: #d1fae5; color: #059669; }
-    .role-badge.manager { background: #dbeafe; color: #2563eb; }
+    /* User View */
+    .view-header { margin-bottom: 1.5rem; }
+    .back-link { color: #6b7280; text-decoration: none; }
 
-    .level-badge { font-size: 0.6875rem; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; background: #f3f4f6; color: #6b7280; }
+    .user-profile-card { background: white; border-radius: 16px; padding: 2rem; }
+    .profile-header { display: flex; align-items: center; gap: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #e5e7eb; margin-bottom: 1.5rem; }
+    .avatar-xl { width: 100px; height: 100px; border-radius: 50%; }
+    .profile-info h2 { margin: 0 0 0.25rem 0; }
+    .profile-info .email { color: #6b7280; margin: 0 0 0.75rem 0; }
+    .badges { display: flex; gap: 0.5rem; }
+    .premium-badge { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; }
+    .banned-badge { background: #ef4444; color: white; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.6875rem; font-weight: 600; }
 
-    .verified-check { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; background: #10b981; color: white; border-radius: 50%; font-size: 0.625rem; margin-left: 0.25rem; }
-    .premium-star { font-size: 0.875rem; margin-left: 0.25rem; }
+    /* Level Section */
+    .level-section { background: #f9fafb; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .level-section h3 { margin: 0 0 1rem 0; font-size: 1.125rem; }
+    .level-section h4 { margin: 1.5rem 0 0.75rem 0; font-size: 0.875rem; color: #6b7280; }
 
-    .user-actions { display: flex; gap: 0.5rem; align-items: center; }
-    .waitlist-actions { display: flex; gap: 0.5rem; }
-    
-    .dropdown { position: relative; }
-    .dropdown-trigger { cursor: pointer; }
-    .dropdown-menu { position: absolute; top: 100%; right: 0; margin-top: 0.5rem; background: white; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); min-width: 140px; z-index: 50; display: none; }
-    .dropdown:hover .dropdown-menu, .dropdown:focus-within .dropdown-menu { display: block; }
-    .dropdown-item { display: block; width: 100%; padding: 0.5rem 1rem; text-align: left; border: none; background: none; font-size: 0.875rem; color: #374151; cursor: pointer; }
-    .dropdown-item:hover { background: #f3f4f6; }
-    .dropdown-item:disabled { opacity: 0.5; cursor: not-allowed; }
+    .current-level { display: flex; align-items: center; gap: 2rem; margin-bottom: 1.5rem; }
+    .level-display { text-align: center; padding: 1rem 2rem; border: 3px solid; border-radius: 12px; background: white; }
+    .level-number { display: block; font-size: 2.5rem; font-weight: 700; color: #1a1a2e; }
+    .level-title { font-size: 1rem; font-weight: 600; }
+    .level-stats { display: flex; gap: 2rem; }
+    .level-stats .stat .label { display: block; font-size: 0.75rem; color: #6b7280; }
+    .level-stats .stat .value { font-size: 1.25rem; font-weight: 700; color: #1a1a2e; }
 
-    .form { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-    .form-group { display: flex; flex-direction: column; gap: 0.5rem; }
-    .form-group label { font-weight: 600; font-size: 0.875rem; color: #374151; }
-    .form-group .hint { font-weight: 400; color: #9ca3af; font-size: 0.75rem; }
-    .form-group input, .form-group select { padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 1rem; }
-    .form-group input:focus, .form-group select:focus { outline: none; border-color: #2563eb; }
-    .form-group.checkboxes { flex-direction: row; gap: 1.5rem; align-items: center; padding-top: 1.5rem; }
-    .checkbox-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-weight: 500; color: #374151; }
-    .checkbox-label input { width: 18px; height: 18px; }
-    .form-input { padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 1rem; flex: 1; }
-    .form-actions { display: flex; gap: 1rem; margin-top: 0.5rem; }
-    .quick-links { display: flex; gap: 0.5rem; margin: 1rem 0; padding: 1rem; background: #f9fafb; border-radius: 8px; }
-    
-    .user-header { display: flex; align-items: center; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb; margin-bottom: 0.5rem; }
+    .class-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.75rem; }
+    .class-btn { width: 100%; padding: 1rem 0.5rem; border: 2px solid; border-radius: 10px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
+    .class-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .class-btn.active { color: white !important; }
+    .class-icon { font-size: 1.25rem; }
+    .class-title { font-weight: 600; font-size: 0.8125rem; }
+    .class-range { font-size: 0.6875rem; opacity: 0.7; }
 
-    .section-divider { padding: 1.5rem; border-top: 1px solid #e5e7eb; }
-    .section-divider h3 { font-size: 1rem; margin-bottom: 0.5rem; }
-    .section-divider p { font-size: 0.875rem; color: #6b7280; margin-bottom: 1rem; }
-    .section-divider.danger { background: #fef2f2; }
-    .section-divider.danger h3 { color: #dc2626; }
-    .inline-form { display: flex; gap: 0.75rem; align-items: center; }
+    .level-form { display: flex; gap: 0.5rem; align-items: center; }
+    .level-input { width: 80px; padding: 0.5rem; border: 1px solid #e5e7eb; border-radius: 6px; text-align: center; font-weight: 600; }
 
-    .btn { padding: 0.625rem 1.25rem; border-radius: 8px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
+    .exp-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .exp-btn { padding: 0.5rem 1rem; border: 1px solid #e5e7eb; border-radius: 8px; background: white; cursor: pointer; font-weight: 500; transition: all 0.2s; }
+    .exp-btn:hover { background: #dbeafe; border-color: #3b82f6; color: #1e40af; }
+
+    .settings-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+    .setting-card { background: #f9fafb; border-radius: 10px; padding: 1rem; }
+    .setting-card h4 { margin: 0 0 0.5rem 0; font-size: 0.875rem; color: #6b7280; }
+    .setting-card select { width: 100%; padding: 0.5rem; border: 1px solid #e5e7eb; border-radius: 6px; }
+
+    .user-stats { display: flex; gap: 2rem; padding: 1rem; background: #f9fafb; border-radius: 10px; margin-bottom: 1.5rem; }
+    .stat-item .label { display: block; font-size: 0.75rem; color: #6b7280; }
+    .stat-item .value { font-size: 1.125rem; font-weight: 600; color: #1a1a2e; }
+
+    .user-actions { display: flex; gap: 0.75rem; }
+
+    .btn { padding: 0.625rem 1.25rem; border-radius: 8px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; font-size: 0.875rem; }
     .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
     .btn-primary { background: #2563eb; color: white; }
     .btn-secondary { background: #f3f4f6; color: #374151; }
-    .btn-success { background: #059669; color: white; }
-    .btn-warning { background: #f59e0b; color: white; }
-    .btn-danger { background: #dc2626; color: white; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-success { background: #22c55e; color: white; }
+    .btn-danger { background: #ef4444; color: white; }
     .inline { display: inline; }
 
     .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
     .alert.success { background: #d1fae5; color: #065f46; }
     .alert.error { background: #fee2e2; color: #991b1b; }
-    .alert.warning { background: #fef3c7; color: #92400e; }
 
-    .empty-state { text-align: center; padding: 4rem 2rem; color: #6b7280; }
-    .empty-icon { font-size: 3rem; margin-bottom: 1rem; }
-    .empty-state h3 { font-size: 1.125rem; font-weight: 600; color: #374151; margin-bottom: 0.5rem; }
+    @media (max-width: 1024px) {
+      .class-grid { grid-template-columns: repeat(3, 1fr); }
+    }
 
-    @media (max-width: 1024px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 768px) {
-      .stats-grid { grid-template-columns: 1fr; }
-      .form-row { grid-template-columns: 1fr; }
-      .toolbar { flex-direction: column; align-items: stretch; }
-      .user-card { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
-      .user-meta { width: 100%; justify-content: space-between; }
-      .user-actions { width: 100%; justify-content: flex-start; }
-      .waitlist-actions { flex-wrap: wrap; }
-      .inline-form { flex-direction: column; align-items: stretch; }
-      .inline-form .form-input { width: 100%; }
-      .pending-alert { flex-direction: column; text-align: center; }
-      .pending-alert .btn { margin: 0.5rem 0 0; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .class-grid { grid-template-columns: repeat(2, 1fr); }
+      .current-level { flex-direction: column; text-align: center; }
+      .settings-grid { grid-template-columns: 1fr; }
     }
   </style>
 </AdminLayout>
