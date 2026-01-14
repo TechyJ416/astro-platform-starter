@@ -1,31 +1,455 @@
 ---
-import { getSupabase } from "@supabase/auth-helpers-astro";
-const { supabase, session } = await getSupabase(Astro);
+// src/components/Navbar.astro
+const { session, profile, user } = Astro.locals;
 
-let isAdmin = false;
+const isLoggedIn = !!(session && profile);
+const isAdmin = profile?.role === 'admin';
+const isManager = profile?.role === 'manager';
+const isCreator = profile?.role === 'creator';
 
-if (session) {
-  const { data } = await supabase
-    .from("admins")
-    .select("id")
-    .eq("id", session.user.id)
-    .maybeSingle();
+const avatarUrl = profile?.avatar_url || 
+  `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.full_name || profile?.username || 'User')}&background=2563eb&color=fff`;
 
-  isAdmin = !!data;
-}
+const displayName = profile?.full_name || profile?.username || profile?.email?.split('@')[0] || 'User';
+
+// Get dashboard URL based on role
+let dashboardUrl = '/dashboard';
+if (isAdmin) dashboardUrl = '/admin';
+else if (isManager) dashboardUrl = '/manager/dashboard';
+else if (isCreator) dashboardUrl = '/creator/dashboard';
 ---
 
-<nav>
-  <a href="/">Home</a>
-  <a href="/dashboard">Dashboard</a>
+<nav class="navbar">
+  <div class="nav-container">
+    <a href="/" class="nav-logo">🚀 Banity</a>
+    
+    <div class="nav-links">
+      <a href="/" class="nav-link">Home</a>
+      <a href="/campaigns" class="nav-link">Campaigns</a>
+      {isLoggedIn && (
+        <a href={dashboardUrl} class="nav-link">Dashboard</a>
+      )}
+    </div>
 
-  {isAdmin && (
-    <a href="/admin" class="admin-link">Admin</a>
-  )}
+    <div class="nav-auth">
+      {isLoggedIn ? (
+        <div class="user-menu">
+          <button class="user-trigger" id="user-menu-trigger">
+            <img src={avatarUrl} alt={displayName} class="user-avatar" />
+            <span class="user-name">{displayName}</span>
+            <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+          
+          <div class="dropdown-menu" id="user-dropdown">
+            <div class="dropdown-header">
+              <img src={avatarUrl} alt={displayName} />
+              <div>
+                <span class="dropdown-name">{displayName}</span>
+                <span class="dropdown-email">{profile?.email}</span>
+                {profile?.creator_level && (
+                  <span class="dropdown-level">Level {profile.creator_level}</span>
+                )}
+              </div>
+            </div>
+            
+            <div class="dropdown-divider"></div>
+            
+            <a href={dashboardUrl} class="dropdown-item">
+              <span class="dropdown-icon">📊</span>
+              Dashboard
+            </a>
+            
+            <a href="/profile" class="dropdown-item">
+              <span class="dropdown-icon">👤</span>
+              Profile
+            </a>
+            
+            {isCreator && (
+              <>
+                <a href="/creator/submissions" class="dropdown-item">
+                  <span class="dropdown-icon">📤</span>
+                  My Submissions
+                </a>
+                <a href="/creator/earnings" class="dropdown-item">
+                  <span class="dropdown-icon">💰</span>
+                  Earnings
+                </a>
+              </>
+            )}
+            
+            {isManager && (
+              <>
+                <a href="/manager/campaigns" class="dropdown-item">
+                  <span class="dropdown-icon">📢</span>
+                  My Campaigns
+                </a>
+              </>
+            )}
+            
+            {isAdmin && (
+              <>
+                <a href="/admin" class="dropdown-item admin-item">
+                  <span class="dropdown-icon">⚙️</span>
+                  Admin Panel
+                </a>
+              </>
+            )}
+            
+            <div class="dropdown-divider"></div>
+            
+            <a href="/settings" class="dropdown-item">
+              <span class="dropdown-icon">⚙️</span>
+              Settings
+            </a>
+            
+            <form action="/api/auth/logout" method="POST" class="logout-form">
+              <button type="submit" class="dropdown-item logout-item">
+                <span class="dropdown-icon">🚪</span>
+                Sign Out
+              </button>
+            </form>
+          </div>
+        </div>
+      ) : (
+        <div class="auth-buttons">
+          <a href="/login" class="btn btn-secondary">Sign In</a>
+          <a href="/register" class="btn btn-primary">Get Started</a>
+        </div>
+      )}
+    </div>
 
-  {session ? (
-    <a href="/auth/logout">Logout</a>
-  ) : (
-    <a href="/login">Login</a>
-  )}
+    <button class="mobile-toggle" id="mobile-toggle">
+      <span></span>
+      <span></span>
+      <span></span>
+    </button>
+  </div>
 </nav>
+
+<script>
+  // User dropdown toggle
+  const trigger = document.getElementById('user-menu-trigger');
+  const dropdown = document.getElementById('user-dropdown');
+  
+  if (trigger && dropdown) {
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle('show');
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!dropdown.contains(e.target as Node) && !trigger.contains(e.target as Node)) {
+        dropdown.classList.remove('show');
+      }
+    });
+  }
+
+  // Mobile toggle
+  const mobileToggle = document.getElementById('mobile-toggle');
+  const navbar = document.querySelector('.navbar');
+  
+  if (mobileToggle && navbar) {
+    mobileToggle.addEventListener('click', () => {
+      navbar.classList.toggle('mobile-open');
+    });
+  }
+</script>
+
+<style>
+  .navbar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .nav-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0.75rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2rem;
+  }
+
+  .nav-logo {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #1a1a2e;
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+
+  .nav-links {
+    display: flex;
+    gap: 0.5rem;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .nav-link {
+    padding: 0.5rem 1rem;
+    color: #4b5563;
+    text-decoration: none;
+    font-weight: 500;
+    border-radius: 8px;
+    transition: all 0.2s;
+  }
+
+  .nav-link:hover {
+    color: #1a1a2e;
+    background: #f3f4f6;
+  }
+
+  .nav-auth {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
+  }
+
+  .auth-buttons {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .btn {
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-weight: 600;
+    text-decoration: none;
+    font-size: 0.875rem;
+    transition: all 0.2s;
+  }
+
+  .btn-secondary {
+    color: #374151;
+    background: #f3f4f6;
+  }
+
+  .btn-secondary:hover {
+    background: #e5e7eb;
+  }
+
+  .btn-primary {
+    color: white;
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+  }
+
+  /* User Menu */
+  .user-menu {
+    position: relative;
+  }
+
+  .user-trigger {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 9999px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .user-trigger:hover {
+    background: #f3f4f6;
+    border-color: #d1d5db;
+  }
+
+  .user-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  .user-name {
+    font-weight: 500;
+    color: #1a1a2e;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chevron {
+    color: #6b7280;
+    transition: transform 0.2s;
+  }
+
+  .dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 260px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+    border: 1px solid #e5e7eb;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-10px);
+    transition: all 0.2s;
+  }
+
+  .dropdown-menu.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+
+  .dropdown-header {
+    display: flex;
+    gap: 0.75rem;
+    padding: 1rem;
+    align-items: center;
+  }
+
+  .dropdown-header img {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  .dropdown-name {
+    display: block;
+    font-weight: 600;
+    color: #1a1a2e;
+  }
+
+  .dropdown-email {
+    display: block;
+    font-size: 0.75rem;
+    color: #6b7280;
+  }
+
+  .dropdown-level {
+    display: inline-block;
+    margin-top: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    background: #dbeafe;
+    color: #1e40af;
+    border-radius: 9999px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+  }
+
+  .dropdown-divider {
+    height: 1px;
+    background: #e5e7eb;
+    margin: 0.25rem 0;
+  }
+
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.625rem 1rem;
+    color: #374151;
+    text-decoration: none;
+    font-size: 0.875rem;
+    transition: all 0.15s;
+    width: 100%;
+    border: none;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .dropdown-item:hover {
+    background: #f3f4f6;
+    color: #1a1a2e;
+  }
+
+  .dropdown-icon {
+    font-size: 1rem;
+    width: 20px;
+    text-align: center;
+  }
+
+  .admin-item {
+    color: #7c3aed;
+  }
+
+  .admin-item:hover {
+    background: #f5f3ff;
+    color: #6d28d9;
+  }
+
+  .logout-form {
+    margin: 0;
+  }
+
+  .logout-item {
+    color: #dc2626;
+  }
+
+  .logout-item:hover {
+    background: #fef2f2;
+    color: #b91c1c;
+  }
+
+  /* Mobile */
+  .mobile-toggle {
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    padding: 0.5rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  .mobile-toggle span {
+    display: block;
+    width: 24px;
+    height: 2px;
+    background: #374151;
+    border-radius: 2px;
+    transition: all 0.2s;
+  }
+
+  @media (max-width: 768px) {
+    .nav-links {
+      display: none;
+    }
+
+    .user-name {
+      display: none;
+    }
+
+    .auth-buttons .btn-secondary {
+      display: none;
+    }
+
+    .mobile-toggle {
+      display: flex;
+    }
+
+    .navbar.mobile-open .nav-links {
+      display: flex;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      flex-direction: column;
+      background: white;
+      padding: 1rem;
+      border-top: 1px solid #e5e7eb;
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+    }
+  }
+</style>
