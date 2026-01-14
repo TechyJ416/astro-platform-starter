@@ -1,0 +1,449 @@
+---
+// src/components/AdminOverlay.astro
+// This component adds an admin bar when viewing the site as an admin
+
+const { profile } = Astro.locals;
+const isAdmin = profile?.role === 'admin' || profile?.role === 'moderator';
+
+if (!isAdmin) return null;
+
+const currentPath = Astro.url.pathname;
+---
+
+{isAdmin && (
+  <div class="admin-overlay" id="admin-overlay">
+    <!-- Admin Bar -->
+    <div class="admin-bar">
+      <div class="admin-bar-left">
+        <span class="admin-indicator">
+          <span class="indicator-dot"></span>
+          Admin View
+        </span>
+        <span class="current-page">📍 {currentPath}</span>
+      </div>
+      
+      <div class="admin-bar-center">
+        <a href="/admin" class="admin-link">Dashboard</a>
+        <a href="/admin/users" class="admin-link">Users</a>
+        <a href="/admin/campaigns" class="admin-link">Campaigns</a>
+        <a href="/admin/support" class="admin-link">Support</a>
+      </div>
+      
+      <div class="admin-bar-right">
+        <button class="edit-mode-btn" id="toggle-edit-mode">
+          ✏️ Edit Mode
+        </button>
+        <button class="hide-bar-btn" id="toggle-admin-bar">
+          Hide Bar
+        </button>
+      </div>
+    </div>
+
+    <!-- Edit Mode Panel (slides out) -->
+    <div class="edit-panel" id="edit-panel">
+      <div class="edit-panel-header">
+        <h3>🎨 Quick Edit</h3>
+        <button class="close-panel" id="close-edit-panel">✕</button>
+      </div>
+      
+      <div class="edit-panel-content">
+        <div class="edit-section">
+          <h4>Page Settings</h4>
+          <div class="edit-field">
+            <label>Page Title</label>
+            <input type="text" id="edit-page-title" value="" placeholder="Enter page title..." />
+          </div>
+          <div class="edit-field">
+            <label>Meta Description</label>
+            <textarea id="edit-meta-desc" rows="2" placeholder="SEO description..."></textarea>
+          </div>
+        </div>
+
+        <div class="edit-section">
+          <h4>Quick Actions</h4>
+          <div class="quick-actions">
+            <button class="action-btn" data-action="clear-cache">🔄 Clear Cache</button>
+            <button class="action-btn" data-action="preview-mobile">📱 Mobile Preview</button>
+            <button class="action-btn" data-action="view-analytics">📊 Analytics</button>
+          </div>
+        </div>
+
+        <div class="edit-section">
+          <h4>Page Elements</h4>
+          <p class="hint">Click any element on the page while in edit mode to modify it.</p>
+          <div class="element-list" id="element-list">
+            <div class="element-item">No elements selected</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Admin Button (when bar is hidden) -->
+    <button class="floating-admin-btn" id="floating-admin-btn" style="display: none;">
+      ⚙️
+    </button>
+  </div>
+
+  <style>
+    .admin-overlay {
+      --admin-bar-height: 48px;
+    }
+
+    .admin-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: var(--admin-bar-height);
+      background: linear-gradient(135deg, #1a1a2e, #2d2d4a);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 1rem;
+      z-index: 10000;
+      font-size: 0.8125rem;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    }
+
+    .admin-bar-left {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .admin-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 600;
+      color: #fbbf24;
+    }
+
+    .indicator-dot {
+      width: 8px;
+      height: 8px;
+      background: #22c55e;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .current-page {
+      color: rgba(255,255,255,0.6);
+    }
+
+    .admin-bar-center {
+      display: flex;
+      gap: 0.25rem;
+    }
+
+    .admin-link {
+      color: rgba(255,255,255,0.8);
+      text-decoration: none;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+
+    .admin-link:hover {
+      background: rgba(255,255,255,0.1);
+      color: white;
+    }
+
+    .admin-bar-right {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .edit-mode-btn, .hide-bar-btn {
+      padding: 0.375rem 0.75rem;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.75rem;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .edit-mode-btn {
+      background: #6366f1;
+      color: white;
+    }
+
+    .edit-mode-btn:hover {
+      background: #4f46e5;
+    }
+
+    .edit-mode-btn.active {
+      background: #22c55e;
+    }
+
+    .hide-bar-btn {
+      background: rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.8);
+    }
+
+    .hide-bar-btn:hover {
+      background: rgba(255,255,255,0.2);
+    }
+
+    /* Edit Panel */
+    .edit-panel {
+      position: fixed;
+      top: var(--admin-bar-height);
+      right: -320px;
+      width: 320px;
+      height: calc(100vh - var(--admin-bar-height));
+      background: white;
+      box-shadow: -4px 0 20px rgba(0,0,0,0.15);
+      z-index: 9999;
+      transition: right 0.3s ease;
+      overflow-y: auto;
+    }
+
+    .edit-panel.open {
+      right: 0;
+    }
+
+    .edit-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem;
+      border-bottom: 1px solid #e5e7eb;
+      position: sticky;
+      top: 0;
+      background: white;
+    }
+
+    .edit-panel-header h3 {
+      margin: 0;
+      font-size: 1rem;
+    }
+
+    .close-panel {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: none;
+      background: #f3f4f6;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+
+    .edit-panel-content {
+      padding: 1rem;
+    }
+
+    .edit-section {
+      margin-bottom: 1.5rem;
+    }
+
+    .edit-section h4 {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      color: #6b7280;
+      margin: 0 0 0.75rem 0;
+    }
+
+    .edit-field {
+      margin-bottom: 0.75rem;
+    }
+
+    .edit-field label {
+      display: block;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: #374151;
+      margin-bottom: 0.25rem;
+    }
+
+    .edit-field input,
+    .edit-field textarea {
+      width: 100%;
+      padding: 0.5rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      font-size: 0.875rem;
+    }
+
+    .edit-field input:focus,
+    .edit-field textarea:focus {
+      outline: none;
+      border-color: #6366f1;
+    }
+
+    .quick-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .action-btn {
+      padding: 0.625rem 1rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: white;
+      cursor: pointer;
+      text-align: left;
+      font-size: 0.875rem;
+      transition: all 0.2s;
+    }
+
+    .action-btn:hover {
+      background: #f9fafb;
+      border-color: #6366f1;
+    }
+
+    .hint {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      margin: 0 0 0.75rem 0;
+    }
+
+    .element-list {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .element-item {
+      padding: 0.75rem;
+      font-size: 0.8125rem;
+      color: #6b7280;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .element-item:last-child {
+      border-bottom: none;
+    }
+
+    /* Floating Button */
+    .floating-admin-btn {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #1a1a2e, #2d2d4a);
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-size: 1.25rem;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      z-index: 9998;
+      transition: all 0.2s;
+    }
+
+    .floating-admin-btn:hover {
+      transform: scale(1.1);
+    }
+
+    /* Body offset when admin bar is visible */
+    :global(body.admin-bar-visible) {
+      padding-top: var(--admin-bar-height);
+    }
+
+    /* Edit mode highlights */
+    :global(.admin-edit-mode [data-editable]:hover) {
+      outline: 2px dashed #6366f1;
+      outline-offset: 2px;
+      cursor: pointer;
+    }
+
+    :global(.admin-edit-mode [data-editable].editing) {
+      outline: 2px solid #22c55e;
+      outline-offset: 2px;
+    }
+
+    @media (max-width: 768px) {
+      .admin-bar-center {
+        display: none;
+      }
+      
+      .current-page {
+        display: none;
+      }
+    }
+  </style>
+
+  <script>
+    // Add body class for padding
+    document.body.classList.add('admin-bar-visible');
+
+    const adminBar = document.querySelector('.admin-bar');
+    const editPanel = document.getElementById('edit-panel');
+    const toggleEditBtn = document.getElementById('toggle-edit-mode');
+    const toggleBarBtn = document.getElementById('toggle-admin-bar');
+    const closeEditBtn = document.getElementById('close-edit-panel');
+    const floatingBtn = document.getElementById('floating-admin-btn');
+
+    let editModeActive = false;
+
+    // Toggle edit mode
+    toggleEditBtn?.addEventListener('click', () => {
+      editModeActive = !editModeActive;
+      toggleEditBtn.classList.toggle('active', editModeActive);
+      document.body.classList.toggle('admin-edit-mode', editModeActive);
+      
+      if (editModeActive) {
+        editPanel?.classList.add('open');
+      }
+    });
+
+    // Close edit panel
+    closeEditBtn?.addEventListener('click', () => {
+      editPanel?.classList.remove('open');
+    });
+
+    // Toggle admin bar visibility
+    toggleBarBtn?.addEventListener('click', () => {
+      if (adminBar) adminBar.style.display = 'none';
+      if (floatingBtn) floatingBtn.style.display = 'block';
+      document.body.classList.remove('admin-bar-visible');
+    });
+
+    // Show admin bar from floating button
+    floatingBtn?.addEventListener('click', () => {
+      if (adminBar) adminBar.style.display = 'flex';
+      if (floatingBtn) floatingBtn.style.display = 'none';
+      document.body.classList.add('admin-bar-visible');
+    });
+
+    // Handle editable elements in edit mode
+    document.addEventListener('click', (e) => {
+      if (!editModeActive) return;
+      
+      const target = e.target as HTMLElement;
+      const editable = target.closest('[data-editable]');
+      
+      if (editable) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Remove previous editing class
+        document.querySelectorAll('.editing').forEach(el => el.classList.remove('editing'));
+        
+        // Add editing class
+        editable.classList.add('editing');
+        
+        // Update element list
+        const elementList = document.getElementById('element-list');
+        if (elementList) {
+          elementList.innerHTML = `
+            <div class="element-item">
+              <strong>${editable.tagName}</strong>
+              <br><small>${editable.getAttribute('data-editable') || 'content'}</small>
+            </div>
+          `;
+        }
+      }
+    });
+  </script>
+)}
